@@ -1,5 +1,5 @@
 import React from 'react';
-import { collection, getDocs, query, where, limit } from 'firebase/firestore';
+import { collection, getDocs, query, where, limit, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { 
   ArrowRight, MapPin, BedDouble, Wind, ShieldCheck, 
@@ -8,35 +8,43 @@ import {
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
 
-// --- 抓取前 3 名精選房源 ---
-async function getFeaturedRooms() {
+// ★ 引入圖片過牆代購 API 邏輯
+const getProxiedUrl = (url?: string | null) => {
+  if (!url) return '';
+  if (url.startsWith('/api/image')) return url;
+  return `/api/image?url=${encodeURIComponent(url)}`;
+};
+
+// --- ★ 邏輯升級：改為抓取前 3 名「大盤源 (Properties)」 ---
+async function getFeaturedProperties() {
   try {
     if (!db) return [];
+    
+    // 抓取準備狀態不是"已退租"的盤源，這裡簡單抓取最新的三個
     const q = query(
-      collection(db, 'rooms'), 
-      where('webStatus', '==', 'published'),
+      collection(db, 'properties'), 
+      where('status', 'in', ['收租中', '準備狀態', '裝修中', '閒置中']), // 排除已退租
       limit(3)
     );
-    const roomSnap = await getDocs(q);
+    const propSnap = await getDocs(q);
     
-    const propSnap = await getDocs(collection(db, 'properties'));
-    const propMap: Record<string, string> = {};
-    propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
-
+    // 抓取圖庫以尋找封面
     const mediaSnap = await getDocs(collection(db, 'media_library'));
-    const mediaDocs = mediaSnap.docs.map(d => d.data());
+    const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
 
-    return roomSnap.docs.map(doc => {
+    return propSnap.docs.map(doc => {
       const data = doc.data();
-      const primaryImg = mediaDocs.find(m => m.propertyId === data.propertyId && m.isPrimary)?.url 
-                       || mediaDocs.find(m => m.propertyId === data.propertyId)?.url;
+      
+      // 找出屬於這個盤源的圖片，並優先挑選設定為封面 (isPrimary) 的圖片
+      const propImages = mediaDocs.filter(m => m.propertyId === doc.id && m.status === 'linked');
+      const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
+      
       return { 
         id: doc.id, 
         ...data, 
         primaryImage: primaryImg,
-        propertyName: propMap[data.propertyId] || '精選盤源'
       };
-    }).filter((r: any) => r.status !== 'Occupied');
+    });
   } catch (e) {
     console.error("Home Fetch Error:", e);
     return [];
@@ -44,7 +52,7 @@ async function getFeaturedRooms() {
 }
 
 export default async function HomePage() {
-  const featuredRooms = await getFeaturedRooms();
+  const featuredProperties = await getFeaturedProperties();
 
   return (
     <main className="min-h-screen bg-white selection:bg-orange-200">
@@ -150,32 +158,35 @@ export default async function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-            {featuredRooms.map((room: any) => (
-              <Link href={`/properties/${room.id}`} key={room.id} className="group bg-white rounded-2xl overflow-hidden border border-slate-100 transition-all hover:shadow-lg flex flex-col">
+            {/* ★ 這裡改為渲染 featuredProperties，並更新顯示邏輯 */}
+            {featuredProperties.map((prop: any) => (
+              <Link href={`/properties?uni=${prop.name}`} key={prop.id} className="group bg-white rounded-2xl overflow-hidden border border-slate-100 transition-all hover:shadow-lg flex flex-col">
                 <div className="h-48 relative overflow-hidden bg-slate-100 shrink-0">
-                  {room.primaryImage ? (
-                    <img src={room.primaryImage} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  {prop.primaryImage ? (
+                    // ★ 套用過牆代理
+                    <img src={getProxiedUrl(prop.primaryImage)} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><Home size={24} className="mb-2 opacity-50"/><span className="font-black uppercase tracking-widest text-[9px] opacity-40">Prime Living</span></div>
                   )}
+                  {/* ★ 地址脫敏：只顯示大區和細區，不顯示門牌 */}
                   <div className="absolute top-3 left-3 px-2 py-1 bg-white/95 rounded-md text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1">
-                    <MapPin size={12} className="text-orange-500"/> {room.propertyName}
+                    <MapPin size={12} className="text-orange-500"/> {prop.region} {prop.district}
                   </div>
                 </div>
                 <div className="p-4 flex-1 flex flex-col">
                   <div className="flex justify-between items-start mb-2">
-                    <h3 className="font-black text-lg text-slate-900 truncate pr-2 flex-1">{room.name}</h3>
-                    <p className="text-orange-600 font-black text-xl shrink-0 leading-none">${(room.baseRent || 0).toLocaleString()}</p>
+                    {/* ★ 顯示盤源名稱 */}
+                    <h3 className="font-black text-lg text-slate-900 truncate pr-2 flex-1">{prop.name}</h3>
                   </div>
-                  <div className="flex gap-3 text-[10px] font-bold text-slate-500 pt-3 mt-auto">
+                  <div className="flex gap-3 text-[10px] font-bold text-slate-500 pt-3 mt-auto border-t border-slate-50">
                     <span className="flex items-center gap-1"><BedDouble size={14} className="text-blue-500"/> 正規租約</span>
-                    <span className="flex items-center gap-1"><Wind size={14} className="text-cyan-500"/> 分體冷氣</span>
-                    <span className="flex items-center gap-1"><ShieldCheck size={14} className="text-emerald-500"/> 智能鎖</span>
+                    <span className="flex items-center gap-1"><Wind size={14} className="text-cyan-500"/> 品牌傢俬</span>
+                    <span className="flex items-center gap-1"><ShieldCheck size={14} className="text-emerald-500"/> 星級物管</span>
                   </div>
                 </div>
               </Link>
             ))}
-            {featuredRooms.length === 0 && (
+            {featuredProperties.length === 0 && (
               <div className="col-span-3 py-16 text-center bg-white rounded-2xl border border-dashed border-slate-200">
                 <Search size={24} className="mx-auto text-slate-300 mb-2" />
                 <p className="text-slate-500 text-sm font-bold">精選房源籌備中...</p>
