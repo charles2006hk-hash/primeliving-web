@@ -12,9 +12,12 @@ import { notFound } from 'next/navigation';
 import WechatModal from '../../../components/WechatModal'; 
 
 // ★ 反向代理 URL 轉換器 (讓內地可以看見 Firebase 圖片)
-const getProxiedUrl = (url?: string) => {
+const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
-  return url.replace('https://firebasestorage.googleapis.com', '/fb-storage');
+  // 避免重複包裝
+  if (url.startsWith('/api/image')) return url;
+  // 將原汁原味的 Firebase 網址，打包交給我們的 API
+  return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
 // --- 抓取單個房間數據 ---
