@@ -5,11 +5,17 @@ import {
   MapPin, BedDouble, Wind, ShieldCheck, 
   ChevronLeft, Share2, Heart, CheckCircle2, 
   Navigation, School, TrainFront, MessageCircle, Phone, Sparkles, Wifi,
-  Train, Store, Sun, DollarSign // ★ 新增評分面板所需的圖標
+  Train, Store, Sun, DollarSign 
 } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import WechatModal from '../../../components/WechatModal'; 
+
+// ★ 反向代理 URL 轉換器 (讓內地可以看見 Firebase 圖片)
+const getProxiedUrl = (url?: string) => {
+  if (!url) return '';
+  return url.replace('https://firebasestorage.googleapis.com', '/fb-storage');
+};
 
 // --- 抓取單個房間數據 ---
 async function getRoomDetail(id: string) {
@@ -35,20 +41,26 @@ async function getRoomDetail(id: string) {
       }
     } catch (e) { console.warn("無法抓取盤源資訊"); }
 
-    // 2. 從 media_library 抓取相片
+    // 2. 從 media_library 抓取相片 (★ 加入房間專屬圖片判斷)
     let roomImages: string[] = [];
     try {
       if (data.propertyId) {
         const mediaSnap = await getDocs(collection(db, 'media_library'));
-        const linkedMedia = mediaSnap.docs
-          .map(d => d.data())
-          .filter(m => m.propertyId === data.propertyId && m.status === 'linked');
+        const allMedia = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
         
-        const primary = linkedMedia.find(m => m.isPrimary);
-        const others = linkedMedia.filter(m => !m.isPrimary);
-        
-        if (primary) roomImages.push(primary.url);
-        others.forEach(img => roomImages.push(img.url));
+        // ★ 邏輯更新：如果房間有指派專屬圖片，優先顯示專屬圖片
+        if (data.images && data.images.length > 0) {
+          const assignedMedia = allMedia.filter(m => data.images.includes(m.id));
+          roomImages = assignedMedia.map(m => m.url);
+        } else {
+          // 如果沒有指派，退回顯示盤源所有的圖片
+          const linkedMedia = allMedia.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
+          const primary = linkedMedia.find(m => m.isPrimary);
+          const others = linkedMedia.filter(m => !m.isPrimary);
+          
+          if (primary) roomImages.push(primary.url);
+          others.forEach(img => roomImages.push(img.url));
+        }
       }
     } catch (e) { console.warn("無法抓取圖庫照片"); }
     
@@ -82,7 +94,8 @@ export default async function PropertyDetailPage({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-1 h-[350px] md:h-[550px] overflow-hidden bg-slate-100">
         <div className="relative group cursor-zoom-in">
           {room.images?.[0] ? (
-            <img src={room.images[0]} alt="主圖" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
+            // ★ 套用過牆代理
+            <img src={getProxiedUrl(room.images[0])} alt="主圖" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
                <span className="font-black tracking-widest uppercase opacity-20 text-3xl italic">Prime Living</span>
@@ -96,7 +109,8 @@ export default async function PropertyDetailPage({
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="bg-slate-200 relative overflow-hidden group cursor-zoom-in">
                {room.images?.[i] ? (
-                 <img src={room.images[i]} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
+                 // ★ 套用過牆代理
+                 <img src={getProxiedUrl(room.images[i])} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                ) : (
                  <div className="w-full h-full flex items-center justify-center text-slate-300 font-bold opacity-20 text-[10px] uppercase">Prime Living</div>
                )}
@@ -142,7 +156,7 @@ export default async function PropertyDetailPage({
                     <Sparkles size={14} /> Prime Score
                   </div>
                   <div className="flex items-baseline justify-center md:justify-start gap-1">
-                    <span className="text-6xl font-black tracking-tighter italic">4.8</span>
+                    <span className="text-6xl font-black tracking-tighter italic">{room.primeScore || 4.8}</span>
                     <span className="text-xl text-slate-400 font-bold">/5</span>
                   </div>
                   <p className="text-emerald-400 text-xs mt-2 font-black tracking-wider uppercase flex items-center justify-center md:justify-start gap-1">
@@ -153,10 +167,10 @@ export default async function PropertyDetailPage({
                 {/* 中間：四項核心指標 */}
                 <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
                   {[
-                    { icon: <Train size={16}/>, label: '通勤便捷度', score: 4.9, desc: '步行 5 分鐘至港鐵' },
-                    { label: '周邊生活圈', icon: <Store size={16}/>, score: 4.8, desc: '下樓即大型商場' },
-                    { label: '居住舒適度', icon: <Sun size={16}/>, score: 4.5, desc: '高層海景，採光極佳' },
-                    { label: '租金性價比', icon: <DollarSign size={16}/>, score: 4.7, desc: '同區優勢定價' },
+                    { icon: <Train size={16}/>, label: '通勤便捷度', score: room.scoreCommute || 4.9, desc: '步行 5 分鐘至港鐵' },
+                    { label: '周邊生活圈', icon: <Store size={16}/>, score: room.scoreLifestyle || 4.8, desc: '下樓即大型商場' },
+                    { label: '居住舒適度', icon: <Sun size={16}/>, score: room.scoreComfort || 4.5, desc: '高層海景，採光極佳' },
+                    { label: '租金性價比', icon: <DollarSign size={16}/>, score: room.scoreValue || 4.7, desc: '同區優勢定價' },
                   ].map((item) => (
                     <div key={item.label} className="group">
                       <div className="flex justify-between items-end mb-2">
@@ -171,7 +185,6 @@ export default async function PropertyDetailPage({
                           style={{ width: `${(item.score / 5) * 100}%` }}
                         />
                       </div>
-                      <p className="text-[10px] text-slate-500 mt-2 font-medium">{item.desc}</p>
                     </div>
                   ))}
                 </div>
@@ -186,7 +199,7 @@ export default async function PropertyDetailPage({
                     <div>
                       <p className="text-[10px] font-black text-orange-400 uppercase tracking-widest mb-1.5">AI 房源洞察報告</p>
                       <p className="text-sm text-slate-300 leading-relaxed font-medium">
-                        「此房源交通優勢顯著，且租金在同屋苑同等裝修中極具競爭力。由於性價比極高，預計本週內會被預訂，建議盡早決策。」
+                        {room.aiInsight || '「此房源交通優勢顯著，且租金在同屋苑同等裝修中極具競爭力。由於性價比極高，預計本週內會被預訂，建議盡早決策。」'}
                       </p>
                     </div>
                  </div>
