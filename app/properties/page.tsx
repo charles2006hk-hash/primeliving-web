@@ -10,7 +10,10 @@ import Link from 'next/link';
 // ★ 反向代理 URL 轉換器
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
-  return url.replace('https://firebasestorage.googleapis.com', '/fb-storage');
+  // 避免重複包裝
+  if (url.startsWith('/api/image')) return url;
+  // 將原汁原味的 Firebase 網址，打包交給我們的 API
+  return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
 interface PropertyRoom {
