@@ -7,7 +7,12 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
-// --- 型別定義 ---
+// ★ 反向代理 URL 轉換器
+const getProxiedUrl = (url?: string | null) => {
+  if (!url) return '';
+  return url.replace('https://firebasestorage.googleapis.com', '/fb-storage');
+};
+
 interface PropertyRoom {
   id: string;
   name: string;
@@ -19,9 +24,9 @@ interface PropertyRoom {
   features?: string[];
   propertyName?: string;
   primaryImage?: string;
+  images?: string[]; // 支援專屬圖片
 }
 
-// --- 抓取資料函數 (SSR) ---
 async function getPublishedRooms() {
   try {
     if (!db) return [];
@@ -29,7 +34,6 @@ async function getPublishedRooms() {
     const propMap: Record<string, string> = {};
     propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
 
-    // 只抓發佈的房間
     const q = query(collection(db, 'rooms'), where('webStatus', '==', 'published'));
     const roomSnap = await getDocs(q);
 
@@ -38,8 +42,19 @@ async function getPublishedRooms() {
     
     return roomSnap.docs.map(doc => {
       const data = doc.data();
-      const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
-      const primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
+      let primaryImage = null;
+
+      // ★ 優先找此房間的專屬圖片
+      if (data.images && data.images.length > 0) {
+         const firstAssigned = mediaDocs.find(m => m.id === data.images[0]);
+         if (firstAssigned) primaryImage = firstAssigned.url;
+      }
+
+      // 如果沒專屬圖片，用盤源的主圖墊底
+      if (!primaryImage) {
+         const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
+         primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
+      }
 
       return {
         id: doc.id,
@@ -53,30 +68,23 @@ async function getPublishedRooms() {
   }
 }
 
-// ★ 修改組件接收 searchParams (Next.js 伺服器端參數)
 export default async function PropertiesPage({
   searchParams,
 }: {
   searchParams: Promise<{ uni?: string; type?: string }>;
 }) {
-  // 1. 解析網址參數
   const { uni, type } = await searchParams;
-  
-  // 2. 抓取所有已發佈房源
   const allRooms = await getPublishedRooms();
 
-  // 3. ★ 核心過濾邏輯 ★
   const filteredRooms = allRooms.filter(room => {
     let matchesUni = true;
     let matchesType = true;
 
-    // 如果有選大學，檢查房源名稱或描述是否包含關鍵字 (例如 "hku", "港大")
     if (uni) {
       const searchTarget = (room.name + room.propertyName).toLowerCase();
       matchesUni = searchTarget.includes(uni.toLowerCase());
     }
 
-    // 如果有選房型
     if (type) {
       if (type === 'ensuite') {
         matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
@@ -90,7 +98,6 @@ export default async function PropertiesPage({
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
-      {/* 標題區塊 */}
       <div className="max-w-7xl mx-auto px-4 pt-10 pb-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -107,7 +114,6 @@ export default async function PropertiesPage({
         </div>
       </div>
 
-      {/* 房源列表網格 */}
       <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-4">
         {filteredRooms.length === 0 ? (
           <div className="col-span-full py-24 text-center bg-white rounded-3xl border border-dashed border-slate-300 shadow-sm">
@@ -118,10 +124,10 @@ export default async function PropertiesPage({
         ) : (
           filteredRooms.map((room) => (
             <Link href={`/properties/${room.id}`} key={room.id} className="group bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-xl hover:border-orange-200 hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              {/* 圖片與內容渲染邏輯保持跟之前一樣... */}
               <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
                 {room.primaryImage ? (
-                  <img src={room.primaryImage} alt={room.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
+                  // ★ 套用過牆代理
+                  <img src={getProxiedUrl(room.primaryImage)} alt={room.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
                 ) : (
                   <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><Home size={32} className="mb-2 opacity-50"/><span className="uppercase tracking-widest text-[10px] font-bold opacity-50">Prime Living</span></div>
                 )}
