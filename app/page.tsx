@@ -1,79 +1,89 @@
-'use client';
-
 import React from 'react';
+import { collection, getDocs, query, limit, where } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 import { 
   ArrowRight, MapPin, BedDouble, ShieldCheck, 
   Sparkles, Home, Star, Users, CheckCircle,
-  Train, Building2, Layout, Quote, MessageSquare
+  Train, Building2, Layout, Quote, MessageSquare, Wind, Wifi
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
 
-// ★ 信任背書數據
-const TRUST_STATS = [
-  { label: '官方直營房源', value: '100%', icon: <ShieldCheck className="text-blue-500" /> },
-  { label: '精英租客選擇', value: '500+', icon: <Users className="text-orange-500" /> },
-  { label: '售後響應速度', value: '30min', icon: <Sparkles className="text-emerald-500" /> },
-];
+// --- ★ 核心工具：圖片過牆代購 API ---
+const getProxiedUrl = (url?: string | null) => {
+  if (!url) return '';
+  if (url.startsWith('/api/image')) return url;
+  return `/api/image?url=${encodeURIComponent(url)}`;
+};
 
-// ★ AI 整理：核心區域深度介紹
-const AREA_GUIDES = [
-  {
-    name: "大圍/沙田 (東鐵核心)",
-    tags: ["城大/浸大/中大首選", "交通樞紐"],
-    desc: "香港留學生的「最強後花園」。大圍名城與沙田第一城是標誌性屋苑，自成大型生活圈。",
-    transport: "東鐵線 15 分鐘直達各大學",
-    estates: "名城 · 柏傲莊 · 沙田第一城",
-    layouts: "3房2廳 (建築 900-1100呎) 為主",
-    img: "https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=800",
-    link: "/properties?uni=cityu"
-  },
-  {
-    name: "紅磡/何文田 (理大生活圈)",
-    tags: ["理大 PolyU 步行圈", "美食天堂"],
-    desc: "最具生活煙火氣的區域。海濱南岸擁有全港頂尖會所設施，深受追求品質的高才與學生喜愛。",
-    transport: "步行 8-12 分鐘至理大/紅磡站",
-    estates: "海濱南岸 · 曦匯 · 半島豪庭",
-    layouts: "2房/3房 (實用 430-600呎) 為多",
-    img: "https://images.unsplash.com/photo-1517048676732-d65bc937f952?auto=format&fit=crop&q=80&w=800",
-    link: "/properties?uni=polyu"
-  },
-  {
-    name: "港島西區 (港大精英區)",
-    tags: ["港大 HKU 門戶", "高才聚居"],
-    desc: "充滿英倫人文氣息。翰林峰、寶翠園等高級住宅林立，鄰近中環 CBD，交通極其便利。",
-    transport: "地鐵 2-5 分鐘直達港大/中環",
-    estates: "翰林峰 · 寶翠園 · 瑧蓺",
-    layouts: "開放式/1房 (實用 200-400呎)",
-    img: "https://images.unsplash.com/photo-1555541492-f04620603099?auto=format&fit=crop&q=80&w=800",
-    link: "/properties?uni=hku"
+// --- 1. 抓取 CMS 區域百科 ---
+async function getAreaGuides() {
+  try {
+    if (!db) return [];
+    const snap = await getDocs(collection(db, 'area_guides'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("CMS Areas Fetch Error:", e);
+    return [];
   }
-];
+}
 
-// ★ 真實租客好評 (口碑管理)
-const TESTIMONIALS = [
-  {
-    name: "張同學",
-    identity: "HKU 碩士生",
-    text: "剛到香港人生地不熟，PrimeLiving 的管家非常專業，線上睇樓到簽約不到一天搞定，拎包入住太省心了！",
-    rating: 5
-  },
-  {
-    name: "李先生",
-    identity: "高才通精英",
-    text: "對比了很多中介，這裡的官方直營讓人很放心。報修系統響應很快，住在這裡很有安全感。",
-    rating: 5
+// --- 2. 抓取 CMS 租客好評 ---
+async function getTestimonials() {
+  try {
+    if (!db) return [];
+    const snap = await getDocs(collection(db, 'testimonials'));
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (e) {
+    console.error("CMS Testimonials Fetch Error:", e);
+    return [];
   }
-];
+}
 
-export default function HomePage() {
+// --- 3. 抓取最新盤源 (只顯示大盤源封面) ---
+async function getLatestProperties() {
+  try {
+    if (!db) return [];
+    const q = query(collection(db, 'properties'), limit(3));
+    const propSnap = await getDocs(q);
+    
+    const mediaSnap = await getDocs(collection(db, 'media_library'));
+    const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
+
+    return propSnap.docs.map(doc => {
+      const data = doc.data();
+      const propImages = mediaDocs.filter(m => m.propertyId === doc.id && m.status === 'linked');
+      const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
+      return { id: doc.id, ...data, primaryImage: primaryImg };
+    });
+  } catch (e) {
+    return [];
+  }
+}
+
+export default async function HomePage() {
+  // 並行抓取所有實時數據
+  const [areaGuides, testimonials, featuredProps] = await Promise.all([
+    getAreaGuides(),
+    getTestimonials(),
+    getLatestProperties()
+  ]);
+
+  // 信任背書數據
+  const TRUST_STATS = [
+    { label: '官方直營房源', value: '100%', icon: <ShieldCheck className="text-blue-500" /> },
+    { label: '精英租客選擇', value: '500+', icon: <Users className="text-orange-500" /> },
+    { label: '售後響應速度', value: '30min', icon: <Sparkles className="text-emerald-500" /> },
+  ];
+
   return (
-    <main className="min-h-screen bg-white">
+    <main className="min-h-screen bg-white selection:bg-orange-200">
       
       {/* 1. Hero Section */}
       <section className="pt-20 md:pt-28 pb-16 px-4 bg-[radial-gradient(ellipse_at_top_right,_var(--tw-gradient-stops))] from-orange-50 via-white to-white relative overflow-hidden">
+        <div className="absolute top-0 right-0 w-96 h-96 bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
         <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10">
-          <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-orange-600 text-[11px] font-black mb-6 border border-orange-100 shadow-xl shadow-orange-500/5 uppercase tracking-widest animate-bounce">
+          <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-orange-600 text-[11px] font-black mb-6 border border-orange-100 shadow-xl shadow-orange-500/5 uppercase tracking-widest">
             <Sparkles size={16} /> 2026 赴港精英租務首選平台
           </div>
           <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tighter leading-[1.1] mb-6">
@@ -81,20 +91,18 @@ export default function HomePage() {
             <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-orange-400">香港星級理想家</span>
           </h1>
           <p className="text-base text-slate-500 mb-10 max-w-2xl font-medium leading-relaxed">
-            佳寓 PrimeLiving 提供官方直營高品質公寓，涵蓋全港名校熱點。水電網全包、專屬管家維修，讓您的赴港生活從第一天起就精緻體面。
+            佳寓 PrimeLiving 提供官方直營高品質公寓。水電網全包、專屬管家維修，讓您的赴港生活從第一天起就精緻體面。
           </p>
           <HomeSearch />
         </div>
       </section>
 
-      {/* 2. 信任數據區塊 (提升公司實力感) */}
+      {/* 2. 信任數據區塊 */}
       <section className="py-8 bg-slate-900">
         <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-3 gap-8">
           {TRUST_STATS.map((stat, i) => (
             <div key={i} className="flex items-center justify-center gap-4 text-white">
-              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center">
-                {stat.icon}
-              </div>
+              <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center">{stat.icon}</div>
               <div>
                 <p className="text-2xl font-black">{stat.value}</p>
                 <p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{stat.label}</p>
@@ -104,7 +112,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 3. 區域百科與戶型介紹 (深度資訊) */}
+      {/* 3. 區域百科 - 數據來自 CMS */}
       <section className="py-20 px-4 bg-white">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
@@ -113,81 +121,96 @@ export default function HomePage() {
           </div>
 
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            {AREA_GUIDES.map((area, idx) => (
-              <div key={idx} className="group bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 flex flex-col transition-all hover:shadow-2xl hover:border-orange-200">
-                <div className="h-56 relative overflow-hidden">
-                  <img src={area.img} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" />
-                  <div className="absolute bottom-6 left-6">
-                    <div className="flex gap-2 mb-2">
-                      {area.tags.map(t => <span key={t} className="bg-orange-500 text-white text-[9px] font-black px-2 py-1 rounded-md uppercase tracking-widest">{t}</span>)}
+            {areaGuides.length === 0 ? (
+                <div className="col-span-3 py-10 text-center text-slate-400 font-bold">請在 ERP 的 CMS 中新增區域百科</div>
+            ) : (
+                areaGuides.map((area: any) => (
+                <div key={area.id} className="group bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 flex flex-col transition-all hover:shadow-2xl hover:border-orange-200">
+                    <div className="h-56 relative overflow-hidden">
+                    <img src={getProxiedUrl(area.imageUrl)} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" />
+                    <div className="absolute bottom-6 left-6">
+                        <h3 className="text-xl font-black text-white">{area.name}</h3>
                     </div>
-                    <h3 className="text-xl font-black text-white">{area.name}</h3>
-                  </div>
+                    </div>
+                    <div className="p-8 flex-1 flex flex-col">
+                    <p className="text-sm text-slate-600 leading-relaxed mb-6 font-medium line-clamp-3">{area.desc}</p>
+                    <div className="space-y-4 mb-8">
+                        <div className="flex items-center gap-3">
+                        <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
+                        <div><p className="text-[10px] font-black text-slate-400 uppercase">交通資訊</p><p className="text-xs font-bold text-slate-800">{area.transport}</p></div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                        <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
+                        <div><p className="text-[10px] font-black text-slate-400 uppercase">推薦屋苑</p><p className="text-xs font-bold text-slate-800">{area.estates}</p></div>
+                        </div>
+                    </div>
+                    <Link href={`/properties?search=${area.name}`} className="w-full py-4 bg-white border-2 border-slate-200 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 group-hover:bg-slate-900 group-hover:text-white transition-all">
+                        探索此區房源 <ArrowRight size={18} />
+                    </Link>
+                    </div>
                 </div>
-                <div className="p-8 flex-1 flex flex-col">
-                  <p className="text-sm text-slate-600 leading-relaxed mb-6 font-medium">{area.desc}</p>
-                  
-                  <div className="space-y-4 mb-8">
-                    <div className="flex items-center gap-3">
-                      <div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase">通勤便利</p>
-                        <p className="text-xs font-bold text-slate-800">{area.transport}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="bg-emerald-100 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase">熱門屋苑</p>
-                        <p className="text-xs font-bold text-slate-800">{area.estates}</p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <div className="bg-purple-100 p-2 rounded-lg text-purple-600"><Layout size={16}/></div>
-                      <div>
-                        <p className="text-[10px] font-black text-slate-400 uppercase">主流戶型</p>
-                        <p className="text-xs font-bold text-slate-800">{area.layouts}</p>
-                      </div>
-                    </div>
-                  </div>
+                ))
+            )}
+          </div>
+        </div>
+      </section>
 
-                  <Link href={area.link} className="w-full py-4 bg-white border-2 border-slate-200 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 group-hover:bg-slate-900 group-hover:text-white group-hover:border-slate-900 transition-all">
-                    探索此區房源 <ArrowRight size={18} />
-                  </Link>
+      {/* 4. 最新盤源 - 數據來自 Properties */}
+      <section className="py-20 px-4 bg-slate-50 border-y border-slate-100">
+        <div className="max-w-7xl mx-auto">
+          <div className="flex justify-between items-end mb-12">
+            <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3">
+               <div className="w-2 h-8 bg-orange-500 rounded-full"/> 最新上架盤源
+            </h2>
+            <Link href="/properties" className="text-sm font-black text-orange-600 hover:underline">查看全部</Link>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {featuredProps.map((prop: any) => (
+              <Link href={`/properties?search=${prop.name}`} key={prop.id} className="group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-slate-100">
+                <div className="h-52 relative overflow-hidden bg-slate-100">
+                  {prop.primaryImage ? (
+                    <img src={getProxiedUrl(prop.primaryImage)} alt={prop.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 font-black italic">Prime Living</div>
+                  )}
+                  <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-black text-slate-800">
+                    <MapPin size={12} className="inline mr-1 text-orange-500"/> {prop.region} {prop.district}
+                  </div>
                 </div>
-              </div>
+                <div className="p-6">
+                  <h3 className="font-black text-lg text-slate-900 mb-4 truncate">{prop.name}</h3>
+                  <div className="flex gap-4 border-t border-slate-50 pt-4 text-[10px] font-black text-slate-400">
+                    <span className="flex items-center gap-1"><ShieldCheck size={14} className="text-blue-500"/> 官方直營</span>
+                    <span className="flex items-center gap-1"><Wind size={14} className="text-cyan-500"/> 拎包入住</span>
+                  </div>
+                </div>
+              </Link>
             ))}
           </div>
         </div>
       </section>
 
-      {/* 4. 口碑與好評 (建立信任感) */}
-      <section className="py-20 px-4 bg-slate-50 border-y border-slate-200">
+      {/* 5. 聽聽租客怎麼說 - 數據來自 CMS */}
+      <section className="py-20 px-4 bg-white">
         <div className="max-w-7xl mx-auto">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-8 mb-16">
-            <div className="text-center md:text-left">
-              <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-4 tracking-tight">聽聽租客怎麼說</h2>
-              <p className="text-slate-500 font-medium">已有超過 500 位精英租客在佳寓開啟了他們的香港之旅</p>
-            </div>
-            <div className="flex items-center gap-2 bg-white px-6 py-3 rounded-3xl shadow-sm border border-slate-200">
-              <div className="flex text-orange-500"><Star size={16} fill="currentColor"/><Star size={16} fill="currentColor"/><Star size={16} fill="currentColor"/><Star size={16} fill="currentColor"/><Star size={16} fill="currentColor"/></div>
-              <span className="font-black text-slate-800">4.9 / 5.0</span>
-            </div>
+          <div className="text-center mb-16">
+            <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-4 tracking-tight">聽聽租客怎麼說</h2>
+            <p className="text-slate-500 font-medium">已有超過 500 位精英租客在佳寓開啟了他們的香港之旅</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {TESTIMONIALS.map((t, i) => (
-              <div key={i} className="bg-white p-10 rounded-[3rem] shadow-sm border border-slate-100 relative">
-                <Quote className="absolute top-8 right-8 text-orange-100" size={64} />
+            {testimonials.map((t: any) => (
+              <div key={t.id} className="bg-slate-50 p-10 rounded-[3rem] shadow-sm border border-slate-100 relative">
+                <Quote className="absolute top-8 right-8 text-orange-200 opacity-30" size={48} />
                 <div className="relative z-10">
                   <div className="flex items-center gap-4 mb-6">
                     <div className="w-14 h-14 bg-orange-100 rounded-2xl flex items-center justify-center text-orange-600 font-black text-xl italic border border-orange-200">
-                      {t.name[0]}
+                      {t.name?.[0]}
                     </div>
                     <div>
                       <h4 className="font-black text-slate-900">{t.name}</h4>
-                      <p className="text-xs text-orange-600 font-bold uppercase tracking-widest">{t.identity}</p>
+                      <p className="text-[10px] text-orange-600 font-bold uppercase tracking-widest">{t.identity}</p>
                     </div>
                   </div>
                   <p className="text-slate-600 text-lg font-medium leading-relaxed italic">「{t.text}」</p>
@@ -201,7 +224,7 @@ export default function HomePage() {
         </div>
       </section>
 
-      {/* 5. 底部 CTA (導流) */}
+      {/* 6. 底部 CTA */}
       <section className="py-20 px-4">
         <div className="max-w-5xl mx-auto bg-slate-900 rounded-[3rem] p-10 md:p-20 text-center relative overflow-hidden shadow-2xl">
           <div className="absolute top-0 left-0 w-full h-full bg-[radial-gradient(circle_at_50%_50%,_var(--tw-gradient-stops))] from-orange-500/20 via-transparent to-transparent opacity-50" />
