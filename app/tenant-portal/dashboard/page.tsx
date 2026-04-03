@@ -513,13 +513,55 @@ function DashboardContent() {
       )}
 
       {isTicketModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3><button onClick={() => setIsTicketModalOpen(false)} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
-            <div className="p-6 overflow-y-auto flex-1"><form onSubmit={handleSubmitTicket} className="space-y-6"><div><p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p><div className="grid grid-cols-2 gap-3">{['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (<button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>))}</div></div><div><p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p><textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400" /></div><div><p className="text-xs font-black text-slate-800 mb-3 flex justify-between"><span>上傳照片 (選填)</span><span className="text-slate-400 font-normal">幫助師傅更快判斷</span></p><div className="relative"><input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已暫存！"); } }} /><label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>{isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}</label></div></div><button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">{isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 送出中...</> : '確認送出報修'}</button></form></div>
+  <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+      <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+        <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3>
+        <button onClick={() => setIsTicketModalOpen(false)} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+      </div>
+      <div className="p-6 overflow-y-auto flex-1">
+        <form onSubmit={handleSubmitTicket} className="space-y-6">
+          <div>
+            <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
+            <div className="grid grid-cols-2 gap-3">
+              {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
+                <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+              ))}
+            </div>
           </div>
-        </div>
-      )}
+          <div>
+            <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
+            {/* 這裡加入了 text-slate-900 確保文字可見 */}
+            <textarea 
+              rows={4} 
+              required 
+              placeholder="例如：冷氣開了不冷，而且會滴水..." 
+              value={ticketDesc} 
+              onChange={(e) => setTicketDesc(e.target.value)} 
+              className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-semibold" 
+            />
+          </div>
+          <div>
+            <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
+              <span>上傳照片 (選填)</span>
+              <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
+            </p>
+            <div className="relative">
+              <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已暫存！"); } }} />
+              <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
+              </label>
+            </div>
+          </div>
+          <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
+            {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 送出中...</> : '確認送出報修'}
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+)}
 
       {isLeaseModalOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
