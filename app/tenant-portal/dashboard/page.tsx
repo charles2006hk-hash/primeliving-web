@@ -206,15 +206,50 @@ function DashboardContent() {
     setIsSubmittingTicket(true);
     try {
       const tenantId = localStorage.getItem('tenantId');
-      await addDoc(collection(db, 'tickets'), {
-        tenantId: tenantId, tenantName: tenantData.name, roomInfo: tenantData.roomInfo, category: ticketCategory,
-        description: ticketDesc, hasPhoto: isPhotoUploaded, status: '待處理', createdAt: serverTimestamp(),
-      });
+      
+      // 構建與 ERP 及小程式 100% 統一的數據結構
+      const ticketData = {
+        // --- 核心定位 (鎖定租客位置) ---
+        tenantId: tenantId,
+        tenantName: tenantData.name || '',
+        // 確保從 tenantData 裡抓出 propertyId，這對 ERP 過濾非常重要
+        propertyId: tenantData.propertyId || '',   
+        roomId: tenantData.roomId || tenantData.room || '', 
+        roomInfo: tenantData.roomInfo || '',
+
+        // --- 工單內容 (對齊 ERP 欄位) ---
+        type: 'Repair',                            // 統一為 Repair
+        category: ticketCategory,
+        // 🔑 重要：補上 title，防止 ERP 搜尋時 toLowerCase() 報錯
+        title: `${ticketCategory}: ${ticketDesc.slice(0, 15)}...`, 
+        description: ticketDesc,
+        priority: 'Medium',                        // 預設中等
+        
+        // --- 狀態控制 (最重要！) ---
+        status: 'Open',                            // 改為 Open，ERP 才看得到
+        repairCost: 0,
+        
+        // --- 時間與附件 ---
+        hasPhoto: isPhotoUploaded,
+        imageUrl: null,                            // 如果網頁端有圖片網址可在此加入
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
+        source: 'WebPortal'                        // 標記來源
+      };
+
+      await addDoc(collection(db, 'tickets'), ticketData);
+
       alert("✅ 報修單已成功送出！管家將盡快為您安排師傅。");
-      setIsTicketModalOpen(false); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
+      setIsTicketModalOpen(false); 
+      setTicketDesc(''); 
+      setIsPhotoUploaded(false); 
+      setTicketCategory('冷氣水電');
     } catch (error) {
-      console.error("報修失敗:", error); alert("系統連線錯誤，請稍後再試。");
-    } finally { setIsSubmittingTicket(false); }
+      console.error("報修失敗:", error); 
+      alert("系統連線錯誤，請稍後再試。");
+    } finally {
+      setIsSubmittingTicket(false); 
+    }
   };
 
   // ★ 處理 KYC 檔案儲存
