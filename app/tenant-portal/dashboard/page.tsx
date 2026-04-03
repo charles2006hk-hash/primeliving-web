@@ -79,6 +79,11 @@ function DashboardContent() {
             daysRemaining: diffDays > 0 ? diffDays : 0,
             status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費',
             roomInfo: `租客編號: ${tenantId.slice(-6).toUpperCase()}`,
+            // 👇 必須補上這幾行，報修 API 才抓得到位置 👇
+            propertyId: data.propertyId || '',   // 盤源 ID
+            propertyName: data.propertyName || '', // 盤源名稱
+            roomId: data.roomId || data.room || '', // 房間 ID
+            // 👆 補強完畢 👆
             leaseStart: data.leaseStart,
             leaseEnd: data.leaseEnd,
             utilities: data.utilities || [
@@ -212,29 +217,30 @@ function DashboardContent() {
         // --- 核心定位 (鎖定租客位置) ---
         tenantId: tenantId,
         tenantName: tenantData.name || '',
-        // 確保從 tenantData 裡抓出 propertyId，這對 ERP 過濾非常重要
+        
+        // 🔑 關鍵：確保這三個欄位在步驟一的 useEffect 裡有被存入 tenantData
         propertyId: tenantData.propertyId || '',   
+        propertyName: tenantData.propertyName || '', // 👈 建議加上這個，ERP 顯示更直觀
         roomId: tenantData.roomId || tenantData.room || '', 
         roomInfo: tenantData.roomInfo || '',
 
         // --- 工單內容 (對齊 ERP 欄位) ---
-        type: 'Repair',                            // 統一為 Repair
+        type: 'Repair',
         category: ticketCategory,
-        // 🔑 重要：補上 title，防止 ERP 搜尋時 toLowerCase() 報錯
         title: `${ticketCategory}: ${ticketDesc.slice(0, 15)}...`, 
         description: ticketDesc,
-        priority: 'Medium',                        // 預設中等
+        priority: 'Medium',
         
-        // --- 狀態控制 (最重要！) ---
-        status: 'Open',                            // 改為 Open，ERP 才看得到
+        // --- 狀態控制 ---
+        status: 'Open', 
         repairCost: 0,
         
         // --- 時間與附件 ---
         hasPhoto: isPhotoUploaded,
-        imageUrl: null,                            // 如果網頁端有圖片網址可在此加入
+        imageUrl: null,
         createdAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        source: 'WebPortal'                        // 標記來源
+        source: 'WebPortal'
       };
 
       await addDoc(collection(db, 'tickets'), ticketData);
