@@ -1,5 +1,9 @@
+// ★ 關鍵修復 1：強制 Next.js 每次重新整理都去資料庫抓最新資料，不要讀取舊的快取！
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
+
 import React from 'react';
-import { collection, getDocs, query, limit, orderBy } from 'firebase/firestore'; // ★ 引入 orderBy
+import { collection, getDocs, query, limit, orderBy } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 import { 
   ArrowRight, MapPin, ShieldCheck, 
@@ -13,14 +17,18 @@ import HomeSearch from '@/components/HomeSearch';
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
-  return `/api/image?url=${encodeURIComponent(url)}`;
+  
+  // ★ 關鍵修復 2：只有 Firebase 的圖片才需要經過代理過牆，Unsplash 等外部圖床直接放行
+  if (url.includes('firebasestorage.googleapis.com')) {
+    return `/api/image?url=${encodeURIComponent(url)}`;
+  }
+  return url;
 };
 
-// --- 1. 抓取 CMS 區域百科 (★ 修正：加入排序功能) ---
+// --- 1. 抓取 CMS 區域百科 ---
 async function getAreaGuides() {
   try {
     if (!db) return [];
-    // ★ 關鍵：依照後台設定的 sortOrder 從小排到大
     const q = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ 
@@ -38,7 +46,6 @@ async function getAreaGuides() {
 async function getTestimonials() {
   try {
     if (!db) return [];
-    // ★ 評價可以依建立時間排序，讓最新的顯示在前面
     const q = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
     const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
@@ -47,21 +54,18 @@ async function getTestimonials() {
   }
 }
 
-// --- 3. 抓取最新盤源 (優化抓圖邏輯) ---
+// --- 3. 抓取最新盤源 ---
 async function getLatestProperties() {
   try {
     if (!db) return [];
-    // 抓取最新 3 個準備上架或已發佈的盤源
     const q = query(collection(db, 'properties'), limit(3));
     const propSnap = await getDocs(q);
     
-    // 抓取圖庫資料來匹配封面
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
 
     return propSnap.docs.map(doc => {
       const data = doc.data();
-      // 在圖庫中尋找封面圖
       const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
       const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
       
@@ -118,11 +122,18 @@ export default async function HomePage() {
               {areaGuides.map((area: any) => (
                 <div key={area.id} className="group bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 flex flex-col transition-all hover:shadow-2xl hover:border-orange-200">
                   <div className="h-56 relative overflow-hidden bg-slate-200">
-                    <img 
-                      src={getProxiedUrl(area.imageUrl)} 
-                      alt={area.name} 
-                      className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
-                    />
+                    {/* ★ 如果有圖片就顯示圖片，沒有就顯示灰底 */}
+                    {area.imageUrl ? (
+                      <img 
+                        src={getProxiedUrl(area.imageUrl)} 
+                        alt={area.name} 
+                        className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" 
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 font-bold">
+                        尚無圖片
+                      </div>
+                    )}
                     <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" />
                     <div className="absolute bottom-6 left-6">
                       <h3 className="text-xl font-black text-white">{area.name}</h3>
