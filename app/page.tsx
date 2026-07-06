@@ -1,10 +1,10 @@
 import React from 'react';
-import { collection, getDocs, query, limit, where, orderBy } from 'firebase/firestore';
+import { collection, getDocs, query, limit, orderBy } from 'firebase/firestore'; // ★ 引入 orderBy
 import { db } from '@/lib/firebase';
 import { 
-  ArrowRight, MapPin, BedDouble, ShieldCheck, 
-  Sparkles, Home, Star, Users, CheckCircle,
-  Train, Building2, Layout, Quote, MessageSquare, Wind, Wifi
+  ArrowRight, MapPin, ShieldCheck, 
+  Sparkles, Home, CheckCircle,
+  Train, Building2, Quote, Wind
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
@@ -13,19 +13,19 @@ import HomeSearch from '@/components/HomeSearch';
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
-  // 確保傳入的是完整的 Firebase URL
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
-// --- 1. 抓取 CMS 區域百科 (修正欄位匹配) ---
+// --- 1. 抓取 CMS 區域百科 (★ 修正：加入排序功能) ---
 async function getAreaGuides() {
   try {
     if (!db) return [];
-    const snap = await getDocs(collection(db, 'area_guides'));
+    // ★ 關鍵：依照後台設定的 sortOrder 從小排到大
+    const q = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ 
       id: d.id, 
       ...d.data(),
-      // 兼容匯入腳本中的不同欄位名稱
       imageUrl: d.data().imageUrl || d.data().img || '',
     }));
   } catch (e) {
@@ -38,28 +38,30 @@ async function getAreaGuides() {
 async function getTestimonials() {
   try {
     if (!db) return [];
-    const snap = await getDocs(collection(db, 'testimonials'));
+    // ★ 評價可以依建立時間排序，讓最新的顯示在前面
+    const q = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
+    const snap = await getDocs(q);
     return snap.docs.map(d => ({ id: d.id, ...d.data() }));
   } catch (e) {
     return [];
   }
 }
 
-// --- 3. 抓取最新盤源 (修正圖片抓取邏輯) ---
+// --- 3. 抓取最新盤源 (優化抓圖邏輯) ---
 async function getLatestProperties() {
   try {
     if (!db) return [];
-    // 抓取最近更新的 3 個盤源
+    // 抓取最新 3 個準備上架或已發佈的盤源
     const q = query(collection(db, 'properties'), limit(3));
     const propSnap = await getDocs(q);
     
-    // 抓取所有已關聯的圖庫資料來匹配封面
+    // 抓取圖庫資料來匹配封面
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
 
     return propSnap.docs.map(doc => {
       const data = doc.data();
-      // 在圖庫中尋找該物業的封面圖 (isPrimary) 或第一張圖
+      // 在圖庫中尋找封面圖
       const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
       const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
       
@@ -99,7 +101,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 2. 生活圈百科 - 解決「沒有資料出來」問題 */}
+      {/* 2. 生活圈百科 */}
       <section className="py-20 px-4 bg-white">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
@@ -149,7 +151,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 3. 最新盤源 - 解決「沒有圖片」問題 */}
+      {/* 3. 最新盤源 */}
       <section className="py-20 px-4 bg-slate-50 border-y border-slate-100">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-end mb-12">
@@ -196,22 +198,28 @@ export default async function HomePage() {
         <div className="max-w-7xl mx-auto">
           <h2 className="text-3xl font-black text-center text-slate-900 mb-16 tracking-tight">聽聽租客怎麼說</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-            {testimonials.map((t: any) => (
-              <div key={t.id} className="bg-slate-50 p-10 rounded-[2.5rem] relative border border-slate-100">
-                <Quote className="absolute top-8 right-8 text-orange-200 opacity-30" size={48} />
-                <div className="flex items-center gap-4 mb-6">
-                  <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center text-white font-black text-xl italic">{t.name?.[0]}</div>
-                  <div>
-                    <h4 className="font-black text-slate-900">{t.name}</h4>
-                    <p className="text-[10px] text-orange-600 font-bold uppercase tracking-widest">{t.identity}</p>
+            {testimonials.length === 0 ? (
+               <div className="col-span-2 py-10 text-center text-slate-400 font-bold bg-slate-50 rounded-3xl border border-dashed">
+                 目前尚未有租客評價
+               </div>
+            ) : (
+              testimonials.map((t: any) => (
+                <div key={t.id} className="bg-slate-50 p-10 rounded-[2.5rem] relative border border-slate-100">
+                  <Quote className="absolute top-8 right-8 text-orange-200 opacity-30" size={48} />
+                  <div className="flex items-center gap-4 mb-6">
+                    <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center text-white font-black text-xl italic">{t.name?.[0]}</div>
+                    <div>
+                      <h4 className="font-black text-slate-900">{t.name}</h4>
+                      <p className="text-[10px] text-orange-600 font-bold uppercase tracking-widest">{t.identity}</p>
+                    </div>
+                  </div>
+                  <p className="text-slate-600 text-lg font-medium leading-relaxed">「{t.text}」</p>
+                  <div className="mt-6 flex items-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest">
+                    <CheckCircle size={14}/> 身份已認證租客
                   </div>
                 </div>
-                <p className="text-slate-600 text-lg font-medium leading-relaxed">「{t.text}」</p>
-                <div className="mt-6 flex items-center gap-1.5 text-[10px] font-black text-emerald-600 uppercase tracking-widest">
-                  <CheckCircle size={14}/> 身份已認證租客
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
         </div>
       </section>
