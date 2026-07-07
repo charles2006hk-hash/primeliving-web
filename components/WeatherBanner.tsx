@@ -1,14 +1,21 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { CloudSun, ThermometerSun, Umbrella, Wind, Sparkles } from 'lucide-react';
+import { CloudSun, ThermometerSun, AlertTriangle, Wind, Sparkles, Loader2 } from 'lucide-react';
 
 export default function WeatherBanner() {
   const [greeting, setGreeting] = useState('你好');
   const [timeStr, setTimeStr] = useState('');
+  
+  // 天氣資料狀態
+  const [temp, setTemp] = useState<number | string>('--');
+  const [humidity, setHumidity] = useState<number | string>('--');
+  const [forecast, setForecast] = useState<string>('正在與香港天文台連線中...');
+  const [warningMsg, setWarningMsg] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // 根據使用者本地時間動態變換打招呼用語
   useEffect(() => {
+    // 1. 處理打招呼與時間
     const updateTime = () => {
       const now = new Date();
       const hour = now.getHours();
@@ -21,15 +28,58 @@ export default function WeatherBanner() {
         setGreeting('晚上好');
       }
 
-      // 格式化日期 (例如：7月7日 星期二)
       const options: Intl.DateTimeFormatOptions = { month: 'long', day: 'numeric', weekday: 'long' };
       setTimeStr(now.toLocaleDateString('zh-HK', options));
     };
 
     updateTime();
-    // 設定每分鐘更新一次時間防呆
-    const timer = setInterval(updateTime, 60000);
-    return () => clearInterval(timer);
+    const timeTimer = setInterval(updateTime, 60000);
+
+    // 2. 抓取香港天文台即時 API
+    const fetchHKOWeather = async () => {
+      try {
+        // A. 抓取即時溫濕度與警告 (rhrread)
+        const currentRes = await fetch('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=rhrread&lang=tc');
+        const currentData = await currentRes.json();
+        
+        // 取得「香港天文台」觀測站的溫度 (若無則取陣列第一個)
+        const obsTemp = currentData.temperature.data.find((d: any) => d.place === '香港天文台')?.value || currentData.temperature.data[0]?.value;
+        setTemp(obsTemp);
+        
+        // 取得濕度
+        const obsHum = currentData.humidity.data[0]?.value;
+        setHumidity(obsHum);
+
+        // 取得即時天氣警告 (如果有)
+        if (currentData.warningMessage && currentData.warningMessage.length > 0) {
+          setWarningMsg(currentData.warningMessage.join(' '));
+        } else {
+          setWarningMsg('');
+        }
+
+        // B. 抓取天氣預報當作貼心小提醒 (flw)
+        const forecastRes = await fetch('https://data.weather.gov.hk/weatherAPI/opendata/weather.php?dataType=flw&lang=tc');
+        const forecastData = await forecastRes.json();
+        
+        // 組合今日預報與未來幾天展望
+        setForecast(`${forecastData.forecastDesc} ${forecastData.outlook}`);
+        setIsLoading(false);
+
+      } catch (error) {
+        console.error('HKO API 載入失敗:', error);
+        setForecast('目前暫時無法取得天文台天氣資訊，請稍後再試。');
+        setIsLoading(false);
+      }
+    };
+
+    fetchHKOWeather();
+    // 設定每 15 分鐘自動更新一次天氣，避免過度消耗 API
+    const weatherTimer = setInterval(fetchHKOWeather, 15 * 60 * 1000);
+
+    return () => {
+      clearInterval(timeTimer);
+      clearInterval(weatherTimer);
+    };
   }, []);
 
   return (
@@ -53,24 +103,36 @@ export default function WeatherBanner() {
           </div>
         </div>
 
-        {/* 右側：天氣資訊與貼心提醒 */}
+        {/* 右側：天文台天氣資訊與貼心提醒 */}
         <div className="flex-1 bg-slate-50/80 border border-slate-100 rounded-2xl p-4 relative z-10 w-full">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mb-2 border-b border-slate-200/60 pb-3">
-            <div className="flex items-center gap-1.5 text-slate-700 font-black">
-              <ThermometerSun size={18} className="text-red-500"/>
-              <span>目前氣溫 30°C</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-slate-700 font-bold text-sm">
-              <Wind size={16} className="text-cyan-600"/>
-              <span>濕度 78%</span>
-            </div>
-            <div className="flex items-center gap-1.5 text-slate-700 font-bold text-sm">
-              <Umbrella size={16} className="text-blue-500"/>
-              <span>降雨機率 40%</span>
-            </div>
+            {isLoading ? (
+              <div className="flex items-center gap-2 text-slate-500 text-sm font-bold">
+                <Loader2 size={16} className="animate-spin" />
+                正在同步天文台數據...
+              </div>
+            ) : (
+              <>
+                <div className="flex items-center gap-1.5 text-slate-700 font-black">
+                  <ThermometerSun size={18} className="text-red-500"/>
+                  <span>即時氣溫 {temp}°C</span>
+                </div>
+                <div className="flex items-center gap-1.5 text-slate-700 font-bold text-sm">
+                  <Wind size={16} className="text-cyan-600"/>
+                  <span>濕度 {humidity}%</span>
+                </div>
+                {/* 如果有天氣警告，以紅色突顯顯示 */}
+                {warningMsg && (
+                  <div className="flex items-center gap-1.5 text-red-600 font-black text-sm bg-red-50 px-2 py-0.5 rounded-md border border-red-100">
+                    <AlertTriangle size={14} />
+                    <span>{warningMsg.split('。')[0]}</span> 
+                  </div>
+                )}
+              </>
+            )}
           </div>
           <p className="text-xs md:text-sm text-slate-600 font-medium leading-relaxed">
-            <strong className="text-orange-600">小提醒：</strong> 今日天氣炎熱，局部地區可能有驟雨。出門看房或通勤請記得攜帶雨具，並隨時補充水分。未來幾天將持續高溫，請注意防曬喔！
+            <strong className="text-orange-600">佳寓天氣報：</strong> {forecast}
           </p>
         </div>
 
