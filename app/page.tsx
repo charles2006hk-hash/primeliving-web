@@ -1,4 +1,4 @@
-// ★ 關鍵修復 1：強制 Next.js 每次重新整理都去資料庫抓最新資料，不要讀取舊的快取！
+// ★ 強制 Next.js 每次重新整理都去資料庫抓最新資料
 export const dynamic = 'force-dynamic';
 export const revalidate = 0;
 
@@ -12,13 +12,13 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
+// ★ 新增：引入我們剛寫好的天氣問候組件
+import WeatherBanner from '@/components/WeatherBanner';
 
 // --- 核心工具：圖片過牆代購 API ---
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
-  
-  // ★ 關鍵修復 2：只有 Firebase 的圖片才需要經過代理過牆，Unsplash 等外部圖床直接放行
   if (url.includes('firebasestorage.googleapis.com')) {
     return `/api/image?url=${encodeURIComponent(url)}`;
   }
@@ -54,13 +54,19 @@ async function getTestimonials() {
   }
 }
 
-// --- 3. 抓取最新盤源 ---
+// --- 3. 抓取最新盤源 (★ 包含空殼檢查邏輯) ---
 async function getLatestProperties() {
   try {
     if (!db) return [];
-    const q = query(collection(db, 'properties'), limit(3));
+    
+    // 抓取最新建立的 3 個盤源大殼
+    const q = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
     const propSnap = await getDocs(q);
     
+    // 抓取所有房間，用來比對這 3 個大殼內部有沒有發佈的分間
+    const roomsSnap = await getDocs(collection(db, 'rooms'));
+    const allRooms = roomsSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
+
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
 
@@ -69,13 +75,18 @@ async function getLatestProperties() {
       const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
       const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
       
+      // ★ 核心檢查：看看這個物業內部，有沒有任何一間房的 webStatus 是 'published'
+      const hasPublishedRooms = allRooms.some(r => r.propertyId === doc.id && r.webStatus === 'published');
+      
       return { 
         id: doc.id, 
         ...data, 
-        primaryImage: primaryImg 
+        primaryImage: primaryImg,
+        hasPublishedRooms // 將標記傳給前端
       };
     });
   } catch (e) {
+    console.error("Latest Properties Fetch Error:", e);
     return [];
   }
 }
@@ -105,8 +116,11 @@ export default async function HomePage() {
         </div>
       </section>
 
+      {/* ★ 加入天文台即時天氣與問候橫幅 */}
+      <WeatherBanner />
+
       {/* 2. 生活圈百科 */}
-      <section className="py-20 px-4 bg-white">
+      <section className="py-16 px-4 bg-white">
         <div className="max-w-7xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-black text-slate-900 mb-4 tracking-tight">精選生活圈百科</h2>
@@ -122,7 +136,6 @@ export default async function HomePage() {
               {areaGuides.map((area: any) => (
                 <div key={area.id} className="group bg-slate-50 rounded-[2.5rem] overflow-hidden border border-slate-100 flex flex-col transition-all hover:shadow-2xl hover:border-orange-200">
                   <div className="h-56 relative overflow-hidden bg-slate-200">
-                    {/* ★ 如果有圖片就顯示圖片，沒有就顯示灰底 */}
                     {area.imageUrl ? (
                       <img 
                         src={getProxiedUrl(area.imageUrl)} 
@@ -162,7 +175,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 3. 最新盤源 */}
+      {/* 3. 最新盤源 (★ 包含智能跳轉路由) */}
       <section className="py-20 px-4 bg-slate-50 border-y border-slate-100">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-end mb-12">
@@ -172,34 +185,42 @@ export default async function HomePage() {
             <Link href="/properties" className="text-sm font-black text-orange-600 hover:underline">查看全部</Link>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {featuredProps.map((prop: any) => (
-              <Link href={`/properties?search=${prop.name}`} key={prop.id} className="group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-slate-100 flex flex-col">
-                <div className="h-52 relative overflow-hidden bg-slate-100 shrink-0">
-                  {prop.primaryImage ? (
-                    <img 
-                      src={getProxiedUrl(prop.primaryImage)} 
-                      alt={prop.name} 
-                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                    />
-                  ) : (
-                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 font-black italic">
-                      <Home size={32} className="mb-2 opacity-20" />
-                      Prime Living
+            {featuredProps.map((prop: any) => {
+              
+              // ★ 智能路由：有房間就搜自己，空殼就導向總列表
+              const smartDestinationUrl = prop.hasPublishedRooms 
+                ? `/properties?search=${prop.name}` 
+                : `/properties`;
+
+              return (
+                <Link href={smartDestinationUrl} key={prop.id} className="group bg-white rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all border border-slate-100 flex flex-col">
+                  <div className="h-52 relative overflow-hidden bg-slate-100 shrink-0">
+                    {prop.primaryImage ? (
+                      <img 
+                        src={getProxiedUrl(prop.primaryImage)} 
+                        alt={prop.name} 
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
+                      />
+                    ) : (
+                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 font-black italic">
+                        <Home size={32} className="mb-2 opacity-20" />
+                        Prime Living
+                      </div>
+                    )}
+                    <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-black text-slate-800">
+                      <MapPin size={12} className="inline mr-1 text-orange-500"/> {prop.region} {prop.district}
                     </div>
-                  )}
-                  <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-black text-slate-800">
-                    <MapPin size={12} className="inline mr-1 text-orange-500"/> {prop.region} {prop.district}
                   </div>
-                </div>
-                <div className="p-6">
-                  <h3 className="font-black text-lg text-slate-900 mb-4 truncate">{prop.name}</h3>
-                  <div className="flex gap-4 border-t border-slate-50 pt-4 text-[10px] font-black text-slate-400">
-                    <span className="flex items-center gap-1"><ShieldCheck size={14} className="text-blue-500"/> 官方直營</span>
-                    <span className="flex items-center gap-1"><Wind size={14} className="text-cyan-500"/> 拎包入住</span>
+                  <div className="p-6">
+                    <h3 className="font-black text-lg text-slate-900 mb-4 truncate">{prop.name}</h3>
+                    <div className="flex gap-4 border-t border-slate-50 pt-4 text-[10px] font-black text-slate-400">
+                      <span className="flex items-center gap-1"><ShieldCheck size={14} className="text-blue-500"/> 官方直營</span>
+                      <span className="flex items-center gap-1"><Wind size={14} className="text-cyan-500"/> 拎包入住</span>
+                    </div>
                   </div>
-                </div>
-              </Link>
-            ))}
+                </Link>
+              );
+            })}
           </div>
         </div>
       </section>
