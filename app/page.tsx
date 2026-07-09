@@ -8,12 +8,10 @@ import { db } from '@/lib/firebase';
 import { 
   ArrowRight, MapPin, ShieldCheck, 
   Sparkles, Home, CheckCircle,
-  Train, Building2, Quote, Wind, Sun, AlertTriangle // ★ 引入天氣需要的 icon
+  Train, Building2, Quote, Wind
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
-// 移除笨重的天氣橫幅組件
-// import WeatherBanner from '@/components/WeatherBanner'; 
 
 // --- 核心工具：圖片過牆代購 API ---
 const getProxiedUrl = (url?: string | null) => {
@@ -54,16 +52,14 @@ async function getTestimonials() {
   }
 }
 
-// --- 3. 抓取最新盤源 (★ 包含空殼檢查邏輯) ---
+// --- 3. 抓取最新盤源 (包含空殼檢查邏輯) ---
 async function getLatestProperties() {
   try {
     if (!db) return [];
     
-    // 抓取最新建立的 3 個盤源大殼
     const q = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
     const propSnap = await getDocs(q);
     
-    // 抓取所有房間，用來比對這 3 個大殼內部有沒有發佈的分間
     const roomsSnap = await getDocs(collection(db, 'rooms'));
     const allRooms = roomsSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
 
@@ -75,14 +71,13 @@ async function getLatestProperties() {
       const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
       const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
       
-      // ★ 核心檢查：看看這個物業內部，有沒有任何一間房的 webStatus 是 'published'
       const hasPublishedRooms = allRooms.some(r => r.propertyId === doc.id && r.webStatus === 'published');
       
       return { 
         id: doc.id, 
         ...data, 
         primaryImage: primaryImg,
-        hasPublishedRooms // 將標記傳給前端
+        hasPublishedRooms 
       };
     });
   } catch (e) {
@@ -92,7 +87,6 @@ async function getLatestProperties() {
 }
 
 export default async function HomePage() {
-  // 併發抓取數據提升速度
   const [areaGuides, testimonials, featuredProps] = await Promise.all([
     getAreaGuides(),
     getTestimonials(),
@@ -102,35 +96,13 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-white selection:bg-orange-200">
       
-      {/* 1. Hero Section (★ 升級毛玻璃懸浮組件) */}
-      <section className="pt-20 md:pt-32 pb-16 px-4 bg-slate-50 relative overflow-hidden min-h-[60vh] flex items-center justify-center">
+      {/* 1. Hero Section (★ 已移除天氣組件，並縮緊上下 padding 減少空白) */}
+      <section className="pt-28 md:pt-36 pb-12 px-4 bg-slate-50 relative overflow-hidden">
         {/* 背景裝飾光暈 */}
         <div className="absolute top-0 right-0 w-[30rem] h-[30rem] bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-[20rem] h-[20rem] bg-blue-500/5 blur-[80px] rounded-full pointer-events-none" />
-        
-        {/* ★ 優化版：懸浮毛玻璃天氣小組件 (放置於畫面右上角) */}
-        <div className="hidden lg:flex absolute top-28 right-12 z-20 flex-col items-end animate-in fade-in slide-in-from-right-8 duration-700">
-          <div className="bg-white/60 backdrop-blur-md border border-white shadow-xl rounded-2xl p-4 flex flex-col gap-2 transition-transform hover:scale-105">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-500">
-                <Sun size={20} />
-              </div>
-              <div>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-2xl font-black text-slate-800 tracking-tighter">31°C</span>
-                  <span className="text-xs font-bold text-slate-500">濕度 72%</span>
-                </div>
-                <p className="text-[10px] font-bold text-slate-400">香港 • 下午好，佳寓夥伴！</p>
-              </div>
-            </div>
-            {/* 動態警告區塊 */}
-            <div className="w-full bg-red-50 border border-red-100 text-red-600 text-[10px] font-black px-3 py-1.5 rounded-lg flex items-center gap-1.5">
-               <AlertTriangle size={12} /> 雷暴警告現正生效
-            </div>
-          </div>
-        </div>
 
-        {/* 核心搜尋區塊 (視覺焦點) */}
+        {/* 核心搜尋區塊 */}
         <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10 w-full">
           <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-orange-600 text-[11px] font-black mb-6 border border-slate-100 shadow-sm uppercase tracking-widest animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Sparkles size={16} /> 2026 赴港精英租務首選平台
@@ -201,7 +173,7 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* 3. 最新盤源 (★ 包含智能跳轉路由) */}
+      {/* 3. 最新盤源 */}
       <section className="py-20 px-4 bg-slate-50 border-y border-slate-100">
         <div className="max-w-7xl mx-auto">
           <div className="flex justify-between items-end mb-12">
@@ -213,7 +185,6 @@ export default async function HomePage() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {featuredProps.map((prop: any) => {
               
-              // ★ 智能路由：有房間就搜自己，空殼就導向總列表
               const smartDestinationUrl = prop.hasPublishedRooms 
                 ? `/properties?search=${prop.name}` 
                 : `/properties`;
