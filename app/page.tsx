@@ -8,12 +8,12 @@ import { db } from '@/lib/firebase';
 import { 
   ArrowRight, MapPin, ShieldCheck, 
   Sparkles, Home, CheckCircle,
-  Train, Building2, Quote, Wind
+  Train, Building2, Quote, Wind, Sun, AlertTriangle // ★ 引入天氣需要的 icon
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
-// ★ 新增：引入我們剛寫好的天氣問候組件
-import WeatherBanner from '@/components/WeatherBanner';
+// 移除笨重的天氣橫幅組件
+// import WeatherBanner from '@/components/WeatherBanner'; 
 
 // --- 核心工具：圖片過牆代購 API ---
 const getProxiedUrl = (url?: string | null) => {
@@ -102,18 +102,18 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-white selection:bg-orange-200">
       
-      {/* 1. Hero Section */}
+      {/* 1. Hero Section (★ 升級毛玻璃懸浮組件) */}
       <section className="pt-20 md:pt-32 pb-16 px-4 bg-slate-50 relative overflow-hidden min-h-[60vh] flex items-center justify-center">
         {/* 背景裝飾光暈 */}
         <div className="absolute top-0 right-0 w-[30rem] h-[30rem] bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
         <div className="absolute bottom-0 left-0 w-[20rem] h-[20rem] bg-blue-500/5 blur-[80px] rounded-full pointer-events-none" />
         
-        {/* ★ 優化版：懸浮毛玻璃天氣小組件 (放置於畫面右側/右上角) */}
+        {/* ★ 優化版：懸浮毛玻璃天氣小組件 (放置於畫面右上角) */}
         <div className="hidden lg:flex absolute top-28 right-12 z-20 flex-col items-end animate-in fade-in slide-in-from-right-8 duration-700">
           <div className="bg-white/60 backdrop-blur-md border border-white shadow-xl rounded-2xl p-4 flex flex-col gap-2 transition-transform hover:scale-105">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-500">
-                <Sun size={20} /> {/* 這裡可以根據 API 動態替換圖示 */}
+                <Sun size={20} />
               </div>
               <div>
                 <div className="flex items-baseline gap-2">
