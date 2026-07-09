@@ -103,21 +103,47 @@ export default async function HomePage() {
     <main className="min-h-screen bg-white selection:bg-orange-200">
       
       {/* 1. Hero Section */}
-      <section className="pt-20 md:pt-28 pb-16 px-4 bg-slate-50 relative overflow-hidden">
-        <div className="absolute top-0 right-0 w-96 h-96 bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
-        <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10">
-          <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-orange-600 text-[11px] font-black mb-6 border border-slate-100 shadow-sm uppercase tracking-widest">
+      <section className="pt-20 md:pt-32 pb-16 px-4 bg-slate-50 relative overflow-hidden min-h-[60vh] flex items-center justify-center">
+        {/* 背景裝飾光暈 */}
+        <div className="absolute top-0 right-0 w-[30rem] h-[30rem] bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
+        <div className="absolute bottom-0 left-0 w-[20rem] h-[20rem] bg-blue-500/5 blur-[80px] rounded-full pointer-events-none" />
+        
+        {/* ★ 優化版：懸浮毛玻璃天氣小組件 (放置於畫面右側/右上角) */}
+        <div className="hidden lg:flex absolute top-28 right-12 z-20 flex-col items-end animate-in fade-in slide-in-from-right-8 duration-700">
+          <div className="bg-white/60 backdrop-blur-md border border-white shadow-xl rounded-2xl p-4 flex flex-col gap-2 transition-transform hover:scale-105">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center text-orange-500">
+                <Sun size={20} /> {/* 這裡可以根據 API 動態替換圖示 */}
+              </div>
+              <div>
+                <div className="flex items-baseline gap-2">
+                  <span className="text-2xl font-black text-slate-800 tracking-tighter">31°C</span>
+                  <span className="text-xs font-bold text-slate-500">濕度 72%</span>
+                </div>
+                <p className="text-[10px] font-bold text-slate-400">香港 • 下午好，佳寓夥伴！</p>
+              </div>
+            </div>
+            {/* 動態警告區塊 */}
+            <div className="w-full bg-red-50 border border-red-100 text-red-600 text-[10px] font-black px-3 py-1.5 rounded-lg flex items-center gap-1.5">
+               <AlertTriangle size={12} /> 雷暴警告現正生效
+            </div>
+          </div>
+        </div>
+
+        {/* 核心搜尋區塊 (視覺焦點) */}
+        <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10 w-full">
+          <div className="inline-flex items-center gap-1.5 px-4 py-2 rounded-full bg-white text-orange-600 text-[11px] font-black mb-6 border border-slate-100 shadow-sm uppercase tracking-widest animate-in fade-in slide-in-from-bottom-4 duration-500">
             <Sparkles size={16} /> 2026 赴港精英租務首選平台
           </div>
-          <h1 className="text-4xl md:text-6xl font-black text-slate-900 tracking-tighter leading-[1.1] mb-6">
-            您在香港的 <span className="text-orange-500">星級理想家</span>
+          <h1 className="text-5xl md:text-7xl font-black text-slate-900 tracking-tighter leading-[1.1] mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700 delay-100">
+            您在香港的 <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-500 to-amber-400">星級理想家</span>
           </h1>
-          <HomeSearch />
+          
+          <div className="w-full max-w-3xl animate-in fade-in slide-in-from-bottom-4 duration-700 delay-200">
+            <HomeSearch />
+          </div>
         </div>
       </section>
-
-      {/* ★ 加入天文台即時天氣與問候橫幅 */}
-      <WeatherBanner />
 
       {/* 2. 生活圈百科 */}
       <section className="py-16 px-4 bg-white">
