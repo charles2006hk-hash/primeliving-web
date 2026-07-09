@@ -12,6 +12,8 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import HomeSearch from '@/components/HomeSearch';
+// ★ 引入剛剛建立的環境光天氣組件
+import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 
 // --- 核心工具：圖片過牆代購 API ---
 const getProxiedUrl = (url?: string | null) => {
@@ -96,11 +98,11 @@ export default async function HomePage() {
   return (
     <main className="min-h-screen bg-white selection:bg-orange-200">
       
-      {/* 1. Hero Section (★ 已移除天氣組件，並縮緊上下 padding 減少空白) */}
+      {/* 1. Hero Section */}
       <section className="pt-28 md:pt-36 pb-12 px-4 bg-slate-50 relative overflow-hidden">
-        {/* 背景裝飾光暈 */}
-        <div className="absolute top-0 right-0 w-[30rem] h-[30rem] bg-orange-500/5 blur-[100px] rounded-full pointer-events-none" />
-        <div className="absolute bottom-0 left-0 w-[20rem] h-[20rem] bg-blue-500/5 blur-[80px] rounded-full pointer-events-none" />
+        
+        {/* ★ 置入動態天氣環境光組件，取代原本寫死的背景光暈 */}
+        <WeatherAmbientBackground />
 
         {/* 核心搜尋區塊 */}
         <div className="max-w-5xl mx-auto flex flex-col items-center text-center relative z-10 w-full">
