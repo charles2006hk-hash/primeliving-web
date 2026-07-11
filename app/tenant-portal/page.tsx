@@ -1,8 +1,6 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, query, where, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 import { Home, KeyRound, Loader2, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -12,7 +10,7 @@ export default function TenantPortalLogin() {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 檢查是否已經登入過 (LocalStorage Cache)
+  // 檢查是否已經登入過
   useEffect(() => {
     const cachedTenant = localStorage.getItem('pm_tenant_session');
     if (cachedTenant) {
@@ -26,47 +24,25 @@ export default function TenantPortalLogin() {
     setIsLoading(true);
 
     try {
-      // 1. 清洗使用者輸入：移除所有空格、轉小寫
-      const cleanInput = accessCode.replace(/\s+/g, '').toLowerCase();
+      const cleanInput = accessCode.replace(/\s+/g, '');
       if (!cleanInput) throw new Error('請輸入登入碼');
 
-      // 2. 抓取所有履約中與即將入駐的租客
-      const activeQuery = query(collection(db, 'tenants'), where('status', 'in', ['Active', 'Pending']));
-      const snap = await getDocs(activeQuery);
-      
-      // 3. 智能多重匹配邏輯 (Smart Match)
-      const matchedTenant = snap.docs.find(doc => {
-        const data = doc.data();
-        
-        // 提取並清洗資料庫中的各項欄位
-        const name = (data.name || '').replace(/\s+/g, '').toLowerCase();
-        const nameLast4 = name.slice(-4); // 英文名字的最後4個字母
-        const idLast4 = (data.identityNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(-4);
-        const phone = (data.phone || '').replace(/\D/g, '');
-        const phone8 = phone.slice(-8); // 取最後8碼電話
-        const phone4 = phone.slice(-4); // 取最後4碼電話
-        const contractId = (data.contractId || '').replace(/\s+/g, '').toLowerCase();
-
-        // 建立該租客所有允許的魔法登入碼組合
-        const validCodes = [];
-        if (name && idLast4) validCodes.push(name + idLast4);             // 姓名 + 證件後4碼
-        if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   // 姓名後4字母 + 證件後4碼
-        if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         // 手機8碼 + 證件後4碼
-        if (name && phone4) validCodes.push(name + phone4);               // 姓名 + 手機後4碼 (備用)
-        if (contractId) validCodes.push(contractId);                      // 系統合約編號
-
-        // 檢查使用者輸入是否命中其中任何一種
-        return validCodes.includes(cleanInput);
+      // ★ 改為呼叫我們建立的後端 API，保護資料不外洩
+      const response = await fetch('/api/tenant-auth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ accessCode: cleanInput })
       });
 
-      // 4. 登入結果處理
-      if (matchedTenant) {
-        const tenantData = { id: matchedTenant.id, ...matchedTenant.data() };
-        localStorage.setItem('pm_tenant_session', JSON.stringify(tenantData));
-        router.push('/tenant-portal/dashboard');
-      } else {
-        setErrorMsg('登入碼無效。請確認您的姓名與證件後4碼是否正確。');
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || '登入失敗');
       }
+
+      // 登入成功，儲存資料並轉跳
+      localStorage.setItem('pm_tenant_session', JSON.stringify(data));
+      router.push('/tenant-portal/dashboard');
 
     } catch (error: any) {
       console.error(error);
@@ -93,7 +69,6 @@ export default function TenantPortalLogin() {
 
         {/* Form */}
         <div className="p-8">
-          
           <div className="mb-6 bg-orange-50/50 border border-orange-100 rounded-2xl p-4 flex items-start gap-3">
             <Sparkles className="text-orange-500 shrink-0 mt-0.5" size={18} />
             <div className="text-xs font-bold text-slate-600 leading-relaxed">
@@ -111,8 +86,6 @@ export default function TenantPortalLogin() {
           )}
 
           <form onSubmit={handleLogin} className="space-y-6">
-            
-            {/* 唯一帳號欄位 */}
             <div>
               <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
                 專屬登入碼 (Access Code)
@@ -139,7 +112,6 @@ export default function TenantPortalLogin() {
             >
               {isLoading ? <Loader2 size={18} className="animate-spin" /> : <><span className="mr-2">進入我的專屬空間</span> <ArrowRight size={16}/></>}
             </button>
-            
           </form>
           
           <div className="mt-8 text-center">
