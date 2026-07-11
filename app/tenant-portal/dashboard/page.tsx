@@ -18,12 +18,11 @@ function DashboardContent() {
   
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
-  const [tenantDocs, setTenantDocs] = useState<any[]>([]); // ★ 儲存大系統發布的真實單據
+  const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc'>('none');
-  const [viewingDoc, setViewingDoc] = useState<any>(null); // 當前正在檢視的特定單據
+  const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
-  // 支付與其他狀態
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'stripe'>('bank');
   const [isUploading, setIsUploading] = useState(false);
   const [isStripeLoading, setIsStripeLoading] = useState(false);
@@ -42,13 +41,17 @@ function DashboardContent() {
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // 1. 驗證登入與即時連動 (租客資料 + 真實單據庫)
+  // ★ 補回遺漏的登出功能
+  const handleLogout = () => { 
+    localStorage.clear(); 
+    router.push('/tenant-portal'); 
+  };
+
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
     if (!sessionStr) { router.push('/tenant-portal'); return; }
     const sessionData = JSON.parse(sessionStr);
 
-    // 監聽租客本身狀態
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
@@ -75,10 +78,8 @@ function DashboardContent() {
       setLoading(false);
     });
 
-    // ★ 核心修復：監聽大系統為這個租客開立的所有單據
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
     const unsubDocs = onSnapshot(qDocs, (snap) => {
-      // 根據日期排序 (Firestore 組合查詢限制，這裡在前端排序)
       const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => {
         return new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime();
       });
@@ -88,24 +89,20 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); };
   }, [router]);
 
-  // 取得最新的一份租賃合約
   const latestLease = tenantDocs.find(d => d.type === 'Lease');
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
 
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-  // 電子簽署邏輯 (同時更新 tenant 與 最新 document)
   const handleSignLease = async () => {
     if (!signature.trim()) return alert("請輸入您的法定全名作為電子簽名！");
     if (!latestLease) return alert("找不到合約檔案！");
     
     setIsSigning(true);
     try {
-      // 更新租客狀態
       await updateDoc(doc(db, 'tenants', tenantData.id), { 
         signature: signature, signedAt: serverTimestamp(), isContractSigned: true, status: 'Active' 
       });
-      // 將簽名同步寫入大系統的實體文件記錄中
       await updateDoc(doc(db, 'documents', latestLease.id), {
         'formData.tenantSignature': signature,
         'formData.signedAt': new Date().toISOString()
@@ -133,7 +130,6 @@ function DashboardContent() {
     finally { setIsSignDownloading(false); }
   };
 
-  // 共用的 A4 渲染器 (確保租客與後台看到 100% 相同的版型)
   const renderA4Document = (docData: any, isSigningMode = false) => {
     if (!docData) return null;
     const fd = docData.formData || {};
@@ -145,75 +141,80 @@ function DashboardContent() {
     const receiptTotal = baseRent + deposit + extraTotal;
     const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
 
+    const formatCurrency = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
+
     return (
       <div ref={isSigningMode ? contractRef : undefined} className="w-[210mm] min-h-[297mm] bg-white px-[20mm] py-[15mm] text-slate-900 font-sans relative shadow-lg origin-top scale-[0.5] sm:scale-[0.6] md:scale-75 lg:scale-90 print:shadow-none print:scale-100">
         
-        {/* 公司抬頭 */}
-        <div className="flex flex-col items-center mb-5 border-b-[3px] border-slate-800 pb-4">
+        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
           <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
           <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
         </div>
 
-        {/* 標題與日期 */}
         <div className="text-right mb-6">
           <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">
             {docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}
           </h2>
           <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">
-            {docData.type === 'Lease' ? '租賃合約' : docData.type === 'Receipt' ? '正式收據' : docData.type === 'Statement' ? '對數結算單' : '退租協議'}
+            {docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}
           </p>
           <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
         </div>
 
-        {/* 雙方資料 */}
         <div className="flex justify-between gap-6 mb-6">
-          <div className="flex-1 border border-slate-300 p-4 rounded bg-slate-50 relative"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b pb-1">Landlord / Manager</h3><p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p></div>
-          <div className="flex-1 border border-slate-300 p-4 rounded bg-slate-50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b pb-1">Tenant (租客)</h3><p className="font-bold text-sm">{fd.tenantName || '__________________'}</p><p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p><p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p></div>
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
+            <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
+          </div>
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
+            <p className="font-bold text-sm">{fd.tenantName || '__________________'}</p>
+            <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p>
+            <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p>
+          </div>
         </div>
 
-        {/* 物業詳情 */}
         <div className="mb-6">
-          <h3 className="bg-slate-800 text-white px-3 py-1 text-xs font-bold uppercase">Premises Details (物業詳情)</h3>
-          <table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-2 font-bold">{fd.propertyAddress}</td></tr><tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold">Room No.</td><td className="border border-slate-300 p-2 font-bold text-blue-700">{fd.roomName}</td><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-2 font-mono text-xs">{fd.leaseStart} to {fd.leaseEnd}</td></tr></tbody></table>
+          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
+          <table className="w-full text-sm border-collapse border border-slate-300">
+            <tbody>
+              <tr><td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold">{fd.propertyAddress}</td></tr>
+              <tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart} to {fd.leaseEnd}</td></tr>
+            </tbody>
+          </table>
         </div>
 
-        {/* 動態財務表格 */}
         {docData.type === 'Statement' ? (
-          <div className="mb-6"><h3 className="bg-slate-800 text-white px-3 py-1 text-xs font-bold uppercase">Account Reconciliation (結算明細)</h3><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-2 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-2 text-right font-mono">{formatCurrency(fd.totalReceivable)}</td></tr><tr><td className="border border-slate-300 p-2 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-2 text-right font-mono text-emerald-700">{formatCurrency(fd.totalReceived)}</td></tr><tr><td className="border border-slate-300 p-2 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-2 text-right font-mono text-red-600">- {formatCurrency(fd.reservedDamages)}</td></tr></tbody><tfoot><tr className="bg-slate-100 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrency(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
+          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrency(fd.totalReceivable)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrency(fd.totalReceived)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrency(fd.reservedDamages)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrency(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
         ) : docData.type === 'Receipt' ? (
-          <div className="mb-6"><h3 className="bg-slate-800 text-white px-3 py-1 text-xs font-bold uppercase">Payment Received (收款明細)</h3><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-100"><th className="border border-slate-300 p-2 text-left">Description</th><th className="border border-slate-300 p-2 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-2">Monthly Rent (租金)</td><td className="border border-slate-300 p-2 text-right font-mono">{formatCurrency(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-2">Security Deposit (按金)</td><td className="border border-slate-300 p-2 text-right font-mono">{formatCurrency(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-2 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-2 text-right font-mono">{formatCurrency(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-2 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-2 text-right font-mono text-lg">{formatCurrency(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
+          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrency(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrency(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrency(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrency(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
         ) : docData.type === 'Lease' ? (
-          <div className="mb-6"><h3 className="bg-slate-800 text-white px-3 py-1 text-xs font-bold uppercase">Financial Terms (財務條款)</h3><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px]">每月租金</span></td><td className="border border-slate-300 p-2 font-mono font-bold text-lg">{formatCurrency(baseRent)}</td><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Security Deposit<br/><span className="text-[10px]">押金</span></td><td className="border border-slate-300 p-2 font-mono font-bold">{formatCurrency(deposit)}</td></tr></tbody></table></div>
+          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrency(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrency(deposit)}</td></tr></tbody></table></div>
         ) : null}
 
-        {fd.remarks && <div className="mb-8 p-3 border border-dashed border-slate-400 bg-slate-50 rounded text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
+        {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
 
         {docData.type === 'Lease' && (
-           <div className="mb-8 text-[9px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
+           <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
              <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
              <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
-             <p className="italic mt-4">By signing below, Party B acknowledges that they have read, understood, and agreed to all terms and conditions stipulated in the full version of this Tenancy Agreement.</p>
            </div>
         )}
 
-        {/* 簽名與印章欄位 */}
-        <div className="absolute bottom-16 left-[20mm] right-[20mm] grid grid-cols-2 gap-12">
-           <div className="pt-10 border-t border-slate-800 text-center relative">
+        <div className="absolute bottom-[30mm] left-[20mm] right-[20mm] flex justify-between">
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
              <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
              <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
-             {/* 藍色公司印章 (移除紅色濾鏡) */}
-             <div className="absolute -top-10 left-1/2 -translate-x-1/2 w-[110px] h-[110px] border-[3px] border-blue-600 rounded-full flex flex-col items-center justify-center text-blue-600 opacity-80 -rotate-12 pointer-events-none mix-blend-multiply z-0">
-               <span className="text-[8px] font-black tracking-tighter uppercase text-center leading-none mt-1">Jiayu Property<br/>Management<br/>Limited</span>
-               <span className="text-xl font-black mt-0.5">*</span>
-               <span className="text-[10px] font-black tracking-widest mt-0.5">佳寓物業託管</span>
-               <div className="absolute inset-1 border border-blue-600 rounded-full opacity-30"></div>
-             </div>
+             {docData.stampPos && (
+                <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos.x, top: docData.stampPos.y, width: '35mm', height: '35mm' }}>
+                  <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
+                </div>
+             )}
            </div>
            
-           <div className="pt-10 border-t border-slate-800 text-center relative">
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
              <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
              <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
-             {/* 顯示簽名 */}
              {(tenantData.isContractSigned || fd.tenantSignature) && docData.type === 'Lease' && (
                <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 bg-white/80 py-2">
                  <p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{fd.tenantSignature || tenantData.signature}</p>
@@ -234,7 +235,14 @@ function DashboardContent() {
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
 
-      {/* 頂部導航 */}
+      {isVerifying && (
+        <div className="fixed inset-0 bg-slate-900/80 z-[200] flex flex-col items-center justify-center text-white backdrop-blur-sm animate-in fade-in">
+          <Loader2 size={48} className="animate-spin text-emerald-400 mb-4" />
+          <h2 className="text-2xl font-black">正在向銀行確認款項...</h2>
+          <p className="text-slate-300 mt-2 font-medium">請稍候，系統即將為您結算帳單</p>
+        </div>
+      )}
+
       <div className="bg-white px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
         <div className="font-black text-lg text-slate-800 tracking-tight">佳寓 <span className="text-orange-500 text-sm">PrimeLiving</span></div>
         <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><LogOut size={20} /></button>
@@ -246,7 +254,6 @@ function DashboardContent() {
           <button className="relative p-3 bg-white rounded-2xl shadow-sm border border-slate-100"><Bell size={20} className="text-slate-600" /><span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full border-2 border-white"></span></button>
         </div>
 
-        {/* 主卡片 */}
         <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-2xl shadow-slate-900/20 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-40 h-40 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
           <div className="flex justify-between items-start mb-8 relative z-10">
@@ -268,7 +275,6 @@ function DashboardContent() {
           <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center overflow-hidden"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">我的帳戶</p><p className="text-sm font-black text-slate-800 truncate">{tenantData.roomInfo}</p></div>
         </div>
 
-        {/* 服務列表 */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col divide-y divide-slate-50">
           <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
             <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}><FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-400' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
@@ -277,14 +283,9 @@ function DashboardContent() {
           <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
             <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Receipt size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p><p className="text-[10px] font-bold text-slate-400">查看管家開立之收據與對數單</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
           </button>
-          
-          {/* 其他選單... */}
         </div>
       </div>
 
-      {/* ==================== Modals ==================== */}
-
-      {/* 1. 電子合約 Modal */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full sm:max-w-[900px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -295,7 +296,6 @@ function DashboardContent() {
             </div>
             
             <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
-              {/* PDF 預覽區塊 */}
               <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar">
                 {latestLease ? renderA4Document(latestLease, true) : (
                   <div className="flex flex-col items-center justify-center h-full text-slate-400">
@@ -306,7 +306,6 @@ function DashboardContent() {
                 )}
               </div>
 
-              {/* 操作面板 */}
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-l border-slate-200 p-6 flex flex-col justify-center">
                   {tenantData.isContractSigned ? (
@@ -339,7 +338,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 2. 歷史單據列表與預覽 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -376,7 +374,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 3. 獨立單據 A4 預覽 Modal */}
       {activeModal === 'view_doc' && viewingDoc && (
         <div className="fixed inset-0 bg-slate-900/80 z-[110] flex flex-col items-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full flex justify-end p-4 md:p-0 md:mb-4 flex-none max-w-[800px]">
