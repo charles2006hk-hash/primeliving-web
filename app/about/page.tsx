@@ -1,10 +1,12 @@
-// app/about/page.tsx
+'use client'; // ★ 新增：允許使用狀態控制 Modal
 
-import React from 'react';
-import { ShieldCheck, Heart, Users, MapPin, CheckCircle2, Award, Coffee } from 'lucide-react';
-import WechatModal from '@/components/WechatModal';
+import React, { useState } from 'react';
+import { ShieldCheck, Heart, Users, MapPin, CheckCircle2, Award, Coffee, MessageCircle } from 'lucide-react';
+import ContactFormModal from '@/components/ContactFormModal'; // ★ 替換為新表單
 
 export default function AboutPage() {
+  const [isModalOpen, setIsModalOpen] = useState(false); // ★ 控制表單狀態
+
   return (
     <div className="min-h-screen bg-white">
       {/* 1. 品牌視覺 Header */}
@@ -83,7 +85,13 @@ export default function AboutPage() {
               在佳寓，我們不僅提供一張床位。我們舉辦節日聚會、分享求職資訊、提供抵港生活指南。我們希望每一位選擇佳寓的青年，都能在這座城市找到屬於自己的歸屬感。
             </p>
             <div className="pt-4">
-              <WechatModal />
+              {/* ★ 替換為觸發新表單的按鈕 */}
+              <button 
+                onClick={() => setIsModalOpen(true)}
+                className="bg-emerald-500 hover:bg-emerald-600 text-white px-8 py-3 rounded-full font-bold transition-all shadow-lg shadow-emerald-500/20 flex items-center gap-2 active:scale-95"
+              >
+                <MessageCircle size={20} /> 立即預約諮詢
+              </button>
             </div>
           </div>
           <div className="flex-1 grid grid-cols-2 gap-4">
@@ -92,6 +100,9 @@ export default function AboutPage() {
           </div>
         </div>
       </section>
+
+      {/* ★ 置入隱藏的 Modal */}
+      <ContactFormModal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} />
     </div>
   );
 }
