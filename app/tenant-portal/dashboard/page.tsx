@@ -104,6 +104,10 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); };
   }, [router]);
 
+  // ★ 核心修復：將 latestLease 宣告放回主組件層級，讓畫面渲染時抓得到
+  const latestLease = tenantDocs.find(d => d.type === 'Lease');
+  const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
+
   const verifyAndSettlePayment = async (sessionId: string) => {
     setIsVerifying(true);
     try {
@@ -158,7 +162,6 @@ function DashboardContent() {
 
   const handleSignLease = async () => {
     if (!signature.trim()) return alert("請輸入您的法定全名作為電子簽名！");
-    const latestLease = tenantDocs.find(d => d.type === 'Lease');
     if (!latestLease) return alert("找不到合約檔案！");
     
     setIsSigning(true);
@@ -328,10 +331,8 @@ function DashboardContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>;
   if (!tenantData) return null;
 
-  // ★ 核心修復：這三行重新加回來了！用來計算畫面卡片上的手續費與雜費
   const stripeFee = Math.round((tenantData.amountDue || 0) * 0.03);
   const totalWithStripe = (tenantData.amountDue || 0) + stripeFee;
-  const totalUtilities = tenantData.utilities?.reduce((acc: number, curr: any) => acc + curr.amount, 0) || 0;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-12 selection:bg-orange-200 font-sans relative">
@@ -410,17 +411,25 @@ function DashboardContent() {
             <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0">選擇付款方式</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="flex bg-slate-100 p-1.5 rounded-2xl"><button onClick={() => setPaymentMethod('bank')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><Landmark size={18}/> 轉帳/FPS</button><button onClick={() => setPaymentMethod('stripe')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'stripe' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}><CreditCard size={18}/> 線上刷卡</button></div>
+              {/* ★ 銀行資訊已更新為恆生銀行 */}
               {paymentMethod === 'bank' && (
                 <div className="animate-in fade-in slide-in-from-left-4 duration-300 space-y-5">
                   <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3"><CheckCircle2 className="text-blue-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-blue-900 mb-1">推薦使用：0% 手續費</p><p className="text-xs text-blue-700 font-medium">請轉帳至以下指定戶口，並上傳入數紙以供管家核對。</p></div></div>
-                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">應付總額 (HKD)</p><p className="text-3xl font-black text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="pt-4 border-t border-slate-100 space-y-3"><div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">FPS Identifier</p><p className="text-sm font-mono font-black text-slate-800 bg-slate-100 px-2 py-1 rounded">16889988</p></div><div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">銀行帳號 (匯豐)</p><p className="text-sm font-mono font-black text-slate-800 bg-slate-100 px-2 py-1 rounded">123-456789-838</p></div></div></div>
+                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
+                    <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">應付總額 (HKD)</p><p className="text-3xl font-black text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div>
+                    <div className="pt-4 border-t border-slate-100 space-y-3">
+                      <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">帳戶銀行</p><p className="text-sm font-bold text-slate-800">恆生銀行 (HANG SENG BANK)</p></div>
+                      <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">帳戶名稱</p><p className="text-[10px] font-bold text-slate-800 bg-slate-100 px-2 py-1 rounded">PRIME LIVING PROPERTY (HK) MANAGEMENT LIMITED</p></div>
+                      <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">銀行帳號</p><p className="text-sm font-mono font-black text-slate-800 bg-slate-100 px-2 py-1 rounded">305-876757-883</p></div>
+                    </div>
+                  </div>
                   <div className="relative"><input type="file" onChange={handleUploadReceipt} disabled={isUploading} className="hidden" id="receipt-upload" accept="image/*,.pdf" /><label htmlFor="receipt-upload" className={`flex items-center justify-center w-full py-4 rounded-2xl cursor-pointer font-black transition-all shadow-lg ${isUploading ? 'bg-slate-100 text-slate-400' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'}`}>{isUploading ? <><Loader2 size={18} className="animate-spin mr-2" /> 檔案上傳中...</> : <><UploadCloud size={18} className="mr-2" /> 點擊上傳轉帳截圖</>}</label></div>
                 </div>
               )}
               {paymentMethod === 'stripe' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300 space-y-5">
                   <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3"><AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-amber-900 mb-1">注意：將收取 3% 處理費</p><p className="text-xs text-amber-700 font-medium">線上刷卡由 Stripe 提供安全支付，費用包含金流平台手續費。</p></div></div>
-                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期租金</p><p className="font-mono font-bold text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${stripeFee.toLocaleString()}</p></div><div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">刷卡總額</p><p className="text-3xl font-black text-purple-700">${totalWithStripe.toLocaleString()}</p></div></div>
+                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期租金</p><p className="font-mono font-bold text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${(Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div><div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">刷卡總額</p><p className="text-3xl font-black text-purple-700">${((tenantData.amountDue || 0) + Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div></div>
                   <button onClick={handleStripeCheckout} disabled={isStripeLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">{isStripeLoading ? <><Loader2 size={18} className="animate-spin"/> 連線金流...</> : <>前往 Stripe 結帳 <ChevronRight size={18}/></>}</button>
                 </div>
               )}
