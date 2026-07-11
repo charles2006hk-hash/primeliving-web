@@ -12,8 +12,8 @@ export async function POST(request: Request) {
     const resend = new Resend(process.env.RESEND_API_KEY);
     const data = await request.json();
     
-    // 展開新欄位
-    const { name, gender, school, degree, duration, roomType, budget, phone, contactMethod, requirements } = data;
+    // ★ 解構加入 referrer
+    const { name, gender, school, degree, duration, roomType, budget, phone, contactMethod, requirements, referrer } = data;
 
     await resend.emails.send({
       from: '系統通知 <onboarding@resend.dev>', // 正式上線記得改為您的網域
@@ -30,6 +30,7 @@ export async function POST(request: Request) {
           <tr><td><strong>預算 (HKD)</strong></td><td>${budget}</td></tr>
           <tr><td><strong>聯絡電話</strong></td><td>${phone}</td></tr>
           <tr><td><strong>微信 / Email</strong></td><td>${contactMethod}</td></tr>
+          <tr><td><strong>推薦人</strong></td><td><strong style="color: purple;">${referrer || '無'}</strong></td></tr>
           <tr><td><strong>備註</strong></td><td>${requirements || '無'}</td></tr>
         </table>
         <p style="margin-top:20px;">請登入大系統後台「客戶需求 CRM」進行跟進。</p>
