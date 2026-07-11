@@ -22,7 +22,8 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
     customBudget: '',
     phone: '',
     contactMethod: '',
-    requirements: ''
+    requirements: '',
+    referrer: '' // ★ 新增：推薦人欄位
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -32,11 +33,10 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (isSubmitting) return; // 防禦：避免重複送出
+    if (isSubmitting) return; 
     setIsSubmitting(true);
 
     try {
-      // 判斷是否為自訂預算
       const finalBudget = formData.budget === 'custom' ? formData.customBudget : formData.budget;
       const dataToSave = { ...formData, budget: finalBudget };
 
@@ -46,7 +46,6 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
         createdAt: serverTimestamp(),
       });
 
-      // 呼叫 API 寄信 (非阻塞)
       fetch('/api/send-inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -57,8 +56,8 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
       setTimeout(() => {
         setIsSuccess(false);
         onClose();
-        // 重置表單
-        setFormData({ name: '', gender: '未填寫', school: '', degree: '碩士 (Master)', duration: '12個月 (一年死約)', roomType: '單人房 (Single)', budget: '6000-9000', customBudget: '', phone: '', contactMethod: '', requirements: '' });
+        // ★ 重置時也要清空推薦人
+        setFormData({ name: '', gender: '未填寫', school: '', degree: '碩士 (Master)', duration: '12個月 (一年死約)', roomType: '單人房 (Single)', budget: '6000-9000', customBudget: '', phone: '', contactMethod: '', requirements: '', referrer: '' });
       }, 3000);
     } catch (error) {
       console.error("提交失敗:", error);
@@ -72,7 +71,6 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
       <div className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col overflow-hidden shadow-2xl animate-in zoom-in-95">
         
-        {/* 標題區 */}
         <div className="bg-emerald-500 p-4 flex justify-between items-center text-white shrink-0">
           <h3 className="font-bold text-lg">預約諮詢 / 需求配對</h3>
           <button onClick={onClose} className="hover:bg-emerald-600 p-1 rounded-full transition"><X size={20} /></button>
@@ -159,6 +157,12 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
             <div>
               <label className="block text-[11px] font-bold text-slate-500 mb-1">其他要求或備註 (選填)</label>
               <textarea rows={2} value={formData.requirements} onChange={e => setFormData({...formData, requirements: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:border-emerald-500 bg-slate-50 resize-none" placeholder="例如：需有海景、能不能養寵物..." />
+            </div>
+
+            {/* ★ 新增：推薦人欄位 */}
+            <div>
+              <label className="block text-[11px] font-bold text-purple-600 mb-1">推薦人姓名及電話 (選填)</label>
+              <input value={formData.referrer} onChange={e => setFormData({...formData, referrer: e.target.value})} className="w-full p-2 border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 bg-purple-50" placeholder="若有佳寓租客/員工推薦，請填寫" />
             </div>
             
             <div className="flex gap-3 pt-2 shrink-0">
