@@ -27,7 +27,6 @@ export default function TenantPortalLogin() {
       const cleanInput = accessCode.replace(/\s+/g, '');
       if (!cleanInput) throw new Error('請輸入登入碼');
 
-      // ★ 改為呼叫我們建立的後端 API，保護資料不外洩
       const response = await fetch('/api/tenant-auth', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -40,7 +39,6 @@ export default function TenantPortalLogin() {
         throw new Error(data.error || '登入失敗');
       }
 
-      // 登入成功，儲存資料並轉跳
       localStorage.setItem('pm_tenant_session', JSON.stringify(data));
       router.push('/tenant-portal/dashboard');
 
@@ -69,12 +67,14 @@ export default function TenantPortalLogin() {
 
         {/* Form */}
         <div className="p-8">
+          
+          {/* ★ 修改：更改範例文字，使用大眾化化名陳小明，絕不洩漏真實住客隱私 */}
           <div className="mb-6 bg-orange-50/50 border border-orange-100 rounded-2xl p-4 flex items-start gap-3">
             <Sparkles className="text-orange-500 shrink-0 mt-0.5" size={18} />
             <div className="text-xs font-bold text-slate-600 leading-relaxed">
               <span className="text-orange-600 font-black">極簡登入：</span><br/>
               請直接輸入您的 <span className="text-slate-800 bg-white px-1.5 py-0.5 rounded shadow-sm border border-slate-200">姓名</span> 加上 <span className="text-slate-800 bg-white px-1.5 py-0.5 rounded shadow-sm border border-slate-200">證件最後4碼</span><br/>
-              <span className="text-[10px] text-slate-400 font-medium mt-1 inline-block">例如：陳大文123A / 呂嫣然5678</span>
+              <span className="text-[10px] text-slate-400 font-medium mt-1 inline-block">例如：陳小明8765 / 張三1234</span>
             </div>
           </div>
 
