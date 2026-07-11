@@ -7,7 +7,7 @@ import {
   Camera, Receipt, ShieldCheck, IdCard, LogOut
 } from 'lucide-react';
 import Link from 'next/link';
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
+import { doc, getDoc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
@@ -43,25 +43,42 @@ function DashboardContent() {
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
 
-  // 1. 驗證登入與即時連動
+  // 1. 驗證登入與即時連動 (包含自動解析真實房號)
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
     if (!sessionStr) { router.push('/tenant-portal'); return; }
     
     const sessionData = JSON.parse(sessionStr);
 
-    const unsub = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
+    const unsub = onSnapshot(doc(db, 'tenants', sessionData.id), async (docSnap) => {
       if (docSnap.exists()) {
         const data = docSnap.data();
         const end = new Date(data.leaseEnd);
         const now = new Date();
         const diffDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
 
+        // 🎯 核心修復：把資料庫的 ID 翻譯成真實的名稱
+        let resolvedPropName = data.propertyName || '';
+        let resolvedRoomName = data.roomName || '';
+
+        if (data.propertyId && !resolvedPropName) {
+          try {
+            const pSnap = await getDoc(doc(db, 'properties', data.propertyId));
+            if (pSnap.exists()) resolvedPropName = pSnap.data().name;
+          } catch(e) {}
+        }
+        if (data.roomId && !resolvedRoomName) {
+          try {
+            const rSnap = await getDoc(doc(db, 'rooms', data.roomId));
+            if (rSnap.exists()) resolvedRoomName = rSnap.data().name;
+          } catch(e) {}
+        }
+
         setTenantData({
           id: docSnap.id,
           name: data.name,
-          phone: data.phone || '',                     // 新增：為了合約顯示
-          identityNumber: data.identityNumber || '',   // 新增：為了合約顯示
+          phone: data.phone || '',
+          identityNumber: data.identityNumber || '',
           amountDue: data.monthlyRent || 0, 
           deposit: data.deposit || 0,
           dueDate: "本月 1 日", 
@@ -70,8 +87,9 @@ function DashboardContent() {
           roomInfo: `租客編號: ${data.contractId || docSnap.id.slice(-6).toUpperCase()}`,
           contractId: data.contractId || '',
           propertyId: data.propertyId || '',   
-          propertyName: data.propertyName || '', 
+          propertyName: resolvedPropName,  // 已翻譯的盤源名稱
           roomId: data.roomId || data.room || '', 
+          roomName: resolvedRoomName,      // 已翻譯的房間名稱 (解決亂碼問題)
           leaseStart: data.leaseStart,
           leaseEnd: data.leaseEnd,
           utilities: data.utilities || []
@@ -212,6 +230,7 @@ function DashboardContent() {
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
 
+      {/* Stripe 處理中遮罩 */}
       {isVerifying && (
         <div className="fixed inset-0 bg-slate-900/80 z-[200] flex flex-col items-center justify-center text-white backdrop-blur-sm animate-in fade-in">
           <Loader2 size={48} className="animate-spin text-emerald-400 mb-4" />
@@ -220,6 +239,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 頂部導航 */}
       <div className="bg-white px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
         <div className="font-black text-lg text-slate-800 tracking-tight">佳寓 <span className="text-orange-500 text-sm">PrimeLiving</span></div>
         <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><LogOut size={20} /></button>
@@ -231,6 +251,7 @@ function DashboardContent() {
           <button className="relative p-3 bg-white rounded-2xl shadow-sm border border-slate-100"><Bell size={20} className="text-slate-600" /><span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full border-2 border-white"></span></button>
         </div>
 
+        {/* 帳單卡片 */}
         <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-2xl shadow-slate-900/20 relative overflow-hidden">
           <div className="absolute top-0 right-0 w-40 h-40 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
           <div className="flex justify-between items-start mb-8 relative z-10">
@@ -254,11 +275,13 @@ function DashboardContent() {
           </button>
         </div>
 
+        {/* 雙拼卡片 */}
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">剩餘租期</p><p className="text-2xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-xs font-bold text-slate-500">天</span></p></div>
           <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center overflow-hidden"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">我的帳戶</p><p className="text-sm font-black text-slate-800 truncate">{tenantData.contractId || 'N/A'}</p></div>
         </div>
 
+        {/* 服務列表 */}
         <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col divide-y divide-slate-50">
           <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
             <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${hasSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}><FileSignature size={20} className={hasSigned ? 'text-emerald-500' : 'text-purple-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!hasSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${hasSigned ? 'text-slate-400' : 'text-red-500'}`}>{hasSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
@@ -306,10 +329,11 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 2. 合約 Modal (更新為與後台大系統統一的專業版型) */}
+      {/* 🎯 2. 合約 Modal (與後台完全統一 100% 相同版型) */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full sm:max-w-[800px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            
             <div className="flex justify-between items-center p-6 bg-white rounded-t-[2.5rem] sm:rounded-t-3xl border-b border-slate-200 flex-none relative">
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
               <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約</h3>
@@ -318,13 +342,13 @@ function DashboardContent() {
             
             <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
               
-              {/* PDF A4 預覽區塊 (與後台完全一致) */}
+              {/* PDF A4 預覽區塊 (對齊大系統，加入破圖防護) */}
               <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar">
                 <div ref={contractRef} className="w-[210mm] min-h-[297mm] bg-white px-[20mm] py-[15mm] text-slate-900 font-sans relative shadow-lg origin-top scale-[0.5] sm:scale-[0.6] md:scale-75 lg:scale-90">
                   
-                  {/* 公司抬頭 Letterhead */}
                   <div className="flex flex-col items-center mb-5 border-b-[3px] border-slate-800 pb-4">
-                    <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" />
+                    {/* 加入 onError 防破圖 */}
+                    <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
                     <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">
                       地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com
                     </div>
@@ -354,7 +378,8 @@ function DashboardContent() {
                     <table className="w-full text-sm border-collapse border border-slate-300">
                       <tbody>
                         <tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-2 font-bold">{tenantData.propertyName}</td></tr>
-                        <tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold">Room No.</td><td className="border border-slate-300 p-2 font-bold text-blue-700">{tenantData.roomId}</td><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-2 font-mono text-xs">{tenantData.leaseStart} to {tenantData.leaseEnd}</td></tr>
+                        {/* 👇 這裡就是修正亂碼的地方：改用 tenantData.roomName 👇 */}
+                        <tr><td className="border border-slate-300 p-2 bg-slate-50 font-bold">Room No.</td><td className="border border-slate-300 p-2 font-bold text-blue-700">{tenantData.roomName || tenantData.roomId}</td><td className="border border-slate-300 p-2 bg-slate-50 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-2 font-mono text-xs">{tenantData.leaseStart} to {tenantData.leaseEnd}</td></tr>
                       </tbody>
                     </table>
                   </div>
@@ -392,7 +417,7 @@ function DashboardContent() {
                       <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
                       <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
                       {hasSigned && (
-                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20">
+                        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 bg-white/80 py-2">
                           <p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{signature}</p>
                           <p className="text-[9px] text-slate-400 font-mono mt-1">Signed on {signDate}</p>
                         </div>
@@ -402,7 +427,7 @@ function DashboardContent() {
                 </div>
               </div>
 
-              {/* 右側操作面板 (手機版在下方) */}
+              {/* 右側操作面板 */}
               <div className="w-full md:w-[320px] bg-white border-l border-slate-200 p-6 flex flex-col justify-center">
                 {hasSigned ? (
                   <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
