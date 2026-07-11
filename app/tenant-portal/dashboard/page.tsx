@@ -23,22 +23,26 @@ function DashboardContent() {
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
-  // ★ 補回遺漏的 Stripe 支付驗證狀態
+  // 支付與驗證狀態
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'stripe'>('bank');
   const [isUploading, setIsUploading] = useState(false);
   const [isStripeLoading, setIsStripeLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
+  // 電子合約狀態
   const [signature, setSignature] = useState('');
   const [isSigning, setIsSigning] = useState(false);
   const [isSignDownloading, setIsSignDownloading] = useState(false);
   const contractRef = useRef<HTMLDivElement>(null);
 
+  // 報修單狀態
   const [ticketCategory, setTicketCategory] = useState('冷氣水電');
   const [ticketDesc, setTicketDesc] = useState('');
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPhotoUploaded, setIsPhotoUploaded] = useState(false);
 
+  // KYC 檔案狀態 (★ 補回遺漏的 isProfileComplete)
+  const [isProfileComplete, setIsProfileComplete] = useState(false);
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
@@ -48,7 +52,6 @@ function DashboardContent() {
     router.push('/tenant-portal'); 
   };
 
-  // 1. 驗證登入與即時連動 (租客資料 + 真實單據庫)
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
     if (!sessionStr) { router.push('/tenant-portal'); return; }
@@ -72,10 +75,20 @@ function DashboardContent() {
           isContractSigned: data.isContractSigned || !!data.signature,
           signature: data.signature || '',
           signedAt: data.signedAt?.toDate ? data.signedAt.toDate().toLocaleString() : '',
-          isProfileComplete: !!(data.emergencyContact?.name && (data.idUploaded || data.isIdVerified))
+          propertyName: data.propertyName || '',
+          roomId: data.roomId || '',
+          roomName: data.roomName || data.roomId || '',
+          leaseStart: data.leaseStart || '',
+          leaseEnd: data.leaseEnd || '',
+          deposit: data.deposit || 0,
+          phone: data.phone || '',
+          identityNumber: data.identityNumber || ''
         });
+
+        // 檢查檔案是否齊全
         if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
         if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
+        if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
       }
       setLoading(false);
     });
@@ -91,7 +104,6 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); };
   }, [router]);
 
-  // ★ 補回遺漏的 Stripe 支付回調處理函數
   const verifyAndSettlePayment = async (sessionId: string) => {
     setIsVerifying(true);
     try {
@@ -117,7 +129,6 @@ function DashboardContent() {
     }
   };
 
-  // 監聽 URL 參數以觸發 Stripe 驗證
   useEffect(() => {
     const sessionId = searchParams?.get('session_id');
     const success = searchParams?.get('success');
@@ -214,7 +225,9 @@ function DashboardContent() {
       await updateDoc(doc(db, 'tenants', tenantData.id), {
         emergencyContact: emergencyContact, idUploaded: true, isIdVerified: true, kycUpdatedAt: serverTimestamp()
       });
-      alert("✅ 檔案已完善。"); setActiveModal('none');
+      setIsProfileComplete(true);
+      alert("✅ 檔案已完善。"); 
+      setActiveModal('none');
     } catch (error) { console.error(error); alert("儲存失敗。"); } 
     finally { setIsSavingProfile(false); }
   };
@@ -390,9 +403,6 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* ==================== 模態框區塊 (Modals) ==================== */}
-
-      {/* 1. 支付 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -418,11 +428,9 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 2. 合約 Modal */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full sm:max-w-[800px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            
             <div className="flex justify-between items-center p-6 bg-white rounded-t-[2.5rem] sm:rounded-t-3xl border-b border-slate-200 flex-none relative">
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
               <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約</h3>
@@ -472,7 +480,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 3. KYC 檔案認證 Modal */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -493,7 +500,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 4. 水電明細 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -530,7 +536,22 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 5. 獨立單據 A4 預覽 Modal */}
+      {activeModal === 'ticket' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <form onSubmit={handleSubmitTicket} className="space-y-6">
+                <div><p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p><div className="grid grid-cols-2 gap-3">{['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (<button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>))}</div></div>
+                <div><p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p><textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-semibold" /></div>
+                <div><p className="text-xs font-black text-slate-800 mb-3 flex justify-between"><span>上傳照片 (選填)</span><span className="text-slate-400 font-normal">幫助師傅更快判斷</span></p><div className="relative"><input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已暫存！"); } }} /><label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>{isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}</label></div></div>
+                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">{isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 送出中...</> : '確認送出報修'}</button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
       {activeModal === 'view_doc' && viewingDoc && (
         <div className="fixed inset-0 bg-slate-900/80 z-[110] flex flex-col items-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full flex justify-end p-4 md:p-0 md:mb-4 flex-none max-w-[800px]">
