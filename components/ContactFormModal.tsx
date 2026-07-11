@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { X, Send, Loader2, CheckCircle } from 'lucide-react';
+import { X, Send, Loader2, CheckCircle, AlertCircle } from 'lucide-react';
 
 interface ContactFormModalProps {
   isOpen: boolean;
@@ -24,38 +24,64 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
     contactMethod: '',
     requirements: '',
     referrer: '',
-    botTrap: '' // ★ 防禦機制 1：蜜罐欄位 (Honeypot)
+    honeypot: '' // ★ 防禦機制：蜜罐欄位
   });
   
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [errorMsg, setErrorMsg] = useState(''); // ★ 新增：前端錯誤提示狀態
 
   if (!isOpen) return null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return; 
+    setErrorMsg('');
 
-    // ★ 防禦機制 1：如果蜜罐欄位被填寫，代表是機器人，直接中斷但假裝成功
-    if (formData.botTrap) {
-      console.warn("Spam detected and blocked silently.");
-      onClose();
+    // ==========================================
+    // 🛡️ 1. 資安防護：蜜罐陷阱 (Honeypot)
+    // ==========================================
+    if (formData.honeypot) {
+      console.warn("Spam detected.");
+      onClose(); // 機器人填了隱藏欄位，直接關閉不理會
       return;
     }
 
-    // ★ 防禦機制 2：頻率限制 (Cooldown)，60秒內不能重複送出
-    const lastSubmitTime = localStorage.getItem('lastInquirySubmit');
-    if (lastSubmitTime && Date.now() - parseInt(lastSubmitTime) < 60000) {
-      alert("⚠️ 您提交得太頻繁了，請稍後再試！");
+    // ==========================================
+    // 🛡️ 2. 資安防護：防連點冷卻機制 (Cooldown)
+    // ==========================================
+    const lastSubmit = localStorage.getItem('pm_last_inquiry');
+    if (lastSubmit && Date.now() - parseInt(lastSubmit) < 60000) {
+      setErrorMsg("⚠️ 您提交得太頻繁了，請等待一分鐘後再試。");
       return;
     }
 
+    // ==========================================
+    // 🛡️ 3. 資料品質自檢 (Validation)
+    // ==========================================
+    // 電話號碼檢查 (最少 8 位數字)
+    const digitsOnly = formData.phone.replace(/\D/g, '');
+    if (digitsOnly.length < 8) {
+      setErrorMsg("❌ 電話號碼格式錯誤，請至少包含 8 位數字。");
+      return;
+    }
+
+    // Email 或微信格式基本檢查
+    if (formData.contactMethod.length < 5) {
+      setErrorMsg("❌ 請輸入正確的微信號或 Email (過短)。");
+      return;
+    }
+    if (formData.contactMethod.includes('@') && !formData.contactMethod.includes('.')) {
+      setErrorMsg("❌ Email 格式似乎不正確，請檢查是否有漏打後綴 (如 .com)。");
+      return;
+    }
+
+    // 驗證通過，開始送出
     setIsSubmitting(true);
 
     try {
       const finalBudget = formData.budget === 'custom' ? formData.customBudget : formData.budget;
-      // 移除 botTrap 不存入資料庫
-      const { botTrap, ...dataToSave } = { ...formData, budget: finalBudget };
+      const { honeypot, ...dataToSave } = { ...formData, budget: finalBudget };
 
       const docRef = await addDoc(collection(db, 'inquiries'), {
         ...dataToSave,
@@ -70,26 +96,26 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
       });
 
       // 紀錄最後送出時間
-      localStorage.setItem('lastInquirySubmit', Date.now().toString());
+      localStorage.setItem('pm_last_inquiry', Date.now().toString());
 
       setIsSuccess(true);
       setTimeout(() => {
         setIsSuccess(false);
         onClose();
-        setFormData({ name: '', gender: '未填寫', school: '', degree: '碩士 (Master)', duration: '12個月 (一年死約)', roomType: '單人房 (Single)', budget: '6000-9000', customBudget: '', phone: '', contactMethod: '', requirements: '', referrer: '', botTrap: '' });
+        setFormData({ name: '', gender: '未填寫', school: '', degree: '碩士 (Master)', duration: '12個月 (一年死約)', roomType: '單人房 (Single)', budget: '6000-9000', customBudget: '', phone: '', contactMethod: '', requirements: '', referrer: '', honeypot: '' });
       }, 3000);
     } catch (error) {
       console.error("提交失敗:", error);
-      alert("抱歉，系統發生錯誤，請稍後再試。");
+      setErrorMsg("伺服器連線發生錯誤，請稍後再試。");
     } finally {
       setIsSubmitting(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-[100] flex justify-center items-center bg-black/60 backdrop-blur-sm p-4 sm:p-6">
-      {/* ★ UI 修復：將 Modal 設定為 max-h-[95vh] 並 flex-col，確保表單主體可在內部獨立滾動 */}
-      <form onSubmit={handleSubmit} className="bg-white rounded-2xl w-full max-w-lg max-h-[95vh] flex flex-col shadow-2xl animate-in zoom-in-95 overflow-hidden">
+    // ★ 設定 z-[9999] 確保永遠在最上層
+    <div className="fixed inset-0 z-[9999] flex justify-center items-center bg-black/60 backdrop-blur-sm p-4 sm:p-6">
+      <form onSubmit={handleSubmit} className="bg-white rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl animate-in zoom-in-95 overflow-hidden">
         
         {/* 固定頭部 */}
         <div className="bg-emerald-500 p-4 flex justify-between items-center text-white shrink-0">
@@ -105,20 +131,20 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
           </div>
         ) : (
           <>
-            {/* 滾動內容區 */}
+            {/* ★ 前端錯誤提示區塊 */}
+            {errorMsg && (
+              <div className="bg-red-50 text-red-600 px-4 py-3 text-sm font-bold flex items-center shrink-0 border-b border-red-100">
+                <AlertCircle size={16} className="mr-2 shrink-0" /> {errorMsg}
+              </div>
+            )}
+
+            {/* 內部滾動內容區 */}
             <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1">
               
-              {/* ★ 隱藏的蜜罐欄位，一般訪客看不見 */}
-              <input 
-                type="text" 
-                name="botTrap" 
-                tabIndex={-1} 
-                autoComplete="off"
-                value={formData.botTrap}
-                onChange={e => setFormData({...formData, botTrap: e.target.value})}
-                className="opacity-0 absolute -left-[9999px] top-0" 
-                aria-hidden="true" 
-              />
+              {/* 🛡️ 隱藏的蜜罐欄位 (不可視，防機器人) */}
+              <div className="opacity-0 absolute -left-[9999px] top-0" aria-hidden="true">
+                <input type="text" name="honeypot" tabIndex={-1} autoComplete="off" value={formData.honeypot} onChange={e => setFormData({...formData, honeypot: e.target.value})} />
+              </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -168,12 +194,12 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
                     <option value="6000-9000">6,000 - 9,000</option><option value="10000-15000">10,000 - 15,000</option><option value="15000以上">15,000 以上</option><option value="custom">自訂填寫...</option>
                   </select>
                 </div>
-                {formData.budget === 'custom' ? (
+                {formData.budget === 'custom' && (
                   <div>
                     <label className="block text-[11px] font-bold text-emerald-600 mb-1">請輸入預算</label>
                     <input required value={formData.customBudget} onChange={e => setFormData({...formData, customBudget: e.target.value})} className="w-full p-2 border border-emerald-300 rounded-lg text-sm outline-none bg-emerald-50" placeholder="例如: 8500" />
                   </div>
-                ) : <div/>}
+                )}
               </div>
 
               <hr className="border-slate-100 my-2" />
@@ -181,7 +207,7 @@ export default function ContactFormModal({ isOpen, onClose }: ContactFormModalPr
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">聯絡電話 *</label>
-                  <input required value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:border-emerald-500 bg-slate-50 font-mono" placeholder="請包含區號" />
+                  <input required type="tel" value={formData.phone} onChange={e => setFormData({...formData, phone: e.target.value})} className="w-full p-2 border rounded-lg text-sm outline-none focus:border-emerald-500 bg-slate-50 font-mono" placeholder="請包含區號" />
                 </div>
                 <div>
                   <label className="block text-[11px] font-bold text-slate-500 mb-1">微信號 或 Email *</label>
