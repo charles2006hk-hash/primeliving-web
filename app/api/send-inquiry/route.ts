@@ -1,42 +1,43 @@
 import { NextResponse } from 'next/server';
 import { Resend } from 'resend';
 
-// ★ 加入這行：強制此 API 為動態路由，防止 Next.js 在 build 階段靜態預先渲染它
 export const dynamic = 'force-dynamic';
 
 export async function POST(request: Request) {
   try {
-    // ★ 修復核心：將實例化移入函式內部，並加入防呆機制
     if (!process.env.RESEND_API_KEY) {
-      console.error('Missing RESEND_API_KEY environment variable');
       return NextResponse.json({ error: 'Server configuration error' }, { status: 500 });
     }
     
     const resend = new Resend(process.env.RESEND_API_KEY);
-
     const data = await request.json();
-    const { school, enrollmentDate, requirements, phone, contactMethod } = data;
+    
+    // 展開新欄位
+    const { name, gender, school, degree, duration, roomType, budget, phone, contactMethod, requirements } = data;
 
     await resend.emails.send({
-      from: '系統通知 <onboarding@resend.dev>', // 正式上線請改為已驗證的網域
+      from: '系統通知 <onboarding@resend.dev>', // 正式上線記得改為您的網域
       to: 'info@primelivinghk.com',
-      subject: `🚨 新客戶諮詢：${school}`,
+      subject: `🚨 新客戶諮詢：${name || '未知客戶'} - ${school}`,
       html: `
         <h2>佳寓官網 - 新租房需求</h2>
-        <ul>
-          <li><strong>目標地點/學校：</strong> ${school}</li>
-          <li><strong>預計入住：</strong> ${enrollmentDate}</li>
-          <li><strong>聯絡電話：</strong> ${phone}</li>
-          <li><strong>微信/Email：</strong> ${contactMethod}</li>
-          <li><strong>特殊要求：</strong> ${requirements || '無'}</li>
-        </ul>
-        <p>請登入後台系統跟進此客戶。</p>
+        <table border="1" cellpadding="8" cellspacing="0" style="border-collapse: collapse; width: 100%; max-w: 600px;">
+          <tr><td width="30%"><strong>稱呼/性別</strong></td><td>${name} (${gender})</td></tr>
+          <tr><td><strong>學校/地點</strong></td><td>${school}</td></tr>
+          <tr><td><strong>身份</strong></td><td>${degree}</td></tr>
+          <tr><td><strong>期望房型</strong></td><td>${roomType}</td></tr>
+          <tr><td><strong>租期</strong></td><td>${duration}</td></tr>
+          <tr><td><strong>預算 (HKD)</strong></td><td>${budget}</td></tr>
+          <tr><td><strong>聯絡電話</strong></td><td>${phone}</td></tr>
+          <tr><td><strong>微信 / Email</strong></td><td>${contactMethod}</td></tr>
+          <tr><td><strong>備註</strong></td><td>${requirements || '無'}</td></tr>
+        </table>
+        <p style="margin-top:20px;">請登入大系統後台「客戶需求 CRM」進行跟進。</p>
       `
     });
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error('Email error:', error);
     return NextResponse.json({ error: 'Failed to send email' }, { status: 500 });
   }
 }
