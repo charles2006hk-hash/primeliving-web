@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { collection, query, where, getDocs } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
 export async function POST(request: Request) {
@@ -12,15 +12,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '請輸入登入碼' }, { status: 400 });
     }
 
-    // 抓取所有履約中與即將入駐的租客
-    const activeQuery = query(collection(db, 'tenants'), where('status', 'in', ['Active', 'Pending']));
-    const snap = await getDocs(activeQuery);
+    // ★ 優化：移除 status 篩選，直接撈取全量租客進行動態比對，防止格式不匹配或同步延遲
+    const tenantsRef = collection(db, 'tenants');
+    const snap = await getDocs(tenantsRef);
 
     // 在伺服器端執行防錯智能比對
     const matchedTenant = snap.docs.find(doc => {
       const data = doc.data();
       
-      // ★ 核心防錯：使用 String() 強制轉型，避免數字型別導致字串函數崩潰
+      // 強制轉型為字串並清洗
       const name = String(data.name || '').replace(/\s+/g, '').toLowerCase();
       const nameLast4 = name.slice(-4);
       
@@ -35,10 +35,10 @@ export async function POST(request: Request) {
 
       // 建立多重容錯合法登入碼池
       const validCodes = [];
-      if (name && idLast4) validCodes.push(name + idLast4);             // 呂嫣然4321
-      if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   // (若為英文名適用)
-      if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         // 123456784321
-      if (name && phone4) validCodes.push(name + phone4);               // 呂嫣然5678 (備用)
+      if (name && idLast4) validCodes.push(name + idLast4);             // 姓名 + 證件後4碼
+      if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   // 姓名後4字 + 證件後4碼
+      if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         // 手機 + 證件後4碼
+      if (name && phone4) validCodes.push(name + phone4);               // 姓名 + 手機後4碼 (備用)
       if (contractId) validCodes.push(contractId);                      // 系統編號
 
       return validCodes.includes(cleanInput);
