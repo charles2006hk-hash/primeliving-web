@@ -1,121 +1,151 @@
 'use client';
 
-import React, { useState } from 'react';
-import { Smartphone, Hash, ArrowRight, ShieldCheck, Lock, Eye } from 'lucide-react';
-import { collection, query, where, getDocs } from 'firebase/firestore'; 
+import React, { useState, useEffect } from 'react';
+import { collection, query, where, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
+import { Home, KeyRound, Loader2, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
-import Link from 'next/link'; // ★ 新增 Link
 
-export default function TenantLoginPage() {
-  const [phone, setPhone] = useState('');
-  const [contractId, setContractId] = useState('');
-  const [loading, setLoading] = useState(false);
+export default function TenantPortalLogin() {
   const router = useRouter();
+  const [accessCode, setAccessCode] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
+
+  // 檢查是否已經登入過 (LocalStorage Cache)
+  useEffect(() => {
+    const cachedTenant = localStorage.getItem('pm_tenant_session');
+    if (cachedTenant) {
+      router.push('/tenant-portal/dashboard'); 
+    }
+  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    setLoading(true);
-    
-    try {
-      const q = query(
-        collection(db, 'tenants'),
-        where('phone', '==', phone), 
-        where('name', '==', contractId) 
-      );
-      
-      const querySnapshot = await getDocs(q);
+    setErrorMsg('');
+    setIsLoading(true);
 
-      if (!querySnapshot.empty) {
-        const tenantDoc = querySnapshot.docs[0];
-        const tenantData = tenantDoc.data();
+    try {
+      // 1. 清洗使用者輸入：移除所有空格、轉小寫
+      const cleanInput = accessCode.replace(/\s+/g, '').toLowerCase();
+      if (!cleanInput) throw new Error('請輸入登入碼');
+
+      // 2. 抓取所有履約中與即將入駐的租客
+      const activeQuery = query(collection(db, 'tenants'), where('status', 'in', ['Active', 'Pending']));
+      const snap = await getDocs(activeQuery);
+      
+      // 3. 智能多重匹配邏輯 (Smart Match)
+      const matchedTenant = snap.docs.find(doc => {
+        const data = doc.data();
         
-        localStorage.setItem('tenantId', tenantDoc.id);
-        localStorage.setItem('tenantName', tenantData.name);
-        
+        // 提取並清洗資料庫中的各項欄位
+        const name = (data.name || '').replace(/\s+/g, '').toLowerCase();
+        const nameLast4 = name.slice(-4); // 英文名字的最後4個字母
+        const idLast4 = (data.identityNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase().slice(-4);
+        const phone = (data.phone || '').replace(/\D/g, '');
+        const phone8 = phone.slice(-8); // 取最後8碼電話
+        const phone4 = phone.slice(-4); // 取最後4碼電話
+        const contractId = (data.contractId || '').replace(/\s+/g, '').toLowerCase();
+
+        // 建立該租客所有允許的魔法登入碼組合
+        const validCodes = [];
+        if (name && idLast4) validCodes.push(name + idLast4);             // 姓名 + 證件後4碼
+        if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   // 姓名後4字母 + 證件後4碼
+        if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         // 手機8碼 + 證件後4碼
+        if (name && phone4) validCodes.push(name + phone4);               // 姓名 + 手機後4碼 (備用)
+        if (contractId) validCodes.push(contractId);                      // 系統合約編號
+
+        // 檢查使用者輸入是否命中其中任何一種
+        return validCodes.includes(cleanInput);
+      });
+
+      // 4. 登入結果處理
+      if (matchedTenant) {
+        const tenantData = { id: matchedTenant.id, ...matchedTenant.data() };
+        localStorage.setItem('pm_tenant_session', JSON.stringify(tenantData));
         router.push('/tenant-portal/dashboard');
       } else {
-        alert("❌ 驗證失敗：找不到對應的租客資料，請確認手機與姓名是否正確。");
+        setErrorMsg('登入碼無效。請確認您的姓名與證件後4碼是否正確。');
       }
-    } catch (error) {
-      console.error("Login Error:", error);
-      alert("系統連線錯誤，請稍後再試");
+
+    } catch (error: any) {
+      console.error(error);
+      setErrorMsg(error.message || '系統連線發生錯誤，請稍後再試。');
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
 
   return (
-    <div className="min-h-[80vh] flex items-center justify-center px-4 pt-20 pb-12 bg-slate-50">
-      <div className="max-w-md w-full">
-        {/* 頂部引導 */}
-        <div className="text-center mb-10">
-          <div className="w-16 h-16 bg-orange-500 text-white rounded-3xl flex items-center justify-center mx-auto mb-6 shadow-lg shadow-orange-200">
-            <Lock size={30} />
+    <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4 selection:bg-orange-200">
+      <div className="bg-white w-full max-w-md rounded-[2rem] shadow-xl overflow-hidden animate-in zoom-in-95 duration-300 border border-slate-100">
+        
+        {/* Header */}
+        <div className="bg-slate-900 p-10 text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-orange-500/20 blur-[50px] rounded-full" />
+          <div className="absolute bottom-0 left-0 w-24 h-24 bg-blue-500/20 blur-[40px] rounded-full" />
+          <div className="w-16 h-16 bg-gradient-to-br from-orange-400 to-orange-600 rounded-2xl mx-auto flex items-center justify-center mb-6 shadow-lg shadow-orange-500/30 relative z-10">
+            <Home size={32} className="text-white" />
           </div>
-          <h1 className="text-3xl font-black text-slate-900 mb-2">租客專屬入口</h1>
-          <p className="text-slate-500 font-medium">輸入您的資訊以管理租約與帳單</p>
+          <h1 className="text-2xl font-black text-white relative z-10 tracking-tight">佳寓租客服務入口</h1>
+          <p className="text-slate-400 text-sm mt-2 relative z-10 font-medium">Prime Living Tenant Portal</p>
         </div>
 
-        {/* 登入表單 */}
-        <form onSubmit={handleLogin} className="space-y-4">
-          <div className="bg-white p-2 rounded-3xl shadow-xl shadow-slate-200/50 border border-slate-100">
-            <div className="flex items-center px-4 py-4 border-b border-slate-50">
-              <Smartphone size={20} className="text-slate-400 mr-4" />
-              <input 
-                type="tel" 
-                placeholder="手機號碼 (需與租約一致)" 
-                className="flex-1 outline-none text-slate-800 font-bold placeholder:text-slate-300"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                required
-              />
-            </div>
-            <div className="flex items-center px-4 py-4">
-              <Hash size={20} className="text-slate-400 mr-4" />
-              <input 
-                type="text" 
-                placeholder="姓名 (與合約一致)" 
-                className="flex-1 outline-none text-slate-800 font-bold placeholder:text-slate-300"
-                value={contractId}
-                onChange={(e) => setContractId(e.target.value)}
-                required
-              />
+        {/* Form */}
+        <div className="p-8">
+          
+          <div className="mb-6 bg-orange-50/50 border border-orange-100 rounded-2xl p-4 flex items-start gap-3">
+            <Sparkles className="text-orange-500 shrink-0 mt-0.5" size={18} />
+            <div className="text-xs font-bold text-slate-600 leading-relaxed">
+              <span className="text-orange-600 font-black">極簡登入：</span><br/>
+              請直接輸入您的 <span className="text-slate-800 bg-white px-1.5 py-0.5 rounded shadow-sm border border-slate-200">姓名</span> 加上 <span className="text-slate-800 bg-white px-1.5 py-0.5 rounded shadow-sm border border-slate-200">證件最後4碼</span><br/>
+              <span className="text-[10px] text-slate-400 font-medium mt-1 inline-block">例如：陳大文123A / 呂嫣然5678</span>
             </div>
           </div>
 
-          <button 
-            type="submit"
-            disabled={loading}
-            className="w-full py-5 bg-slate-900 text-white rounded-3xl font-black text-lg flex items-center justify-center gap-2 hover:bg-orange-600 transition-all active:scale-95 shadow-xl disabled:opacity-50"
-          >
-            {loading ? '驗證中...' : '確認登入'} <ArrowRight size={20}/>
-          </button>
-        </form>
+          {errorMsg && (
+            <div className="mb-6 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-start gap-2 text-red-600 text-xs font-bold animate-in slide-in-from-top-2">
+              <AlertCircle size={16} className="shrink-0 mt-0.5" />
+              <p>{errorMsg}</p>
+            </div>
+          )}
 
-        {/* ★ 新增：Demo 體驗模式入口 */}
-        <Link 
-          href="/tenant-portal/demo" 
-          className="mt-4 w-full py-4 bg-white text-slate-600 rounded-3xl font-bold text-md flex items-center justify-center gap-2 hover:bg-slate-100 transition-all border border-slate-200 shadow-sm"
-        >
-          <Eye size={18}/> 訪客體驗 Demo 帳戶
-        </Link>
+          <form onSubmit={handleLogin} className="space-y-6">
+            
+            {/* 唯一帳號欄位 */}
+            <div>
+              <label className="block text-xs font-bold text-slate-500 mb-2 ml-1">
+                專屬登入碼 (Access Code)
+              </label>
+              <div className="relative group">
+                <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-orange-500 transition-colors">
+                  <KeyRound size={20} />
+                </div>
+                <input 
+                  type="text"
+                  required
+                  value={accessCode}
+                  onChange={(e) => setAccessCode(e.target.value)}
+                  placeholder="姓名 + 證件後4碼"
+                  className="w-full bg-slate-50 border border-slate-200 pl-12 pr-4 py-4 rounded-2xl text-base font-black text-slate-800 outline-none focus:bg-white focus:border-orange-500 focus:ring-4 focus:ring-orange-500/10 transition-all placeholder:font-medium placeholder:text-slate-400"
+                />
+              </div>
+            </div>
 
-        {/* 底部保障提示 */}
-        <div className="mt-12 grid grid-cols-2 gap-4">
-           <div className="flex flex-col items-center text-center p-4">
-              <ShieldCheck size={20} className="text-emerald-500 mb-2"/>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">數據加密傳輸</p>
-           </div>
-           <div className="flex flex-col items-center text-center p-4">
-              <Smartphone size={20} className="text-blue-500 mb-2"/>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">適配手機操作</p>
-           </div>
+            <button 
+              type="submit" 
+              disabled={isLoading || !accessCode}
+              className="w-full bg-slate-900 hover:bg-black text-white py-4 rounded-2xl font-black text-sm transition-all active:scale-[0.98] disabled:opacity-50 flex items-center justify-center shadow-lg shadow-slate-900/20"
+            >
+              {isLoading ? <Loader2 size={18} className="animate-spin" /> : <><span className="mr-2">進入我的專屬空間</span> <ArrowRight size={16}/></>}
+            </button>
+            
+          </form>
+          
+          <div className="mt-8 text-center">
+            <p className="text-[10px] text-slate-400 font-medium">遇到登入問題？請聯繫佳寓專屬管家或微信客服為您核對註冊資訊。</p>
+          </div>
         </div>
-
-        <p className="text-center text-[10px] text-slate-400 mt-8 font-medium">
-          若忘記租約資訊，請聯絡您的專屬管家或點擊下方客服諮詢。
-        </p>
       </div>
     </div>
   );
