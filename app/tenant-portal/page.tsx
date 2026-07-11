@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Home, KeyRound, Loader2, ArrowRight, AlertCircle, Sparkles } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
@@ -9,14 +9,6 @@ export default function TenantPortalLogin() {
   const [accessCode, setAccessCode] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-
-  // 檢查是否已經登入過
-  useEffect(() => {
-    const cachedTenant = localStorage.getItem('pm_tenant_session');
-    if (cachedTenant) {
-      router.push('/tenant-portal/dashboard'); 
-    }
-  }, [router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,7 +31,20 @@ export default function TenantPortalLogin() {
         throw new Error(data.error || '登入失敗');
       }
 
+      // ==========================================
+      // 🎯 核心修復：廣播式寫入快取 (Multi-Key Broadcast)
+      // 清除舊快取，並把所有大系統可能讀取的欄位型態全部填滿
+      // ==========================================
+      localStorage.clear(); // 先清空所有可能干擾的舊測試資料
+      
       localStorage.setItem('pm_tenant_session', JSON.stringify(data));
+      localStorage.setItem('tenant', JSON.stringify(data));
+      localStorage.setItem('tenantId', data.id || '');
+      localStorage.setItem('tenantName', data.name || '');
+      localStorage.setItem('tenantPhone', data.phone || '');
+      localStorage.setItem('contractId', data.contractId || '');
+
+      // 成功後跳轉
       router.push('/tenant-portal/dashboard');
 
     } catch (error: any) {
@@ -68,7 +73,6 @@ export default function TenantPortalLogin() {
         {/* Form */}
         <div className="p-8">
           
-          {/* ★ 修改：更改範例文字，使用大眾化化名陳小明，絕不洩漏真實住客隱私 */}
           <div className="mb-6 bg-orange-50/50 border border-orange-100 rounded-2xl p-4 flex items-start gap-3">
             <Sparkles className="text-orange-500 shrink-0 mt-0.5" size={18} />
             <div className="text-xs font-bold text-slate-600 leading-relaxed">
