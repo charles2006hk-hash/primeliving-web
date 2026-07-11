@@ -1,10 +1,11 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Smartphone, Hash, ArrowRight, ShieldCheck, Lock } from 'lucide-react';
+import { Smartphone, Hash, ArrowRight, ShieldCheck, Lock, Eye } from 'lucide-react';
 import { collection, query, where, getDocs } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link'; // ★ 新增 Link
 
 export default function TenantLoginPage() {
   const [phone, setPhone] = useState('');
@@ -32,7 +33,6 @@ export default function TenantLoginPage() {
         localStorage.setItem('tenantId', tenantDoc.id);
         localStorage.setItem('tenantName', tenantData.name);
         
-        // 驗證成功，正式跳轉到 Dashboard
         router.push('/tenant-portal/dashboard');
       } else {
         alert("❌ 驗證失敗：找不到對應的租客資料，請確認手機與姓名是否正確。");
@@ -92,6 +92,14 @@ export default function TenantLoginPage() {
             {loading ? '驗證中...' : '確認登入'} <ArrowRight size={20}/>
           </button>
         </form>
+
+        {/* ★ 新增：Demo 體驗模式入口 */}
+        <Link 
+          href="/tenant-portal/demo" 
+          className="mt-4 w-full py-4 bg-white text-slate-600 rounded-3xl font-bold text-md flex items-center justify-center gap-2 hover:bg-slate-100 transition-all border border-slate-200 shadow-sm"
+        >
+          <Eye size={18}/> 訪客體驗 Demo 帳戶
+        </Link>
 
         {/* 底部保障提示 */}
         <div className="mt-12 grid grid-cols-2 gap-4">
