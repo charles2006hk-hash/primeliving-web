@@ -348,7 +348,9 @@ function DashboardContent() {
       )}
 
       <div className="bg-white px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
-        <div className="font-black text-lg text-slate-800 tracking-tight">佳寓 <span className="text-orange-500 text-sm">PrimeLiving</span></div>
+        <Link href="/" className="flex items-center">
+          <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
+        </Link>
         <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><LogOut size={20} /></button>
       </div>
 
