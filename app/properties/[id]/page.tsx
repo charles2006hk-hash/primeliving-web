@@ -1,101 +1,103 @@
-import React from 'react';
+'use client'; // ★ 因為要使用 useState 控制 Modal，必須加上 'use client'
+
+import React, { useState, useEffect } from 'react';
 import { doc, getDoc, collection, getDocs } from 'firebase/firestore';
-import { db } from '../../../lib/firebase'; 
+import { db } from '@/lib/firebase'; 
 import { 
   MapPin, BedDouble, Wind, ShieldCheck, 
-  ChevronLeft, Share2, Heart, CheckCircle2, 
-  Navigation, School, TrainFront, MessageCircle, Phone, Sparkles, Wifi,
-  Train, Store, Sun, DollarSign 
+  CheckCircle2, Navigation, School, TrainFront, MessageCircle, PhoneCall, Sparkles, Wifi,
+  Train, Store, Sun, DollarSign, Loader2
 } from 'lucide-react';
-import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
-// ★ 引入剛剛做好的智能對話按鈕模組
-import PropertyContactButtons from '../../../components/PropertyContactButtons'; 
+// ★ 直接引入剛做好的智能對話表單
+import ContactFormModal from '@/components/ContactFormModal'; 
 
-// ★ 反向代理 URL 轉換器 (讓內地可以看見 Firebase 圖片)
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
-  // 避免重複包裝
   if (url.startsWith('/api/image')) return url;
-  // 將原汁原味的 Firebase 網址，打包交給我們的 API
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
-// --- 抓取單個房間數據 ---
-async function getRoomDetail(id: string) {
-  try {
-    if (!db) return null;
-
-    const docRef = doc(db, 'rooms', id);
-    const snap = await getDoc(docRef);
-    if (!snap.exists()) return null;
-    
-    const data = snap.data();
-    
-    // 1. 抓取父級盤源名稱與詳細資訊
-    let propertyInfo = { name: '精選盤源', address: '' };
-    try {
-      if (data.propertyId) {
-        const propRef = doc(db, 'properties', data.propertyId);
-        const propSnap = await getDoc(propRef);
-        if (propSnap.exists()) {
-          propertyInfo.name = propSnap.data().name;
-          propertyInfo.address = propSnap.data().address;
-        }
-      }
-    } catch (e) { console.warn("無法抓取盤源資訊"); }
-
-    // 2. 從 media_library 抓取相片 (★ 加入房間專屬圖片判斷)
-    let roomImages: string[] = [];
-    try {
-      if (data.propertyId) {
-        const mediaSnap = await getDocs(collection(db, 'media_library'));
-        const allMedia = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
-        
-        // ★ 邏輯更新：如果房間有指派專屬圖片，優先顯示專屬圖片
-        if (data.images && data.images.length > 0) {
-          const assignedMedia = allMedia.filter(m => data.images.includes(m.id));
-          roomImages = assignedMedia.map(m => m.url);
-        } else {
-          // 如果沒有指派，退回顯示盤源所有的圖片
-          const linkedMedia = allMedia.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
-          const primary = linkedMedia.find(m => m.isPrimary);
-          const others = linkedMedia.filter(m => !m.isPrimary);
-          
-          if (primary) roomImages.push(primary.url);
-          others.forEach(img => roomImages.push(img.url));
-        }
-      }
-    } catch (e) { console.warn("無法抓取圖庫照片"); }
-    
-    return {
-      id: snap.id,
-      ...data,
-      propertyName: propertyInfo.name,
-      propertyAddress: propertyInfo.address,
-      images: roomImages
-    };
-  } catch (error) {
-    console.error("🔥 Firebase 抓取錯誤:", error);
-    return null;
-  }
-}
-
-export default async function PropertyDetailPage({ 
+export default function PropertyDetailPage({ 
   params 
 }: { 
   params: Promise<{ id: string }> 
 }) {
+  const [room, setRoom] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   
-  const resolvedParams = await params;
-  const room: any = await getRoomDetail(resolvedParams.id);
+  // ★ 控制聊天室 Modal 的狀態
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
-  if (!room) notFound();
+  useEffect(() => {
+    async function fetchData() {
+      try {
+        const resolvedParams = await params;
+        const docRef = doc(db, 'rooms', resolvedParams.id);
+        const snap = await getDoc(docRef);
+        if (!snap.exists()) {
+          notFound();
+          return;
+        }
+        
+        const data = snap.data();
+        let propertyInfo = { name: '精選盤源', address: '' };
+        try {
+          if (data.propertyId) {
+            const propRef = doc(db, 'properties', data.propertyId);
+            const propSnap = await getDoc(propRef);
+            if (propSnap.exists()) {
+              propertyInfo.name = propSnap.data().name;
+              propertyInfo.address = propSnap.data().address;
+            }
+          }
+        } catch (e) {}
+
+        let roomImages: string[] = [];
+        try {
+          if (data.propertyId) {
+            const mediaSnap = await getDocs(collection(db, 'media_library'));
+            const allMedia = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
+            
+            if (data.images && data.images.length > 0) {
+              const assignedMedia = allMedia.filter(m => data.images.includes(m.id));
+              roomImages = assignedMedia.map(m => m.url);
+            } else {
+              const linkedMedia = allMedia.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
+              const primary = linkedMedia.find(m => m.isPrimary);
+              const others = linkedMedia.filter(m => !m.isPrimary);
+              if (primary) roomImages.push(primary.url);
+              others.forEach(img => roomImages.push(img.url));
+            }
+          }
+        } catch (e) {}
+        
+        setRoom({
+          id: snap.id,
+          ...data,
+          propertyName: propertyInfo.name,
+          propertyAddress: propertyInfo.address,
+          images: roomImages
+        });
+      } catch (error) {
+        console.error(error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    fetchData();
+  }, [params]);
+
+  if (loading) {
+    return <div className="min-h-screen flex justify-center items-center"><Loader2 className="animate-spin text-orange-500" size={40}/></div>;
+  }
+
+  if (!room) return notFound();
 
   return (
     <div className="min-h-screen bg-white pb-24">
-      {/* 1. 相片牆 (Mobile 優化) */}
+      {/* 相片牆 */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-1 h-[350px] md:h-[550px] overflow-hidden bg-slate-100">
         <div className="relative group cursor-zoom-in">
           {room.images?.[0] ? (
@@ -123,7 +125,6 @@ export default async function PropertyDetailPage({
       </div>
 
       <div className="max-w-6xl mx-auto px-4 mt-8 grid grid-cols-1 lg:grid-cols-3 gap-12">
-        {/* 左側：詳細資訊 */}
         <div className="lg:col-span-2 space-y-10">
           <section>
             <div className="flex items-center gap-2 mb-4 text-orange-600 font-bold text-xs uppercase tracking-widest">
@@ -145,14 +146,10 @@ export default async function PropertyDetailPage({
               ))}
             </div>
 
-            {/* ========================================= */}
-            {/* ★ Prime Score 智能評分面板 ★ */}
-            {/* ========================================= */}
+            {/* Prime Score 面板 */}
             <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-8 text-white mb-10 shadow-xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/20 blur-[80px] -translate-y-20 translate-x-20 pointer-events-none" />
-              
               <div className="flex flex-col md:flex-row items-center gap-8 relative z-10">
-                
                 <div className="text-center md:text-left shrink-0 md:pr-8 md:border-r border-slate-700/50">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/20 text-orange-400 text-[10px] font-black uppercase tracking-widest mb-3 border border-orange-500/30">
                     <Sparkles size={14} /> Prime Score
@@ -165,7 +162,6 @@ export default async function PropertyDetailPage({
                     <CheckCircle2 size={14}/> 極力推薦房源
                   </p>
                 </div>
-
                 <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
                   {[
                     { icon: <Train size={16}/>, label: '通勤便捷度', score: room.scoreCommute || 4.9, desc: '步行 5 分鐘至港鐵' },
@@ -181,16 +177,12 @@ export default async function PropertyDetailPage({
                         <span className="text-sm font-black text-white">{item.score}</span>
                       </div>
                       <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                        <div 
-                          className="h-full bg-gradient-to-r from-orange-500 to-orange-400 rounded-full group-hover:opacity-80 transition-opacity" 
-                          style={{ width: `${(item.score / 5) * 100}%` }}
-                        />
+                        <div className="h-full bg-gradient-to-r from-orange-500 to-orange-400 rounded-full group-hover:opacity-80 transition-opacity" style={{ width: `${(item.score / 5) * 100}%` }}/>
                       </div>
                     </div>
                   ))}
                 </div>
               </div>
-
               <div className="mt-8 pt-6 border-t border-slate-700/50 relative z-10 bg-white/5 rounded-2xl p-5 border border-white/10 backdrop-blur-sm">
                  <div className="flex gap-4 items-start">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 shadow-lg shadow-orange-500/30">
@@ -207,7 +199,7 @@ export default async function PropertyDetailPage({
             </div>
           </section>
 
-          {/* 房間配備 */}
+          {/* 房間標配 */}
           <section className="bg-slate-50/50 p-8 rounded-[2.5rem] border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2">
                 <div className="w-1.5 h-6 bg-orange-500 rounded-full"/> 房間標配
@@ -257,7 +249,7 @@ export default async function PropertyDetailPage({
           </section>
         </div>
 
-        {/* 右側：側邊預約欄 (iPhone 上會自動排到下方) */}
+        {/* 右側預約欄 */}
         <div className="lg:col-span-1">
           <div className="sticky top-24 bg-white border border-slate-100 rounded-[3rem] p-8 shadow-2xl shadow-slate-200/50">
             <div className="mb-8">
@@ -275,8 +267,22 @@ export default async function PropertyDetailPage({
                </div>
             </div>
 
-            {/* ★ 核心修改：替換為全新的微信式對話按鈕，並傳遞完整的房間名稱給機器人 */}
-            <PropertyContactButtons propertyName={`${room.propertyName} - ${room.name}`} />
+            {/* ★ 雙按鈕直接綁定 isChatOpen 狀態 */}
+            <div className="space-y-3">
+              <button 
+                onClick={() => setIsChatOpen(true)}
+                className="w-full bg-[#00c250] hover:bg-[#00a846] text-white py-4 rounded-[2rem] font-black text-lg flex items-center justify-center gap-2 transition-all active:scale-95 shadow-xl shadow-green-500/20"
+              >
+                <MessageCircle size={22} /> 微信與線上諮詢
+              </button>
+              
+              <button 
+                onClick={() => setIsChatOpen(true)}
+                className="w-full bg-slate-900 hover:bg-slate-800 text-white py-4 rounded-[2rem] font-black text-lg flex items-center justify-center gap-2 transition-all active:scale-95 shadow-xl shadow-slate-900/20"
+              >
+                <PhoneCall size={20} /> 電話與專人預約
+              </button>
+            </div>
             
             <div className="mt-8 pt-6 border-t border-slate-100">
                 <div className="flex items-center gap-4 mb-4">
@@ -293,6 +299,13 @@ export default async function PropertyDetailPage({
           </div>
         </div>
       </div>
+
+      {/* ★ 在最外層渲染聊天室 Modal，並將房間名稱傳入 */}
+      <ContactFormModal 
+        isOpen={isChatOpen} 
+        onClose={() => setIsChatOpen(false)} 
+        propertyName={`${room.propertyName} - ${room.name}`} 
+      />
     </div>
   );
 }
