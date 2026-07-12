@@ -19,9 +19,12 @@ export default function Navbar() {
       <nav className="fixed top-0 w-full bg-white/95 backdrop-blur-sm z-[100] border-b border-slate-100 shadow-sm h-14 md:h-16 flex items-center">
         <div className="max-w-7xl mx-auto px-4 w-full flex items-center justify-between">
           
-          {/* ★ 已替換為公司 Logo */}
-          <Link href="/" className="flex items-center z-50">
-            <img src="/logo.png" alt="Prime Living" className="h-8 md:h-10 object-contain" />
+          {/* ★ Logo 與公司名稱並存 */}
+          <Link href="/" className="flex items-center gap-2 z-50 transition-transform active:scale-95">
+            <img src="/logo.png" alt="Prime Living Logo" className="h-8 object-contain" />
+            <span className="font-extrabold text-lg tracking-tight text-slate-900 hidden sm:block">
+              佳寓 <span className="text-orange-500 text-sm font-bold">PrimeLiving</span>
+            </span>
           </Link>
 
           <div className="hidden md:flex items-center gap-8 text-sm">
