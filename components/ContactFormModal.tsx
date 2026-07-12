@@ -8,7 +8,7 @@ import { X, Send, Loader2, Bot, MessageCircle, PhoneCall, AlertCircle } from 'lu
 interface ContactFormModalProps {
   isOpen: boolean;
   onClose: () => void;
-  propertyName?: string; // 允許傳入房源名稱
+  propertyName?: string;
 }
 
 interface ChatMessage {
@@ -20,12 +20,11 @@ interface ChatMessage {
 }
 
 export default function ContactFormModal({ isOpen, onClose, propertyName }: ContactFormModalProps) {
-  // 對話狀態
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [step, setStep] = useState(0); // 0: 打招呼, 1: 填寫表單, 2: 完成
+  const [step, setStep] = useState(0); // 0: 選擇需求, 1: 強制填寫表單, 2: 完成
+  const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ★ 100% 保留您原有的表單資料結構
   const [formData, setFormData] = useState({
     name: '',
     gender: '未填寫',
@@ -39,13 +38,12 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
     contactMethod: '',
     requirements: '',
     referrer: '',
-    honeypot: '' // 防禦機制
+    honeypot: '' 
   });
 
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // 初始化對話
   useEffect(() => {
     if (isOpen) {
       setMessages([
@@ -58,49 +56,69 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
         }
       ]);
       setStep(0);
+      setChatInput('');
       setErrorMsg('');
       setFormData(prev => ({ ...prev, requirements: propertyName ? `[關注房源]: ${propertyName}\n` : '' }));
     }
   }, [isOpen, propertyName]);
 
-  // 自動捲動到底部
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  // 客戶點擊初始選項
+  // ★ 客戶點選機器人提供的按鈕
   const handleOptionClick = (opt: string) => {
     setFormData(prev => ({ ...prev, requirements: prev.requirements + `[客戶需求]: ${opt}\n` }));
     
     setMessages(prev => [
-      ...prev.map(m => ({ ...m, type: 'text' })), // 隱藏選項按鈕
-      { id: Date.now().toString() + '1', sender: 'user', text: opt },
+      ...prev.map(m => ({ ...m, type: 'text' as 'text' })), 
+      { id: Date.now().toString() + '1', sender: 'user' as 'user', text: opt },
       { 
         id: Date.now().toString() + '2', 
-        sender: 'bot', 
+        sender: 'bot' as 'bot', 
         text: '好的！為了讓專員為您精準配對並提供詳細資料，請花 30 秒填寫這張需求卡：',
-        type: 'form' 
+        type: 'form' as 'form'
       }
     ]);
-    setStep(1);
+    setStep(1); // 進入表單階段，鎖定底部輸入框
   };
 
-  // ★ 完美保留您原有的驗證與發送邏輯
+  // ★ 客戶在初期沒有選按鈕，而是直接打字發送
+  const handleSendMessage = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatInput.trim() || isSubmitting || step !== 0) return;
+
+    const text = chatInput.trim();
+    setChatInput('');
+    setFormData(prev => ({ ...prev, requirements: prev.requirements + `[自訂詢問]: ${text}\n` }));
+
+    setMessages(prev => [
+      ...prev.map(m => ({ ...m, type: 'text' as 'text' })), 
+      { id: Date.now().toString() + '1', sender: 'user' as 'user', text },
+      { 
+        id: Date.now().toString() + '2', 
+        sender: 'bot' as 'bot', 
+        text: '好的，我已經記錄下您的問題。為了讓專員能回覆您，請花 30 秒填寫這張聯絡卡：',
+        type: 'form' as 'form'
+      }
+    ]);
+    setStep(1); // 同樣進入表單階段，鎖死底部輸入框
+  };
+
+  // ★ 嚴格的表單送出邏輯
   const handleSubmitForm = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isSubmitting) return; 
     setErrorMsg('');
 
-    // 1. 蜜罐防護
     if (formData.honeypot) { onClose(); return; }
 
-    // 2. 防連點機制
     const lastSubmit = localStorage.getItem('pm_last_inquiry');
     if (lastSubmit && Date.now() - parseInt(lastSubmit) < 60000) {
       setErrorMsg("⚠️ 您提交得太頻繁了，請等待一分鐘後再試。"); return;
     }
 
-    // 3. 資料驗證
+    // 嚴格驗證機制
     const digitsOnly = formData.phone.replace(/\D/g, '');
     if (digitsOnly.length < 8) { setErrorMsg("❌ 電話號碼格式錯誤，請至少包含 8 位數字。"); return; }
     if (formData.contactMethod.length < 5) { setErrorMsg("❌ 請輸入正確的微信號或 Email (過短)。"); return; }
@@ -114,40 +132,36 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
       const finalBudget = formData.budget === 'custom' ? formData.customBudget : formData.budget;
       const { honeypot, ...dataToSave } = { ...formData, budget: finalBudget };
 
-      // ★ 寫入資料庫 (兼容新版 CRM 的欄位標籤)
       const docRef = await addDoc(collection(db, 'inquiries'), {
         ...dataToSave,
         status: 'New', 
-        isExistingTenant: false, // 標記為官網新客
+        isExistingTenant: false, 
         category: '官網新客諮詢',
         roomInfo: propertyName || '一般諮詢',
         source: 'Website Chatbot',
         createdAt: serverTimestamp(),
       });
 
-      // ★ 觸發您的自動發信 API
       fetch('/api/send-inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: docRef.id, ...dataToSave }),
-      });
+      }).catch(err => console.warn("Email API 發送略過", err));
 
       localStorage.setItem('pm_last_inquiry', Date.now().toString());
 
-      // 更新對話畫面為成功
       setStep(2);
       setMessages(prev => [
-        ...prev.filter(m => m.type !== 'form'), // 移除表單氣泡
-        { id: Date.now().toString() + '3', sender: 'user', text: '✅ 已送出我的租房需求卡' },
+        ...prev.filter(m => m.type !== 'form'), 
+        { id: Date.now().toString() + '3', sender: 'user' as 'user', text: '✅ 已送出我的租房需求卡' },
         { 
           id: Date.now().toString() + '4', 
-          sender: 'bot', 
+          sender: 'bot' as 'bot', 
           text: '收到！我們已為您建立專屬服務單並發送通知給專員。團隊將在 30 分鐘內與您聯繫！急需協助可點擊下方按鈕：', 
-          type: 'success' 
+          type: 'success' as 'success'
         }
       ]);
       
-      // 清空表單
       setFormData({ name: '', gender: '未填寫', school: '', degree: '碩士 (Master)', duration: '12個月 (一年死約)', roomType: '單人房 (Single)', budget: '6000-9000', customBudget: '', phone: '', contactMethod: '', requirements: '', referrer: '', honeypot: '' });
 
     } catch (error) {
@@ -164,7 +178,6 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
     <div className="fixed inset-0 z-[9999] flex justify-end md:justify-center items-end md:items-center bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
       <div className="bg-[#f3f4f6] w-full md:max-w-[420px] h-[85vh] md:h-[700px] rounded-t-[2rem] md:rounded-[2rem] shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-8 md:zoom-in-95 duration-300">
         
-        {/* 頂部 Header (微信/客服風格) */}
         <div className="bg-[#1e293b] text-white p-4 px-6 flex justify-between items-center shadow-md relative z-10 flex-none">
           <div className="flex items-center gap-3">
             <div className="relative">
@@ -183,12 +196,10 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
           </button>
         </div>
 
-        {/* 聊天對話與表單區域 */}
         <div className="flex-1 overflow-y-auto p-4 sm:p-5 space-y-5 custom-scrollbar">
           {messages.map((msg) => (
             <div key={msg.id} className={`flex ${msg.sender === 'user' ? 'justify-end' : 'justify-start'} animate-in slide-in-from-bottom-2 fade-in duration-300`}>
               
-              {/* 機器人頭像 */}
               {msg.sender === 'bot' && (
                 <div className="w-8 h-8 bg-emerald-500 rounded-full flex items-center justify-center text-white shrink-0 mr-2 mt-1 shadow-sm">
                   <Bot size={16}/>
@@ -196,7 +207,6 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
               )}
 
               <div className={`max-w-[88%] ${msg.type === 'form' ? 'w-full' : ''}`}>
-                {/* 訊息文字泡泡 */}
                 {msg.text && (
                   <div className={`p-3.5 text-[14px] leading-relaxed shadow-sm ${
                     msg.sender === 'user' 
@@ -207,7 +217,6 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
                   </div>
                 )}
 
-                {/* 選項按鈕 */}
                 {msg.type === 'options' && msg.options && (
                   <div className="flex flex-col gap-2 mt-3 pl-2">
                     {msg.options.map(opt => (
@@ -218,7 +227,7 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
                   </div>
                 )}
 
-                {/* ★ 內嵌結構化表單 (Mini Program Card Style) */}
+                {/* 強制填寫表單 */}
                 {msg.type === 'form' && step === 1 && (
                   <form onSubmit={handleSubmitForm} className="bg-white rounded-2xl p-4 shadow-md border border-slate-200 mt-3 w-full animate-in zoom-in-95 duration-300">
                     <div className="text-emerald-700 font-black border-b border-emerald-100 pb-2 mb-3 text-sm flex items-center gap-1.5">
@@ -269,7 +278,6 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
                   </form>
                 )}
 
-                {/* 完成後的快速聯絡按鈕 */}
                 {msg.type === 'success' && (
                   <div className="flex gap-2 mt-3 pl-1">
                     <a href="https://wa.me/85239969796" target="_blank" rel="noopener noreferrer" className="flex-1 bg-green-500 text-white py-2 rounded-xl text-[11px] font-bold flex items-center justify-center gap-1 hover:bg-green-600 shadow-sm transition">
@@ -285,6 +293,28 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
           ))}
           <div ref={chatEndRef} />
         </div>
+
+        {/* 底部對話輸入框：進入表單或完成階段時自動鎖死 */}
+        <div className="p-4 bg-[#f3f4f6] border-t border-slate-200 flex-none pb-8 md:pb-4">
+          <form onSubmit={handleSendMessage} className="flex gap-3">
+            <input 
+              type="text" 
+              value={chatInput} 
+              onChange={e => setChatInput(e.target.value)} 
+              placeholder={step === 1 ? "請填寫上方需求登記卡..." : step === 2 ? "諮詢已送出..." : "輸入訊息..."} 
+              disabled={step !== 0} // ★ 核心防禦：只允許在 step 0 打字
+              className="flex-1 px-4 py-3 bg-white border border-slate-200 rounded-full text-sm outline-none focus:ring-2 focus:ring-emerald-500/20 transition-shadow shadow-sm disabled:bg-slate-100 disabled:text-slate-400" 
+            />
+            <button 
+              type="submit" 
+              disabled={!chatInput.trim() || isSubmitting || step !== 0} 
+              className="w-12 h-12 bg-emerald-500 text-white rounded-full flex items-center justify-center shrink-0 hover:bg-emerald-600 transition shadow-sm disabled:opacity-50"
+            >
+               <Send size={18} className="ml-0.5"/>
+            </button>
+          </form>
+        </div>
+
       </div>
     </div>
   );
