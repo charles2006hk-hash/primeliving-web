@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, Menu, X, MessageCircle } from 'lucide-react';
+import { Menu, X, MessageCircle } from 'lucide-react';
 import ContactFormModal from './ContactFormModal';
 
 export default function Navbar() {
@@ -19,13 +19,9 @@ export default function Navbar() {
       <nav className="fixed top-0 w-full bg-white/95 backdrop-blur-sm z-[100] border-b border-slate-100 shadow-sm h-14 md:h-16 flex items-center">
         <div className="max-w-7xl mx-auto px-4 w-full flex items-center justify-between">
           
-          <Link href="/" className="flex items-center gap-1.5 z-50">
-            <div className="w-7 h-7 bg-orange-500 rounded-lg flex items-center justify-center shadow">
-              <Home size={16} className="text-white" />
-            </div>
-            <span className="font-extrabold text-lg tracking-tight text-slate-900">
-              佳寓 <span className="text-orange-500 text-sm font-bold">PrimeLiving</span>
-            </span>
+          {/* ★ 已替換為公司 Logo */}
+          <Link href="/" className="flex items-center z-50">
+            <img src="/logo.png" alt="Prime Living" className="h-8 md:h-10 object-contain" />
           </Link>
 
           <div className="hidden md:flex items-center gap-8 text-sm">
@@ -66,7 +62,6 @@ export default function Navbar() {
         )}
       </nav>
 
-      {/* ★ 修復關鍵：將 Modal 移到 nav 標籤外，脫離 backdrop-blur 的高度限制 */}
       <ContactFormModal isOpen={isContactModalOpen} onClose={() => setIsContactModalOpen(false)} />
     </>
   );
