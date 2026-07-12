@@ -9,7 +9,9 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import WechatModal from '../../../components/WechatModal'; 
+
+// ★ 引入剛剛做好的智能對話按鈕模組
+import PropertyContactButtons from '../../../components/PropertyContactButtons'; 
 
 // ★ 反向代理 URL 轉換器 (讓內地可以看見 Firebase 圖片)
 const getProxiedUrl = (url?: string | null) => {
@@ -97,7 +99,6 @@ export default async function PropertyDetailPage({
       <div className="grid grid-cols-1 md:grid-cols-2 gap-1 h-[350px] md:h-[550px] overflow-hidden bg-slate-100">
         <div className="relative group cursor-zoom-in">
           {room.images?.[0] ? (
-            // ★ 套用過牆代理
             <img src={getProxiedUrl(room.images[0])} alt="主圖" className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" />
           ) : (
             <div className="w-full h-full flex flex-col items-center justify-center text-slate-400">
@@ -112,7 +113,6 @@ export default async function PropertyDetailPage({
           {[1, 2, 3, 4].map((i) => (
             <div key={i} className="bg-slate-200 relative overflow-hidden group cursor-zoom-in">
                {room.images?.[i] ? (
-                 // ★ 套用過牆代理
                  <img src={getProxiedUrl(room.images[i])} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" />
                ) : (
                  <div className="w-full h-full flex items-center justify-center text-slate-300 font-bold opacity-20 text-[10px] uppercase">Prime Living</div>
@@ -146,14 +146,13 @@ export default async function PropertyDetailPage({
             </div>
 
             {/* ========================================= */}
-            {/* ★ 新增：Prime Score 智能評分面板 ★ */}
+            {/* ★ Prime Score 智能評分面板 ★ */}
             {/* ========================================= */}
             <div className="bg-slate-900 rounded-[2.5rem] p-6 md:p-8 text-white mb-10 shadow-xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-64 h-64 bg-orange-500/20 blur-[80px] -translate-y-20 translate-x-20 pointer-events-none" />
               
               <div className="flex flex-col md:flex-row items-center gap-8 relative z-10">
                 
-                {/* 左側：總分大字 */}
                 <div className="text-center md:text-left shrink-0 md:pr-8 md:border-r border-slate-700/50">
                   <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-orange-500/20 text-orange-400 text-[10px] font-black uppercase tracking-widest mb-3 border border-orange-500/30">
                     <Sparkles size={14} /> Prime Score
@@ -167,7 +166,6 @@ export default async function PropertyDetailPage({
                   </p>
                 </div>
 
-                {/* 中間：四項核心指標 */}
                 <div className="flex-1 w-full grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-5">
                   {[
                     { icon: <Train size={16}/>, label: '通勤便捷度', score: room.scoreCommute || 4.9, desc: '步行 5 分鐘至港鐵' },
@@ -193,7 +191,6 @@ export default async function PropertyDetailPage({
                 </div>
               </div>
 
-              {/* 底部：AI 總結短評 */}
               <div className="mt-8 pt-6 border-t border-slate-700/50 relative z-10 bg-white/5 rounded-2xl p-5 border border-white/10 backdrop-blur-sm">
                  <div className="flex gap-4 items-start">
                     <div className="w-10 h-10 rounded-full bg-gradient-to-br from-orange-400 to-orange-600 flex items-center justify-center shrink-0 shadow-lg shadow-orange-500/30">
@@ -208,11 +205,9 @@ export default async function PropertyDetailPage({
                  </div>
               </div>
             </div>
-            {/* ========================================= */}
-
           </section>
 
-          {/* 房間配備 (動態渲染) */}
+          {/* 房間配備 */}
           <section className="bg-slate-50/50 p-8 rounded-[2.5rem] border border-slate-100">
             <h3 className="text-xl font-black text-slate-800 mb-8 flex items-center gap-2">
                 <div className="w-1.5 h-6 bg-orange-500 rounded-full"/> 房間標配
@@ -232,7 +227,7 @@ export default async function PropertyDetailPage({
             </div>
           </section>
 
-          {/* 交通資訊 (動態化) */}
+          {/* 交通資訊 */}
           <section>
             <h3 className="text-xl font-black text-slate-800 mb-6 flex items-center gap-2">
               <Navigation size={22} className="text-blue-600"/> 地理位置與通勤
@@ -280,12 +275,8 @@ export default async function PropertyDetailPage({
                </div>
             </div>
 
-            <div className="space-y-3">
-               <WechatModal />
-               <button className="w-full py-5 bg-slate-900 text-white rounded-[2rem] font-black text-lg flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl shadow-slate-900/20">
-                  <Phone size={20} /> 電話諮詢
-               </button>
-            </div>
+            {/* ★ 核心修改：替換為全新的微信式對話按鈕，並傳遞完整的房間名稱給機器人 */}
+            <PropertyContactButtons propertyName={`${room.propertyName} - ${room.name}`} />
             
             <div className="mt-8 pt-6 border-t border-slate-100">
                 <div className="flex items-center gap-4 mb-4">
