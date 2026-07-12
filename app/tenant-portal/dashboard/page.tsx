@@ -4,7 +4,7 @@ import React, { useEffect, useState, Suspense, useRef } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
-  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Copy
+  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where } from 'firebase/firestore';
@@ -20,7 +20,6 @@ function DashboardContent() {
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   
-  // ★ 擴充 activeModal 狀態，加入 contact
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
@@ -43,6 +42,12 @@ function DashboardContent() {
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  // ★ 智能客服聊天室狀態
+  const [chatMessages, setChatMessages] = useState<{sender: 'bot'|'user', text: string, options?: string[]}[]>([]);
+  const [chatCategory, setChatCategory] = useState('');
+  const [chatInput, setChatInput] = useState('');
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   const handleLogout = () => { 
     localStorage.clear(); 
@@ -101,12 +106,66 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); };
   }, [router]);
 
+  // ★ 智能客服初始化與發送邏輯
+  const initChat = () => {
+    setChatMessages([
+      { sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }
+    ]);
+    setChatCategory('');
+    setChatInput('');
+  };
+
+  const handleChatOption = (opt: string) => {
+    setChatCategory(opt);
+    setChatMessages(prev => [
+      ...prev.map(m => ({...m, options: undefined})), // 隱藏舊選項
+      { sender: 'user', text: opt },
+      { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }
+    ]);
+  };
+
+  const handleSendChatMessage = async (text: string) => {
+    if (!text.trim()) return;
+    setChatMessages(prev => [...prev, { sender: 'user', text }]);
+    setChatInput('');
+    setIsSubmittingTicket(true);
+    
+    try {
+      // 將資料寫入 inquiries，並打上「現有租客」的 CRM 標籤
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id,
+        name: tenantData.name,
+        phone: tenantData.phone,
+        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
+        category: chatCategory || '一般客服',
+        message: text,
+        source: 'Tenant Portal Chat',
+        isExistingTenant: true, // ★ 後台 CRM 分流標籤
+        status: 'New',
+        createdAt: serverTimestamp()
+      });
+
+      setTimeout(() => {
+        setChatMessages(prev => [...prev, { 
+          sender: 'bot', 
+          text: '✅ 收到！我已為您建立專屬服務單。真人管家核對後會盡快透過 WhatsApp 或致電與您聯繫。如果您需要立即協助，也可以點擊下方按鈕直接聯絡我們。' 
+        }]);
+        setIsSubmittingTicket(false);
+      }, 1000);
+    } catch (e) {
+      console.error(e);
+      setChatMessages(prev => [...prev, { sender: 'bot', text: '❌ 抱歉，系統連線發生異常，請直接點擊下方 WhatsApp 聯絡我們。' }]);
+      setIsSubmittingTicket(false);
+    }
+  };
+
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
+
   const verifyAndSettlePayment = async (sessionId: string) => {
     setIsVerifying(true);
     try {
       const sessionStr = localStorage.getItem('pm_tenant_session');
       const tId = sessionStr ? JSON.parse(sessionStr).id : null;
-
       const res = await fetch(`/api/checkout/verify?session_id=${sessionId}`);
       const data = await res.json();
       if (data.payment_status === 'paid' && tId) {
@@ -119,11 +178,7 @@ function DashboardContent() {
         alert("🎉 繳費成功！系統已自動結算並更新您的帳單。");
         router.replace('/tenant-portal/dashboard');
       }
-    } catch (error) { 
-      console.error(error); 
-    } finally { 
-      setIsVerifying(false); 
-    }
+    } catch (error) { console.error(error); } finally { setIsVerifying(false); }
   };
 
   useEffect(() => {
@@ -139,10 +194,7 @@ function DashboardContent() {
 
   const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsUploading(true);
-    setTimeout(() => {
-      setIsUploading(false); setActiveModal('none');
-      alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。");
-    }, 2000);
+    setTimeout(() => { setIsUploading(false); setActiveModal('none'); alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); }, 2000);
   };
 
   const handleStripeCheckout = async () => {
@@ -161,19 +213,12 @@ function DashboardContent() {
   const handleSignLease = async () => {
     if (!signature.trim()) return alert("請輸入您的法定全名作為電子簽名！");
     if (!latestLease) return alert("找不到合約檔案！");
-    
     setIsSigning(true);
     try {
-      await updateDoc(doc(db, 'tenants', tenantData.id), { 
-        signature: signature, signedAt: serverTimestamp(), isContractSigned: true, status: 'Active' 
-      });
-      await updateDoc(doc(db, 'documents', latestLease.id), {
-        'formData.tenantSignature': signature,
-        'formData.signedAt': new Date().toISOString()
-      });
+      await updateDoc(doc(db, 'tenants', tenantData.id), { signature: signature, signedAt: serverTimestamp(), isContractSigned: true, status: 'Active' });
+      await updateDoc(doc(db, 'documents', latestLease.id), { 'formData.tenantSignature': signature, 'formData.signedAt': new Date().toISOString() });
       alert("✅ 電子合約簽署成功，具有完整法律效力。");
-    } catch (error) { console.error(error); alert("簽署失敗"); } 
-    finally { setIsSigning(false); }
+    } catch (error) { console.error(error); alert("簽署失敗"); } finally { setIsSigning(false); }
   };
 
   const handleDownloadPDF = async () => {
@@ -181,7 +226,6 @@ function DashboardContent() {
     const htmlToImage = (window as any).htmlToImage;
     const jspdfObj = (window as any).jspdf;
     if (!htmlToImage || !jspdfObj) return alert("⚠️ 系統準備中，請稍後再試！");
-    
     setIsSignDownloading(true);
     try {
       const imgData = await htmlToImage.toPng(contractRef.current, { quality: 1.0, pixelRatio: 2, backgroundColor: '#ffffff' });
@@ -190,28 +234,21 @@ function DashboardContent() {
       const pdfHeight = (contractRef.current.offsetHeight * pdfWidth) / contractRef.current.offsetWidth;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Document_${tenantData.name}.pdf`);
-    } catch (error) { console.error(error); alert("生成 PDF 失敗。"); } 
-    finally { setIsSignDownloading(false); }
+    } catch (error) { console.error(error); alert("生成 PDF 失敗。"); } finally { setIsSignDownloading(false); }
   };
 
-  // ★ 報修工單送出邏輯
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
     setIsSubmittingTicket(true);
     try {
       await addDoc(collection(db, 'tickets'), {
-        tenantId: tenantData.id, tenantName: tenantData.name || '',
-        propertyId: tenantData.propertyId || '', propertyName: tenantData.propertyName || '',
-        roomId: tenantData.roomId || '', roomInfo: tenantData.roomInfo || '',
-        type: 'Repair', category: ticketCategory, title: `${ticketCategory}: ${ticketDesc.slice(0, 15)}...`, 
-        description: ticketDesc, priority: 'Medium', status: 'Open', repairCost: 0,
-        hasPhoto: isPhotoUploaded, imageUrl: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), source: 'WebPortal'
+        tenantId: tenantData.id, tenantName: tenantData.name || '', propertyId: tenantData.propertyId || '', propertyName: tenantData.propertyName || '',
+        roomId: tenantData.roomId || '', roomInfo: tenantData.roomInfo || '', type: 'Repair', category: ticketCategory, title: `${ticketCategory}: ${ticketDesc.slice(0, 15)}...`, 
+        description: ticketDesc, priority: 'Medium', status: 'Open', repairCost: 0, hasPhoto: isPhotoUploaded, imageUrl: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), source: 'WebPortal'
       });
-      alert("✅ 報修單已成功送出！管家已收到您的請求。");
-      setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
-    } catch (error) { console.error(error); alert("報修連線失敗，請稍後再試。"); } 
-    finally { setIsSubmittingTicket(false); }
+      alert("✅ 報修單已送出！"); setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
+    } catch (error) { console.error(error); alert("報修失敗。"); } finally { setIsSubmittingTicket(false); }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -220,108 +257,34 @@ function DashboardContent() {
     if (!isIdUploaded) return alert("請上傳證件！");
     setIsSavingProfile(true);
     try {
-      await updateDoc(doc(db, 'tenants', tenantData.id), {
-        emergencyContact: emergencyContact, idUploaded: true, isIdVerified: true, kycUpdatedAt: serverTimestamp()
-      });
-      setIsProfileComplete(true);
-      alert("✅ 檔案已完善。"); 
-      setActiveModal('none');
-    } catch (error) { console.error(error); alert("儲存失敗。"); } 
-    finally { setIsSavingProfile(false); }
+      await updateDoc(doc(db, 'tenants', tenantData.id), { emergencyContact: emergencyContact, idUploaded: true, isIdVerified: true, kycUpdatedAt: serverTimestamp() });
+      setIsProfileComplete(true); alert("✅ 檔案已完善。"); setActiveModal('none');
+    } catch (error) { console.error(error); alert("儲存失敗。"); } finally { setIsSavingProfile(false); }
   };
 
   const renderA4Document = (docData: any, isSigningMode = false) => {
     if (!docData) return null;
     const fd = docData.formData || {};
     const items = docData.items || [];
-    
     const baseRent = Number(fd.monthlyRent) || 0;
     const deposit = Number(fd.deposit) || 0;
     const extraTotal = items.reduce((sum: number, item: any) => sum + Number(item.amount), 0);
     const receiptTotal = baseRent + deposit + extraTotal;
     const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
-
     const formatCurrencyStr = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
     return (
       <div ref={isSigningMode ? contractRef : undefined} className="w-[210mm] min-h-[297mm] bg-white px-[20mm] py-[15mm] text-slate-900 font-sans relative shadow-lg origin-top scale-[0.5] sm:scale-[0.6] md:scale-75 lg:scale-90 print:shadow-none print:scale-100">
-        
-        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
-          <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
-          <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
-        </div>
-
-        <div className="text-right mb-6">
-          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">
-            {docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}
-          </h2>
-          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">
-            {docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}
-          </p>
-          <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
-        </div>
-
-        <div className="flex justify-between gap-6 mb-6">
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
-            <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
-          </div>
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
-            <p className="font-bold text-sm">{fd.tenantName || '__________________'}</p>
-            <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p>
-            <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p>
-          </div>
-        </div>
-
-        <div className="mb-6">
-          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
-          <table className="w-full text-sm border-collapse border border-slate-300">
-            <tbody>
-              <tr><td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold">{fd.propertyAddress}</td></tr>
-              <tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart} to {fd.leaseEnd}</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-        {docData.type === 'Statement' ? (
-          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(rec)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(rcv)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(dmg)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
-        ) : docData.type === 'Receipt' ? (
-          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
-        ) : docData.type === 'Lease' ? (
-          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td></tr></tbody></table></div>
-        ) : null}
-
+        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4"><img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/><div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div></div>
+        <div className="text-right mb-6"><h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2><p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p><p className="text-xs font-mono mt-3">Date: {fd.docDate}</p></div>
+        <div className="flex justify-between gap-6 mb-6"><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3><p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p></div><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3><p className="font-bold text-sm">{fd.tenantName || '__________________'}</p><p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p><p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p></div></div>
+        <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold">{fd.propertyAddress}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart} to {fd.leaseEnd}</td></tr></tbody></table></div>
+        {docData.type === 'Statement' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(rec)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(rcv)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(dmg)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Receipt' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Lease' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td></tr></tbody></table></div>) : null}
         {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
-
-        {docData.type === 'Lease' && (
-           <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
-             <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
-             <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
-           </div>
-        )}
-
+        {docData.type === 'Lease' && (<div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4"><p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p><p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p></div>)}
         <div className="absolute bottom-[30mm] left-[20mm] right-[20mm] flex justify-between">
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
-             <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
-             {docData.stampPos && (
-                <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos.x, top: docData.stampPos.y, width: '35mm', height: '35mm' }}>
-                  <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
-                </div>
-             )}
-           </div>
-           
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
-             <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
-             {(tenantData.isContractSigned || fd.tenantSignature) && docData.type === 'Lease' && (
-               <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 bg-white/80 py-2">
-                 <p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{fd.tenantSignature || tenantData.signature}</p>
-                 <p className="text-[9px] text-slate-400 font-mono mt-1">Signed</p>
-               </div>
-             )}
-           </div>
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative"><p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>{docData.stampPos && (<div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos.x, top: docData.stampPos.y, width: '35mm', height: '35mm' }}><img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" /></div>)}</div>
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative"><p className="font-bold text-xs uppercase relative z-10">Tenant</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>{(tenantData.isContractSigned || fd.tenantSignature) && docData.type === 'Lease' && (<div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 bg-white/80 py-2"><p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{fd.tenantSignature || tenantData.signature}</p><p className="text-[9px] text-slate-400 font-mono mt-1">Signed</p></div>)}</div>
         </div>
       </div>
     );
@@ -334,7 +297,7 @@ function DashboardContent() {
   const totalWithStripe = (tenantData.amountDue || 0) + stripeFee;
 
   return (
-    <div className="min-h-screen bg-slate-50 pb-12 selection:bg-orange-200 font-sans relative">
+    <div className="min-h-screen bg-slate-50/80 pb-12 selection:bg-orange-200 font-sans relative">
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
 
@@ -351,135 +314,136 @@ function DashboardContent() {
         <Link href="/" className="flex items-center">
           <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
         </Link>
-        <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors"><LogOut size={20} /></button>
+        <button onClick={handleLogout} className="text-slate-400 hover:text-red-500 transition-colors flex items-center text-sm font-bold"><LogOut size={16} className="mr-1"/> 登出</button>
       </div>
 
-      <div className="max-w-md mx-auto space-y-6 pt-6 px-4">
-        <div className="flex justify-between items-center px-2">
-          <div><h1 className="text-2xl font-black text-slate-900">你好, {tenantData.name}</h1></div>
-          <button className="relative p-3 bg-white rounded-2xl shadow-sm border border-slate-100"><Bell size={20} className="text-slate-600" /><span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full border-2 border-white"></span></button>
-        </div>
-
-        <div className="bg-slate-900 rounded-[2.5rem] p-8 text-white shadow-2xl shadow-slate-900/20 relative overflow-hidden">
-          <div className="absolute top-0 right-0 w-40 h-40 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
-          <div className="flex justify-between items-start mb-8 relative z-10">
-            <div>
-              <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">本期待繳 (HKD)</p>
-              <h2 className="text-5xl font-black tracking-tighter">${(tenantData.amountDue || 0).toLocaleString()}</h2>
-            </div>
-            <span className={`px-3 py-1.5 rounded-full text-[10px] font-black border ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-              {tenantData.status}
-            </span>
+      {/* ★ 大氣的網格佈局 (Responsive Grid) */}
+      <div className="max-w-5xl mx-auto space-y-8 pt-8 px-4 md:px-8">
+        
+        {/* 歡迎頭部 */}
+        <div className="flex justify-between items-end">
+          <div>
+            <p className="text-orange-500 font-black tracking-widest uppercase text-xs mb-1">PrimeLiving Tenant Portal</p>
+            <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">尊貴的 {tenantData.name}，您好</h1>
           </div>
-          <div className="flex items-center gap-4 text-xs font-bold text-slate-400 mb-8 relative z-10">
-            {tenantData.amountDue > 0 ? (
-              <div className="flex items-center gap-1.5 bg-white/10 px-3 py-1.5 rounded-lg backdrop-blur-sm"><Calendar size={14} className="text-orange-400"/> 繳費期限: {tenantData.dueDate}</div>
-            ) : (
-              <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 px-3 py-1.5 rounded-lg backdrop-blur-sm"><CheckCircle2 size={14}/> 本期已繳清</div>
-            )}
-          </div>
-          <button onClick={() => setActiveModal('payment')} disabled={tenantData.amountDue === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
-            <CreditCard size={18}/> {tenantData.amountDue === 0 ? '無待繳帳單' : '立即繳費'}
+          <button className="relative p-3 bg-white rounded-full shadow-sm border border-slate-200 hover:shadow-md transition">
+            <Bell size={20} className="text-slate-600" />
+            <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full border-2 border-white"></span>
           </button>
         </div>
 
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">剩餘租期</p><p className="text-2xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-xs font-bold text-slate-500">天</span></p></div>
-          <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center overflow-hidden"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">我的帳戶</p><p className="text-sm font-black text-slate-800 truncate">{tenantData.contractId || 'N/A'}</p></div>
-        </div>
-
-        <div className="bg-white rounded-[2.5rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col divide-y divide-slate-50">
-          <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}><FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-400' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
-          <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-emerald-50'}`}><ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-emerald-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-400' : 'text-slate-400'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           
-          {/* ★ 報修申請 (開啟 Modal) */}
-          <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Wrench size={20} className="text-blue-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p><p className="text-[10px] font-bold text-slate-400">設備損壞一鍵呼叫師傅</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
+          {/* 左欄：主要帳單與資訊 (佔 7 格) */}
+          <div className="lg:col-span-7 space-y-6">
+            <div className="bg-gradient-to-br from-slate-900 to-slate-800 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/20 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
+              <div className="flex justify-between items-start mb-8 relative z-10">
+                <div>
+                  <p className="text-slate-400 text-[10px] font-black uppercase tracking-widest mb-1">本期待繳總額 (HKD)</p>
+                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${(tenantData.amountDue || 0).toLocaleString()}</h2>
+                </div>
+                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
+                  {tenantData.status}
+                </span>
+              </div>
+              <div className="flex items-center gap-4 text-xs font-bold text-slate-400 mb-8 relative z-10">
+                {tenantData.amountDue > 0 ? (
+                  <div className="flex items-center gap-1.5 bg-white/10 px-4 py-2 rounded-xl backdrop-blur-sm"><Calendar size={14} className="text-orange-400"/> 繳費期限: {tenantData.dueDate}</div>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 px-4 py-2 rounded-xl backdrop-blur-sm"><CheckCircle2 size={14}/> 本期已繳清</div>
+                )}
+              </div>
+              <button onClick={() => setActiveModal('payment')} disabled={tenantData.amountDue === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
+                <CreditCard size={18}/> {tenantData.amountDue === 0 ? '無待繳帳單' : '立即繳費'}
+              </button>
+            </div>
 
-          <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Droplets size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p><p className="text-[10px] font-bold text-slate-400">查看管家開立之收據與對數單</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">剩餘租期</p><p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p></div>
+              <div className="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm flex flex-col justify-center overflow-hidden"><p className="text-[10px] font-black text-slate-400 uppercase mb-1">我的帳戶</p><p className="text-base font-black text-slate-800 truncate">{tenantData.contractId || 'N/A'}</p></div>
+            </div>
+          </div>
 
-          {/* ★ 聯絡專屬管家 (改為開啟 Modal) */}
-          <button onClick={() => setActiveModal('contact')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-slate-400 font-bold">WhatsApp 與線上客服</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </button>
+          {/* 右欄：各項服務清單 (佔 5 格) */}
+          <div className="lg:col-span-5">
+            <div className="bg-white rounded-[2rem] border border-slate-100 shadow-xl shadow-slate-200/40 overflow-hidden flex flex-col p-2">
+              <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}><FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-400' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </button>
+              <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-rose-50'}`}><ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-rose-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-400' : 'text-rose-500'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </button>
+              <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Wrench size={20} className="text-blue-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p><p className="text-[10px] font-bold text-slate-400">設備損壞一鍵呼叫師傅</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </button>
+              <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-slate-50 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Receipt size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p><p className="text-[10px] font-bold text-slate-400">查看管家開立之收據與對數單</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+              </button>
+              {/* ★ 開啟智能客服 Modal */}
+              <button onClick={() => { initChat(); setActiveModal('contact'); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-orange-50 hover:bg-orange-100 transition-colors rounded-2xl group text-left border border-orange-100 mt-2">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-white rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform shadow-sm"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-orange-900 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-orange-600 font-bold">智能客服與真人支援</p></div></div><ChevronRight size={18} className="text-orange-300 group-hover:text-orange-500 transition-colors" />
+              </button>
+            </div>
+          </div>
+
         </div>
       </div>
 
       {/* ==================== 模態框區塊 (Modals) ==================== */}
 
-      {/* 聯絡專屬管家 Modal (全新設計) */}
+      {/* ★ 智能客服機器人 Modal */}
       {activeModal === 'contact' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><UserCircle className="mr-2 text-orange-500" size={24}/> 聯絡專屬管家</h3>
-              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[85vh] sm:h-[70vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300 overflow-hidden">
+            {/* 聊天室頭部 */}
+            <div className="bg-slate-900 text-white p-6 flex-none relative rounded-t-[2.5rem] sm:rounded-t-[2.5rem]">
+              <div className="flex items-center gap-3">
+                <div className="relative">
+                  <div className="w-10 h-10 bg-orange-500 rounded-full flex items-center justify-center"><UserCircle size={24}/></div>
+                  <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-slate-900 rounded-full"></span>
+                </div>
+                <div>
+                  <h3 className="font-black text-lg">PrimeLiving 智能管家</h3>
+                  <p className="text-xs text-slate-300">在線為您服務</p>
+                </div>
+              </div>
+              <button onClick={() => setActiveModal('none')} className="absolute top-6 right-6 p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"><X size={20} /></button>
             </div>
-            <div className="p-6 space-y-4 bg-slate-50/50 rounded-b-[2.5rem]">
-               <a href="https://wa.me/85239969796" target="_blank" rel="noopener noreferrer" className="flex items-center p-4 bg-green-50 text-green-700 border border-green-200 rounded-2xl hover:bg-green-100 transition shadow-sm active:scale-95">
-                 <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center mr-4 shrink-0"><MessageCircle size={20} /></div>
-                 <div><p className="font-black">WhatsApp 客服</p><p className="text-xs font-medium mt-0.5">+852 3996 9796</p></div>
-               </a>
-               <a href="tel:+85239969796" className="flex items-center p-4 bg-blue-50 text-blue-700 border border-blue-200 rounded-2xl hover:bg-blue-100 transition shadow-sm active:scale-95">
-                 <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center mr-4 shrink-0"><PhoneCall size={20} /></div>
-                 <div><p className="font-black">致電管家中心</p><p className="text-xs font-medium mt-0.5">辦公時間: 09:00 - 18:00</p></div>
-               </a>
-               <button onClick={() => { navigator.clipboard.writeText('PrimeLivingHK'); alert('微信號已複製：PrimeLivingHK'); }} className="w-full flex items-center p-4 bg-white text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-50 transition text-left shadow-sm active:scale-95">
-                 <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mr-4 shrink-0"><Copy size={20} /></div>
-                 <div><p className="font-black">微信客服 (WeChat)</p><p className="text-xs font-medium mt-0.5">點擊複製微信號: PrimeLivingHK</p></div>
-               </button>
+            
+            {/* 聊天對話區域 */}
+            <div className="flex-1 overflow-y-auto p-5 space-y-4 bg-slate-50">
+               {chatMessages.map((msg, idx) => (
+                 <div key={idx} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
+                   <div className={`max-w-[85%] p-3.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.sender === 'user' ? 'bg-orange-500 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'}`}>
+                     {msg.text}
+                   </div>
+                   {msg.options && (
+                     <div className="flex flex-wrap gap-2 mt-3">
+                       {msg.options.map(opt => (
+                         <button key={opt} onClick={() => handleChatOption(opt)} className="px-4 py-2 bg-white border border-orange-200 text-orange-600 rounded-full text-xs font-bold hover:bg-orange-50 transition shadow-sm">
+                           {opt}
+                         </button>
+                       ))}
+                     </div>
+                   )}
+                 </div>
+               ))}
+               <div ref={chatEndRef} />
             </div>
-          </div>
-        </div>
-      )}
 
-      {/* 報修申請 Modal */}
-      {activeModal === 'ticket' && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3>
-              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
-              <form onSubmit={handleSubmitTicket} className="space-y-6">
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
-                      <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
-                  <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm" />
-                </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
-                    <span>上傳照片 (選填)</span>
-                    <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
-                  </p>
-                  <div className="relative shadow-sm">
-                    <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
-                    <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
-                    </label>
-                  </div>
-                </div>
-                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
-                  {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修申請'}
+            {/* 底部輸入框與真人客服捷徑 */}
+            <div className="p-4 bg-white border-t border-slate-100 flex-none pb-8 sm:pb-4">
+              <form onSubmit={(e) => { e.preventDefault(); handleSendChatMessage(chatInput); }} className="flex gap-2">
+                <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="請輸入您的問題..." className="flex-1 px-4 py-3 bg-slate-100 border-transparent rounded-full text-sm outline-none focus:ring-2 focus:ring-orange-500/20 focus:bg-white transition" />
+                <button type="submit" disabled={!chatInput.trim() || isSubmittingTicket} className="w-12 h-12 bg-orange-500 text-white rounded-full flex items-center justify-center shrink-0 hover:bg-orange-600 transition shadow-sm disabled:opacity-50">
+                   {isSubmittingTicket ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
                 </button>
               </form>
+              <div className="mt-4 flex justify-center gap-6 text-xs font-bold text-slate-400">
+                <a href="https://wa.me/85239969796" target="_blank" rel="noopener noreferrer" className="flex items-center hover:text-green-600 transition"><MessageCircle size={14} className="mr-1"/> WhatsApp</a>
+                <a href="tel:+85239969796" className="flex items-center hover:text-blue-600 transition"><PhoneCall size={14} className="mr-1"/> 致電專人</a>
+              </div>
             </div>
           </div>
         </div>
@@ -587,6 +551,23 @@ function DashboardContent() {
                   <button type="submit" disabled={isSavingProfile} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-600/20 disabled:opacity-50">{isSavingProfile ? <><Loader2 size={18} className="animate-spin"/> 儲存中...</> : '確認送出檔案'}</button>
                 </form>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 報修 Modal */}
+      {activeModal === 'ticket' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
+            <div className="p-6 overflow-y-auto flex-1">
+              <form onSubmit={handleSubmitTicket} className="space-y-6">
+                <div><p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p><div className="grid grid-cols-2 gap-3">{['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (<button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>))}</div></div>
+                <div><p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p><textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-semibold" /></div>
+                <div><p className="text-xs font-black text-slate-800 mb-3 flex justify-between"><span>上傳照片 (選填)</span><span className="text-slate-400 font-normal">幫助師傅更快判斷</span></p><div className="relative"><input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已暫存！"); } }} /><label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>{isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}</label></div></div>
+                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">{isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 送出中...</> : '確認送出報修'}</button>
+              </form>
             </div>
           </div>
         </div>
