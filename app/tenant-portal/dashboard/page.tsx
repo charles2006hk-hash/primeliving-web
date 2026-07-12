@@ -4,7 +4,7 @@ import React, { useEffect, useState, Suspense, useRef } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
-  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye
+  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Copy
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where } from 'firebase/firestore';
@@ -20,28 +20,25 @@ function DashboardContent() {
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   
-  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc'>('none');
+  // ★ 擴充 activeModal 狀態，加入 contact
+  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
-  // 支付與驗證狀態
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'stripe'>('bank');
   const [isUploading, setIsUploading] = useState(false);
   const [isStripeLoading, setIsStripeLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
 
-  // 電子合約狀態
   const [signature, setSignature] = useState('');
   const [isSigning, setIsSigning] = useState(false);
   const [isSignDownloading, setIsSignDownloading] = useState(false);
   const contractRef = useRef<HTMLDivElement>(null);
 
-  // 報修單狀態
   const [ticketCategory, setTicketCategory] = useState('冷氣水電');
   const [ticketDesc, setTicketDesc] = useState('');
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPhotoUploaded, setIsPhotoUploaded] = useState(false);
 
-  // KYC 檔案狀態
   const [isProfileComplete, setIsProfileComplete] = useState(false);
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
   const [isIdUploaded, setIsIdUploaded] = useState(false);
@@ -104,10 +101,6 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); };
   }, [router]);
 
-  // ★ 核心修復：將 latestLease 宣告放回主組件層級，讓畫面渲染時抓得到
-  const latestLease = tenantDocs.find(d => d.type === 'Lease');
-  const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
-
   const verifyAndSettlePayment = async (sessionId: string) => {
     setIsVerifying(true);
     try {
@@ -138,6 +131,11 @@ function DashboardContent() {
     const success = searchParams?.get('success');
     if (success === 'true' && sessionId) { verifyAndSettlePayment(sessionId); }
   }, [searchParams]);
+
+  const latestLease = tenantDocs.find(d => d.type === 'Lease');
+  const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
+
+  const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
   const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => {
     setIsUploading(true);
@@ -196,6 +194,7 @@ function DashboardContent() {
     finally { setIsSignDownloading(false); }
   };
 
+  // ★ 報修工單送出邏輯
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
@@ -209,9 +208,9 @@ function DashboardContent() {
         description: ticketDesc, priority: 'Medium', status: 'Open', repairCost: 0,
         hasPhoto: isPhotoUploaded, imageUrl: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), source: 'WebPortal'
       });
-      alert("✅ 報修單已送出！");
+      alert("✅ 報修單已成功送出！管家已收到您的請求。");
       setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
-    } catch (error) { console.error(error); alert("報修失敗。"); } 
+    } catch (error) { console.error(error); alert("報修連線失敗，請稍後再試。"); } 
     finally { setIsSubmittingTicket(false); }
   };
 
@@ -347,6 +346,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 頂部導航 */}
       <div className="bg-white px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
         <Link href="/" className="flex items-center">
           <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
@@ -395,25 +395,103 @@ function DashboardContent() {
           <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
             <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-emerald-50'}`}><ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-emerald-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-400' : 'text-slate-400'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
           </button>
+          
+          {/* ★ 報修申請 (開啟 Modal) */}
           <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
             <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Wrench size={20} className="text-blue-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p><p className="text-[10px] font-bold text-slate-400">設備損壞一鍵呼叫師傅</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
           </button>
+
           <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
-            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Droplets size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">水電雜費明細</p><p className="text-[10px] font-bold text-slate-400">查看本月實報實銷與費用</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><Droplets size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p><p className="text-[10px] font-bold text-slate-400">查看管家開立之收據與對數單</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
           </button>
-          <Link href="https://wa.me/85298765432" target="_blank" className="flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group">
-            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-slate-400 font-bold">WhatsApp 在線客服</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
-          </Link>
+
+          {/* ★ 聯絡專屬管家 (改為開啟 Modal) */}
+          <button onClick={() => setActiveModal('contact')} className="w-full flex items-center justify-between p-5 hover:bg-slate-50 transition-colors group text-left">
+            <div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-slate-400 font-bold">WhatsApp 與線上客服</p></div></div><ChevronRight size={18} className="text-slate-300 group-hover:text-slate-500 transition-colors" />
+          </button>
         </div>
       </div>
 
+      {/* ==================== 模態框區塊 (Modals) ==================== */}
+
+      {/* 聯絡專屬管家 Modal (全新設計) */}
+      {activeModal === 'contact' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><UserCircle className="mr-2 text-orange-500" size={24}/> 聯絡專屬管家</h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4 bg-slate-50/50 rounded-b-[2.5rem]">
+               <a href="https://wa.me/85239969796" target="_blank" rel="noopener noreferrer" className="flex items-center p-4 bg-green-50 text-green-700 border border-green-200 rounded-2xl hover:bg-green-100 transition shadow-sm active:scale-95">
+                 <div className="w-10 h-10 bg-green-200 rounded-full flex items-center justify-center mr-4 shrink-0"><MessageCircle size={20} /></div>
+                 <div><p className="font-black">WhatsApp 客服</p><p className="text-xs font-medium mt-0.5">+852 3996 9796</p></div>
+               </a>
+               <a href="tel:+85239969796" className="flex items-center p-4 bg-blue-50 text-blue-700 border border-blue-200 rounded-2xl hover:bg-blue-100 transition shadow-sm active:scale-95">
+                 <div className="w-10 h-10 bg-blue-200 rounded-full flex items-center justify-center mr-4 shrink-0"><PhoneCall size={20} /></div>
+                 <div><p className="font-black">致電管家中心</p><p className="text-xs font-medium mt-0.5">辦公時間: 09:00 - 18:00</p></div>
+               </a>
+               <button onClick={() => { navigator.clipboard.writeText('PrimeLivingHK'); alert('微信號已複製：PrimeLivingHK'); }} className="w-full flex items-center p-4 bg-white text-slate-700 border border-slate-200 rounded-2xl hover:bg-slate-50 transition text-left shadow-sm active:scale-95">
+                 <div className="w-10 h-10 bg-slate-100 rounded-full flex items-center justify-center mr-4 shrink-0"><Copy size={20} /></div>
+                 <div><p className="font-black">微信客服 (WeChat)</p><p className="text-xs font-medium mt-0.5">點擊複製微信號: PrimeLivingHK</p></div>
+               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 報修申請 Modal */}
+      {activeModal === 'ticket' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+              <form onSubmit={handleSubmitTicket} className="space-y-6">
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
+                      <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
+                  <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
+                    <span>上傳照片 (選填)</span>
+                    <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
+                  </p>
+                  <div className="relative shadow-sm">
+                    <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
+                    <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
+                    </label>
+                  </div>
+                </div>
+                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
+                  {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修申請'}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 支付 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0">選擇付款方式</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               <div className="flex bg-slate-100 p-1.5 rounded-2xl"><button onClick={() => setPaymentMethod('bank')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><Landmark size={18}/> 轉帳/FPS</button><button onClick={() => setPaymentMethod('stripe')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'stripe' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}><CreditCard size={18}/> 線上刷卡</button></div>
-              {/* ★ 銀行資訊已更新為恆生銀行 */}
               {paymentMethod === 'bank' && (
                 <div className="animate-in fade-in slide-in-from-left-4 duration-300 space-y-5">
                   <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3"><CheckCircle2 className="text-blue-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-blue-900 mb-1">推薦使用：0% 手續費</p><p className="text-xs text-blue-700 font-medium">請轉帳至以下指定戶口，並上傳入數紙以供管家核對。</p></div></div>
@@ -440,6 +518,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 簽署合約 Modal */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full sm:max-w-[800px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -492,6 +571,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* KYC 檔案認證 Modal */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -512,6 +592,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 歷史帳單與收據列表 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -548,6 +629,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* A4 文件預覽 Modal */}
       {activeModal === 'view_doc' && viewingDoc && (
         <div className="fixed inset-0 bg-slate-900/80 z-[110] flex flex-col items-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full flex justify-end p-4 md:p-0 md:mb-4 flex-none max-w-[800px]">
