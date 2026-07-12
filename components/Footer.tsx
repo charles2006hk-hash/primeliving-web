@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { Home, Mail, ShieldCheck, MapPin } from 'lucide-react';
+import { Mail, ShieldCheck, MapPin } from 'lucide-react';
 
 export default function Footer() {
   return (
@@ -9,11 +9,9 @@ export default function Footer() {
         
         {/* 品牌介紹 */}
         <div className="col-span-1 md:col-span-1">
-          <div className="flex items-center gap-2 mb-6">
-            <div className="w-8 h-8 bg-orange-600 rounded-lg flex items-center justify-center text-white">
-              <Home size={18} />
-            </div>
-            <span className="font-black text-xl text-white tracking-tight">PrimeLiving</span>
+          {/* ★ 已替換為公司 Logo，加了白色微底色適應深色背景 */}
+          <div className="mb-6 inline-block bg-white p-1.5 rounded-lg">
+            <img src="/logo.png" alt="Prime Living" className="h-8 md:h-10 object-contain" />
           </div>
           <p className="text-sm leading-relaxed mb-6 font-medium">
             佳寓，專注於提供高品質、直營管理的赴港學生公寓服務。打造溫馨、安全、便捷的海外之家。
