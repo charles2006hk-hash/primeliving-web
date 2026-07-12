@@ -19,8 +19,10 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
+  const [myInquiries, setMyInquiries] = useState<any[]>([]); // ★ 儲存租客自己送出的報修與訊息
   
-  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact'>('none');
+  // ★ 擴充 activeModal 狀態，加入 notifications
+  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'stripe'>('bank');
@@ -48,65 +50,22 @@ function DashboardContent() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ★ 新增：天氣與動態背景狀態
-  const [weather, setWeather] = useState({ 
-    temp: '--', 
-    desc: '載入中', 
-    suggestion: '祝您有美好的一天！', 
-    bgClass: 'from-slate-100 to-slate-200',
-    icon: <Sun size={28} className="text-amber-500" />
-  });
+  const [weather, setWeather] = useState({ temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> });
 
-  const handleLogout = () => { 
-    localStorage.clear(); 
-    router.push('/tenant-portal'); 
-  };
+  const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
 
-  // ★ 初始化獲取香港天氣 (使用免費無Key的 Open-Meteo API)
   useEffect(() => {
-    fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true')
-      .then(res => res.json())
-      .then(data => {
+    fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true').then(res => res.json()).then(data => {
         const t = data.current_weather.temperature;
         const code = data.current_weather.weathercode;
-        let desc = '晴朗';
-        let suggestion = '天氣不錯，祝您有美好的一天！';
-        let bgClass = 'from-sky-100 via-orange-50 to-amber-100'; // 預設晴天漸層
-        let icon = <Sun size={28} className="text-amber-500" />;
-
-        // 依據 WMO 天氣代碼判斷天氣狀況
-        if (code === 0 || code === 1) {
-          desc = '晴朗';
-          bgClass = 'from-sky-100 via-orange-50 to-amber-100';
-          if (t >= 30) suggestion = '天氣炎熱，外出請注意防曬與補充水分喔！';
-          icon = <Sun size={28} className="text-amber-500" />;
-        } else if (code === 2 || code === 3) {
-          desc = '多雲';
-          bgClass = 'from-slate-200 via-slate-100 to-gray-200';
-          suggestion = '天氣微涼舒適，是個適合外出的好日子。';
-          icon = <Cloud size={28} className="text-slate-400" />;
-        } else if (code >= 50 && code <= 69) {
-          desc = '下雨';
-          bgClass = 'from-slate-300 via-indigo-100 to-blue-200';
-          suggestion = '外面正在下雨，出門請務必記得攜帶雨具，小心路滑！☔️';
-          icon = <CloudRain size={28} className="text-blue-500" />;
-        } else if (code >= 80) {
-          desc = '陣雨 / 雷雨';
-          bgClass = 'from-slate-400 via-slate-300 to-indigo-200';
-          suggestion = '局部地區有較大陣雨，建議您出門帶把傘，並注意安全。';
-          icon = <CloudRain size={28} className="text-indigo-600" />;
-        }
-
-        if (t <= 15) {
-          suggestion = '最近氣溫驟降，請注意保暖，別著涼了！🧣';
-        }
-
+        let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', icon = <Sun size={28} className="text-amber-500" />;
+        if (code === 0 || code === 1) { if (t >= 30) suggestion = '天氣炎熱，外出請注意防曬與補充水分喔！'; }
+        else if (code === 2 || code === 3) { desc = '多雲'; bgClass = 'from-slate-200 via-slate-100 to-gray-200'; suggestion = '天氣微涼舒適，是個適合外出的好日子。'; icon = <Cloud size={28} className="text-slate-400" />; }
+        else if (code >= 50 && code <= 69) { desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具，小心路滑！☔️'; icon = <CloudRain size={28} className="text-blue-500" />; }
+        else if (code >= 80) { desc = '陣雨 / 雷雨'; bgClass = 'from-slate-400 via-slate-300 to-indigo-200'; suggestion = '局部地區有較大陣雨，建議您出門帶把傘，並注意安全。'; icon = <CloudRain size={28} className="text-indigo-600" />; }
+        if (t <= 15) suggestion = '最近氣溫驟降，請注意保暖，別著涼了！🧣';
         setWeather({ temp: t, desc, suggestion, bgClass, icon });
-      })
-      .catch(() => {
-        // API 失敗時的 Fallback
-        setWeather({ temp: '--', desc: '未知', suggestion: '祝您有愉快的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> });
-      });
+      }).catch(() => setWeather({ temp: '--', desc: '未知', suggestion: '祝您有愉快的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> }));
   }, []);
 
   useEffect(() => {
@@ -120,32 +79,15 @@ function DashboardContent() {
         const end = new Date(data.leaseEnd);
         const now = new Date();
         const diffDays = Math.ceil((end.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-
-        // ★ 核心修復：解決「我的帳戶 N/A」的問題，強制提供 Fallback ID
         const resolvedContractId = data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`;
 
         setTenantData({
-          id: docSnap.id,
-          name: data.name,
-          amountDue: data.monthlyRent || 0, 
-          dueDate: "本月 1 日", 
-          daysRemaining: diffDays > 0 ? diffDays : 0,
-          status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費',
-          roomInfo: resolvedContractId, // 已修復 N/A
-          isContractSigned: data.isContractSigned || !!data.signature,
-          signature: data.signature || '',
-          signedAt: data.signedAt?.toDate ? data.signedAt.toDate().toLocaleString() : '',
-          propertyName: data.propertyName || '',
-          roomId: data.roomId || '',
-          roomName: data.roomName || data.roomId || '',
-          leaseStart: data.leaseStart || '',
-          leaseEnd: data.leaseEnd || '',
-          deposit: data.deposit || 0,
-          phone: data.phone || '',
-          identityNumber: data.identityNumber || '',
-          utilities: data.utilities || []
+          id: docSnap.id, name: data.name, amountDue: data.monthlyRent || 0, dueDate: "本月 1 日", daysRemaining: diffDays > 0 ? diffDays : 0,
+          status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', roomInfo: resolvedContractId, isContractSigned: data.isContractSigned || !!data.signature,
+          signature: data.signature || '', signedAt: data.signedAt?.toDate ? data.signedAt.toDate().toLocaleString() : '', propertyName: data.propertyName || '',
+          roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0,
+          phone: data.phone || '', identityNumber: data.identityNumber || '', utilities: data.utilities || []
         });
-
         if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
         if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
         if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
@@ -154,67 +96,25 @@ function DashboardContent() {
     });
 
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
-    const unsubDocs = onSnapshot(qDocs, (snap) => {
-      const docs = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => {
-        return new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime();
-      });
-      setTenantDocs(docs);
-    });
+    const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
 
-    return () => { unsubTenant(); unsubDocs(); };
+    // ★ 核心：監聽租客自己的 CRM 訊息，以顯示在鈴鐺通知裡
+    const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
+    const unsubInq = onSnapshot(qInq, snap => setMyInquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
+
+    return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
 
-  const initChat = () => {
-    setChatMessages([
-      { sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }
-    ]);
-    setChatCategory('');
-    setChatInput('');
-  };
-
-  const handleChatOption = (opt: string) => {
-    setChatCategory(opt);
-    setChatMessages(prev => [
-      ...prev.map(m => ({...m, options: undefined})),
-      { sender: 'user', text: opt },
-      { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }
-    ]);
-  };
-
+  const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
+  const handleChatOption = (opt: string) => { setChatCategory(opt); setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); };
   const handleSendChatMessage = async (text: string) => {
     if (!text.trim()) return;
-    setChatMessages(prev => [...prev, { sender: 'user', text }]);
-    setChatInput('');
-    setIsSubmittingTicket(true);
-    
+    setChatMessages(prev => [...prev, { sender: 'user', text }]); setChatInput(''); setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), {
-        tenantId: tenantData.id,
-        name: tenantData.name,
-        phone: tenantData.phone,
-        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
-        category: chatCategory || '一般客服',
-        message: text,
-        source: 'Tenant Portal Chat',
-        isExistingTenant: true, 
-        status: 'New',
-        createdAt: serverTimestamp()
-      });
-
-      setTimeout(() => {
-        setChatMessages(prev => [...prev, { 
-          sender: 'bot', 
-          text: '✅ 收到！我已為您建立專屬服務單。真人管家核對後會盡快透過 WhatsApp 或致電與您聯繫。' 
-        }]);
-        setIsSubmittingTicket(false);
-      }, 1000);
-    } catch (e) {
-      console.error(e);
-      setChatMessages(prev => [...prev, { sender: 'bot', text: '❌ 抱歉，系統連線發生異常，請直接點擊下方 WhatsApp 聯絡我們。' }]);
-      setIsSubmittingTicket(false);
-    }
+      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name, phone: tenantData.phone, roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: chatCategory || '一般客服', message: text, source: 'Tenant Portal Chat', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
+      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您建立專屬服務單。管家核對後會在此系統通知您，或透過 WhatsApp 聯繫。' }]); setIsSubmittingTicket(false); }, 1000);
+    } catch (e) { setChatMessages(prev => [...prev, { sender: 'bot', text: '❌ 抱歉系統異常，請直接點擊下方 WhatsApp 聯絡我們。' }]); setIsSubmittingTicket(false); }
   };
-
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   const verifyAndSettlePayment = async (sessionId: string) => {
@@ -225,42 +125,25 @@ function DashboardContent() {
       const res = await fetch(`/api/checkout/verify?session_id=${sessionId}`);
       const data = await res.json();
       if (data.payment_status === 'paid' && tId) {
-        await addDoc(collection(db, 'transactions'), {
-          type: 'income', status: 'completed', title: '租金與雜費繳納 (線上刷卡)', amount: data.amount_total / 100, 
-          dueDate: new Date().toISOString().split('T')[0], completedDate: new Date().toISOString().split('T')[0],
-          tenantId: tId, remarks: `Stripe 自動結算 (Session: ${sessionId.slice(-8)})`, createdAt: serverTimestamp()
-        });
+        await addDoc(collection(db, 'transactions'), { type: 'income', status: 'completed', title: '租金與雜費繳納 (線上刷卡)', amount: data.amount_total / 100, dueDate: new Date().toISOString().split('T')[0], completedDate: new Date().toISOString().split('T')[0], tenantId: tId, remarks: `Stripe 自動結算 (Session: ${sessionId.slice(-8)})`, createdAt: serverTimestamp() });
         await updateDoc(doc(db, 'tenants', tId), { monthlyRent: 0 });
-        alert("🎉 繳費成功！系統已自動結算並更新您的帳單。");
-        router.replace('/tenant-portal/dashboard');
+        alert("🎉 繳費成功！系統已自動結算並更新您的帳單。"); router.replace('/tenant-portal/dashboard');
       }
-    } catch (error) { console.error(error); } finally { setIsVerifying(false); }
+    } catch (error) {} finally { setIsVerifying(false); }
   };
 
-  useEffect(() => {
-    const sessionId = searchParams?.get('session_id');
-    const success = searchParams?.get('success');
-    if (success === 'true' && sessionId) { verifyAndSettlePayment(sessionId); }
-  }, [searchParams]);
+  useEffect(() => { const sessionId = searchParams?.get('session_id'); const success = searchParams?.get('success'); if (success === 'true' && sessionId) { verifyAndSettlePayment(sessionId); } }, [searchParams]);
 
   const latestLease = tenantDocs.find(d => d.type === 'Lease');
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
-
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-  const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setIsUploading(true);
-    setTimeout(() => { setIsUploading(false); setActiveModal('none'); alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); }, 2000);
-  };
-
+  const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => { setIsUploading(true); setTimeout(() => { setIsUploading(false); setActiveModal('none'); alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); }, 2000); };
   const handleStripeCheckout = async () => {
     if (!tenantData) return;
     setIsStripeLoading(true);
     try {
-      const response = await fetch('/api/checkout', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amountDue: tenantData.amountDue, tenantId: tenantData.id, tenantName: tenantData.name, roomInfo: tenantData.roomInfo, returnUrl: window.location.origin }),
-      });
+      const response = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amountDue: tenantData.amountDue, tenantId: tenantData.id, tenantName: tenantData.name, roomInfo: tenantData.roomInfo, returnUrl: window.location.origin }) });
       const data = await response.json();
       if (data.url) window.location.href = data.url; else { alert("錯誤：" + data.error); setIsStripeLoading(false); }
     } catch (error) { alert("系統連線錯誤"); setIsStripeLoading(false); }
@@ -274,7 +157,7 @@ function DashboardContent() {
       await updateDoc(doc(db, 'tenants', tenantData.id), { signature: signature, signedAt: serverTimestamp(), isContractSigned: true, status: 'Active' });
       await updateDoc(doc(db, 'documents', latestLease.id), { 'formData.tenantSignature': signature, 'formData.signedAt': new Date().toISOString() });
       alert("✅ 電子合約簽署成功，具有完整法律效力。");
-    } catch (error) { console.error(error); alert("簽署失敗"); } finally { setIsSigning(false); }
+    } catch (error) { alert("簽署失敗"); } finally { setIsSigning(false); }
   };
 
   const handleDownloadPDF = async () => {
@@ -290,7 +173,7 @@ function DashboardContent() {
       const pdfHeight = (contractRef.current.offsetHeight * pdfWidth) / contractRef.current.offsetWidth;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Document_${tenantData.name}.pdf`);
-    } catch (error) { console.error(error); alert("生成 PDF 失敗。"); } finally { setIsSignDownloading(false); }
+    } catch (error) { alert("生成 PDF 失敗。"); } finally { setIsSignDownloading(false); }
   };
 
   const handleSubmitTicket = async (e: React.FormEvent) => {
@@ -298,13 +181,13 @@ function DashboardContent() {
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
     setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'tickets'), {
-        tenantId: tenantData.id, tenantName: tenantData.name || '', propertyId: tenantData.propertyId || '', propertyName: tenantData.propertyName || '',
-        roomId: tenantData.roomId || '', roomInfo: tenantData.roomInfo || '', type: 'Repair', category: ticketCategory, title: `${ticketCategory}: ${ticketDesc.slice(0, 15)}...`, 
-        description: ticketDesc, priority: 'Medium', status: 'Open', repairCost: 0, hasPhoto: isPhotoUploaded, imageUrl: null, createdAt: serverTimestamp(), updatedAt: serverTimestamp(), source: 'WebPortal'
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id, name: tenantData.name || '', phone: tenantData.phone || '',
+        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
+        category: ticketCategory, message: ticketDesc, isExistingTenant: true, status: 'New', createdAt: serverTimestamp()
       });
-      alert("✅ 報修單已送出！"); setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
-    } catch (error) { console.error(error); alert("報修失敗。"); } finally { setIsSubmittingTicket(false); }
+      alert("✅ 報修單已送出！進度將會顯示於右上角小鈴鐺通知。"); setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
+    } catch (error) { alert("報修失敗。"); } finally { setIsSubmittingTicket(false); }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -315,7 +198,7 @@ function DashboardContent() {
     try {
       await updateDoc(doc(db, 'tenants', tenantData.id), { emergencyContact: emergencyContact, idUploaded: true, isIdVerified: true, kycUpdatedAt: serverTimestamp() });
       setIsProfileComplete(true); alert("✅ 檔案已完善。"); setActiveModal('none');
-    } catch (error) { console.error(error); alert("儲存失敗。"); } finally { setIsSavingProfile(false); }
+    } catch (error) { alert("儲存失敗。"); } finally { setIsSavingProfile(false); }
   };
 
   const renderA4Document = (docData: any, isSigningMode = false) => {
@@ -351,9 +234,11 @@ function DashboardContent() {
 
   const stripeFee = Math.round((tenantData.amountDue || 0) * 0.03);
   const totalWithStripe = (tenantData.amountDue || 0) + stripeFee;
+  
+  // ★ 計算未讀或是狀態有更新的通知數量 (例如管家有回覆，或是狀態不是 New)
+  const hasUpdates = myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved');
 
   return (
-    // ★ 整個背景改為隨天氣動態變色，並加入過渡動畫
     <div className={`min-h-screen pb-12 selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 ${weather.bgClass}`}>
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
@@ -366,7 +251,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 頂部導航 (玻璃材質) */}
+      {/* 頂部導航 */}
       <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
         <Link href="/" className="flex items-center">
           <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
@@ -376,7 +261,7 @@ function DashboardContent() {
 
       <div className="max-w-5xl mx-auto space-y-8 pt-8 px-4 md:px-8">
         
-        {/* ★ 全新歡迎頭部與天氣組件 */}
+        {/* 歡迎與天氣 */}
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
           <div className="animate-in slide-in-from-bottom-4 duration-500">
             <p className="text-slate-600 font-bold tracking-widest text-xs mb-1">
@@ -397,15 +282,15 @@ function DashboardContent() {
               </div>
             </div>
           </div>
-          <button className="relative p-3 bg-white/60 backdrop-blur-md rounded-full shadow-sm border border-white/60 hover:shadow-md transition">
+          
+          {/* ★ 通知鈴鐺 (點擊開啟通知中心) */}
+          <button onClick={() => setActiveModal('notifications')} className="relative p-3 bg-white/60 backdrop-blur-md rounded-full shadow-sm border border-white/60 hover:shadow-md transition">
             <Bell size={20} className="text-slate-600" />
-            <span className="absolute top-2 right-2 w-2 h-2 bg-orange-500 rounded-full border-2 border-white"></span>
+            {hasUpdates && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>}
           </button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          
-          {/* 左欄：主要帳單與資訊 (佔 7 格) */}
           <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
@@ -442,7 +327,6 @@ function DashboardContent() {
             </div>
           </div>
 
-          {/* 右欄：毛玻璃服務清單 (佔 5 格) */}
           <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
             <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
               <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
@@ -467,6 +351,49 @@ function DashboardContent() {
       </div>
 
       {/* ==================== 模態框區塊 (Modals) ==================== */}
+
+      {/* ★ 通知中心 Modal (對應鈴鐺點擊) */}
+      {activeModal === 'notifications' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[70vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Bell className="mr-2 text-orange-500" size={24}/> 您的通知中心</h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-4">
+              {myInquiries.length === 0 ? (
+                <div className="text-center py-10 text-slate-400">
+                  <Bell size={40} className="mx-auto mb-3 opacity-50"/>
+                  <p className="text-sm font-bold">目前沒有任何通知</p>
+                </div>
+              ) : (
+                myInquiries.map(inq => (
+                  <div key={inq.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-start mb-2">
+                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">{inq.category || '系統通知'}</span>
+                      <span className={`text-[10px] font-black px-2 py-1 rounded ${inq.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : inq.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
+                        {inq.status === 'Resolved' ? '已結案' : inq.status === 'In Progress' ? '管家處理中' : '等待處理'}
+                      </span>
+                    </div>
+                    <p className="text-sm font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">「{inq.message}」</p>
+                    
+                    {/* ★ 顯示後台管家的回覆 */}
+                    {inq.adminReply ? (
+                      <div className="bg-blue-50 p-3 rounded-lg flex items-start gap-2 border border-blue-100 mt-2">
+                        <MessageCircle size={16} className="text-blue-500 shrink-0 mt-0.5"/>
+                        <p className="text-sm text-blue-800 font-medium">{inq.adminReply}</p>
+                      </div>
+                    ) : (
+                      <p className="text-xs text-slate-400 mt-2">管家已收到，將盡快為您處理。</p>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 智能客服機器人 Modal */}
       {activeModal === 'contact' && (
@@ -522,51 +449,9 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 報修申請 Modal */}
-      {activeModal === 'ticket' && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3>
-              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
-            </div>
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
-              <form onSubmit={handleSubmitTicket} className="space-y-6">
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
-                      <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
-                    ))}
-                  </div>
-                </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
-                  <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm" />
-                </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
-                    <span>上傳照片 (選填)</span>
-                    <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
-                  </p>
-                  <div className="relative shadow-sm">
-                    <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
-                    <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
-                    </label>
-                  </div>
-                </div>
-                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
-                  {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修申請'}
-                </button>
-              </form>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* 支付 Modal */}
+      {/* 支付、合約、報修、帳單、檔案、檢視等 Modal 區塊保持不變... */}
+      {/* 為了節省空間，其餘 Modal 與上一版完全相同 */}
+      
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -608,7 +493,6 @@ function DashboardContent() {
               <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約</h3>
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
-            
             <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
               <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar">
                 {latestLease ? renderA4Document(latestLease, true) : (
@@ -619,7 +503,6 @@ function DashboardContent() {
                   </div>
                 )}
               </div>
-
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-l border-slate-200 p-6 flex flex-col justify-center">
                   {tenantData.isContractSigned ? (
@@ -652,7 +535,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* KYC 檔案認證 Modal */}
+      {/* KYC Modal */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -673,7 +556,47 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 歷史帳單與收據列表 Modal */}
+      {/* 報修 Modal */}
+      {activeModal === 'ticket' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
+              <form onSubmit={handleSubmitTicket} className="space-y-6">
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
+                  <div className="grid grid-cols-2 gap-3">
+                    {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
+                      <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
+                  <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm" />
+                </div>
+                <div>
+                  <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
+                    <span>上傳照片 (選填)</span>
+                    <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
+                  </p>
+                  <div className="relative shadow-sm">
+                    <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
+                    <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
+                    </label>
+                  </div>
+                </div>
+                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
+                  {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修申請'}
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 歷史單據列表 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -710,7 +633,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* A4 文件預覽 Modal */}
+      {/* 單據 A4 預覽 Modal */}
       {activeModal === 'view_doc' && viewingDoc && (
         <div className="fixed inset-0 bg-slate-900/80 z-[110] flex flex-col items-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full flex justify-end p-4 md:p-0 md:mb-4 flex-none max-w-[800px]">
