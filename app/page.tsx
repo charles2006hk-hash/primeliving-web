@@ -96,8 +96,9 @@ export default function HomePage() {
             <Sparkles size={14} /> 2026 赴港精英租房首選平台
           </div>
 
-          <h1 className="text-5xl md:text-7xl font-black text-slate-900 tracking-tight mb-12 drop-shadow-sm">
-            您在香港的 <span className="text-transparent bg-clip-text bg-gradient-to-r from-orange-600 to-amber-500">星級理想家</span>
+          <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight leading-[1.15]">
+            您在香港的<br className="sm:hidden" />
+            <span className="text-orange-500 whitespace-nowrap inline-block mt-2 sm:mt-0"> 星級理想家</span>
           </h1>
 
           <div className="w-full max-w-4xl drop-shadow-2xl">
