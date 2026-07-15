@@ -106,9 +106,17 @@ function DashboardContent() {
     const unsubInq = onSnapshot(qInq, snap => setMyInquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
 
     // ★ 核心連動：監聽後台發送的 CRM 互動紀錄 (tenant_interactions)
-    const qCrm = query(collection(db, 'tenant_interactions'), where('tenantId', '==', sessionData.id), orderBy('createdAt', 'desc'));
+    // 移除 orderBy 避免 Firebase 要求建立複合索引而報錯，改用前端 JS 排序
+    const qCrm = query(collection(db, 'tenant_interactions'), where('tenantId', '==', sessionData.id));
     const unsubCrm = onSnapshot(qCrm, snap => {
-      setCrmLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+      const logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      // 前端手動按時間降序排序 (最新的在最上面)
+      logs.sort((a: any, b: any) => {
+        const timeA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
+        const timeB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
+        return timeB - timeA;
+      });
+      setCrmLogs(logs);
     });
 
     return () => { unsubTenant(); unsubDocs(); unsubInq(); unsubCrm(); };
