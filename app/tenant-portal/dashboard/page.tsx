@@ -168,21 +168,60 @@ function DashboardContent() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
+              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
               <div className="flex justify-between items-start mb-8 relative z-10">
-                <div><p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本期待繳總額 (HKD)</p><h2 className="text-5xl md:text-6xl font-black tracking-tighter">${(tenantData.amountDue || 0).toLocaleString()}</h2></div>
-                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>{tenantData.status}</span>
+                <div>
+                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本期待繳總額 (HKD)</p>
+                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${(tenantData.amountDue || 0).toLocaleString()}</h2>
+                </div>
+                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
+                  {tenantData.status}
+                </span>
               </div>
-              <button onClick={() => setActiveModal('payment')} disabled={tenantData.amountDue === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed"><CreditCard size={18}/> {tenantData.amountDue === 0 ? '無待繳帳單' : '立即繳費'}</button>
+              <div className="flex items-center gap-4 text-xs font-bold text-slate-300 mb-8 relative z-10">
+                {tenantData.amountDue > 0 ? (
+                  <div className="flex items-center gap-1.5 bg-white/10 px-4 py-2 rounded-xl backdrop-blur-sm border border-white/10"><Calendar size={14} className="text-orange-400"/> 繳費期限: {tenantData.dueDate}</div>
+                ) : (
+                  <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 px-4 py-2 rounded-xl backdrop-blur-sm border border-emerald-500/20"><CheckCircle2 size={14}/> 本期已繳清</div>
+                )}
+              </div>
+              <button onClick={() => setActiveModal('payment')} disabled={tenantData.amountDue === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
+                <CreditCard size={18}/> {tenantData.amountDue === 0 ? '無待繳帳單' : '立即繳費'}
+              </button>
+            </div>
+
+            {/* ★ 這裡補回被誤刪的「剩餘租期」與「專屬帳戶」卡片 */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
+                <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
+                <p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p>
+              </div>
+              <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden">
+                <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
+                <p className="text-sm font-black text-slate-800 truncate">{tenantData.roomInfo}</p>
+              </div>
             </div>
           </div>
 
           <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
             <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
-              <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 hover:bg-white/80 transition-colors rounded-2xl group text-left">
-                <div className="flex items-center gap-4"><div className="w-12 h-12 rounded-2xl flex items-center justify-center bg-emerald-50"><FileSignature size={20} className="text-emerald-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5">電子合約與簽署</p></div></div><ChevronRight size={18} className="text-slate-400" />
+              <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}><FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-500' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p></div></div><ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
               </button>
-              <button onClick={() => { initChat(); setActiveModal('contact'); }} className="w-full flex items-center justify-between p-4 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
-                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-orange-900 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-orange-600 font-bold">智能客服與真人支援</p></div></div><ChevronRight size={18} className="text-orange-400" />
+              
+              {/* ★ 這裡補回被誤刪的三大功能按鈕 */}
+              <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-rose-50'}`}><ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-rose-500'}/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p><p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-500' : 'text-rose-500'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p></div></div><ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+              </button>
+              <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform"><Wrench size={20} className="text-blue-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p><p className="text-[10px] font-bold text-slate-500">設備損壞一鍵呼叫師傅</p></div></div><ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+              </button>
+              <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform"><Receipt size={20} className="text-cyan-500"/></div><div><p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p><p className="text-[10px] font-bold text-slate-500">查看管家開立之收據與對數單</p></div></div><ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+              </button>
+
+              <button onClick={() => { initChat(); setActiveModal('contact'); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
+                <div className="flex items-center gap-4"><div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform"><UserCircle size={20} className="text-orange-500"/></div><div><p className="text-sm font-black text-orange-900 mb-0.5">聯絡專屬管家</p><p className="text-[10px] text-orange-600 font-bold">智能客服與真人支援</p></div></div><ChevronRight size={18} className="text-orange-400 group-hover:text-orange-500 transition-colors" />
               </button>
             </div>
           </div>
