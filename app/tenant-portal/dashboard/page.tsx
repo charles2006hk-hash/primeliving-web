@@ -7,7 +7,7 @@ import {
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud
 } from 'lucide-react';
 import Link from 'next/link';
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
@@ -19,9 +19,12 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
-  const [myInquiries, setMyInquiries] = useState<any[]>([]); // ★ 儲存租客自己送出的報修與訊息
   
-  // ★ 擴充 activeModal 狀態，加入 notifications
+  // ★ 儲存租客自己送出的報修與訊息
+  const [myInquiries, setMyInquiries] = useState<any[]>([]); 
+  // ★ 儲存 CRM 互動時間軸 (管家對話樞紐)
+  const [crmLogs, setCrmLogs] = useState<any[]>([]); 
+  
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
@@ -98,11 +101,17 @@ function DashboardContent() {
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
     const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
 
-    // ★ 核心：監聽租客自己的 CRM 訊息，以顯示在鈴鐺通知裡
+    // 監聽舊版 Inquiries
     const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
     const unsubInq = onSnapshot(qInq, snap => setMyInquiries(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
 
-    return () => { unsubTenant(); unsubDocs(); unsubInq(); };
+    // ★ 核心連動：監聽後台發送的 CRM 互動紀錄 (tenant_interactions)
+    const qCrm = query(collection(db, 'tenant_interactions'), where('tenantId', '==', sessionData.id), orderBy('createdAt', 'desc'));
+    const unsubCrm = onSnapshot(qCrm, snap => {
+      setCrmLogs(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
+    return () => { unsubTenant(); unsubDocs(); unsubInq(); unsubCrm(); };
   }, [router]);
 
   const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
@@ -218,7 +227,7 @@ function DashboardContent() {
         <div className="text-right mb-6"><h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2><p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p><p className="text-xs font-mono mt-3">Date: {fd.docDate}</p></div>
         <div className="flex justify-between gap-6 mb-6"><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3><p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p></div><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3><p className="font-bold text-sm">{fd.tenantName || '__________________'}</p><p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p><p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p></div></div>
         <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold">{fd.propertyAddress}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart} to {fd.leaseEnd}</td></tr></tbody></table></div>
-        {docData.type === 'Statement' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(rec)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(rcv)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(dmg)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Receipt' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Lease' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td></tr></tbody></table></div>) : null}
+        {docData.type === 'Statement' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Receipt' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Lease' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td></tr></tbody></table></div>) : null}
         {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
         {docData.type === 'Lease' && (<div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4"><p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p><p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p></div>)}
         <div className="absolute bottom-[30mm] left-[20mm] right-[20mm] flex justify-between">
@@ -235,8 +244,8 @@ function DashboardContent() {
   const stripeFee = Math.round((tenantData.amountDue || 0) * 0.03);
   const totalWithStripe = (tenantData.amountDue || 0) + stripeFee;
   
-  // ★ 計算未讀或是狀態有更新的通知數量 (例如管家有回覆，或是狀態不是 New)
-  const hasUpdates = myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved');
+  // ★ 紅點邏輯：判斷舊版 Inquiries 或是新版 CRM 紀錄是否有管家新通知
+  const hasUpdates = myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved') || crmLogs.length > 0;
 
   return (
     <div className={`min-h-screen pb-12 selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 ${weather.bgClass}`}>
@@ -284,9 +293,25 @@ function DashboardContent() {
           </div>
           
           {/* ★ 通知鈴鐺 (點擊開啟通知中心) */}
-          <button onClick={() => setActiveModal('notifications')} className="relative p-3 bg-white/60 backdrop-blur-md rounded-full shadow-sm border border-white/60 hover:shadow-md transition">
-            <Bell size={20} className="text-slate-600" />
-            {hasUpdates && <span className="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white animate-pulse"></span>}
+          <button 
+            onClick={() => setActiveModal('notifications')} 
+            className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${
+              hasUpdates 
+                ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' 
+                : 'bg-white/60 border-white/60 hover:shadow-md'
+            }`}
+          >
+            {/* 有通知時將鈴鐺變為紅色 */}
+            <Bell size={20} className={hasUpdates ? 'text-red-600' : 'text-slate-600'} />
+            
+            {hasUpdates && (
+              <span className="absolute top-1.5 right-1.5 flex h-3.5 w-3.5">
+                {/* 底部雷達波紋動畫 (animate-ping) */}
+                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                {/* 上層實體大紅點 */}
+                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-white"></span>
+              </span>
+            )}
           </button>
         </div>
 
@@ -355,40 +380,66 @@ function DashboardContent() {
       {/* ★ 通知中心 Modal (對應鈴鐺點擊) */}
       {activeModal === 'notifications' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[70vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[75vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Bell className="mr-2 text-orange-500" size={24}/> 您的通知中心</h3>
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Bell className="mr-2 text-orange-500" size={24}/> 您的通知與互動</h3>
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
+            
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-4">
-              {myInquiries.length === 0 ? (
+              {myInquiries.length === 0 && crmLogs.length === 0 ? (
                 <div className="text-center py-10 text-slate-400">
                   <Bell size={40} className="mx-auto mb-3 opacity-50"/>
                   <p className="text-sm font-bold">目前沒有任何通知</p>
                 </div>
               ) : (
-                myInquiries.map(inq => (
-                  <div key={inq.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
-                    <div className="flex justify-between items-start mb-2">
-                      <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">{inq.category || '系統通知'}</span>
-                      <span className={`text-[10px] font-black px-2 py-1 rounded ${inq.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : inq.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
-                        {inq.status === 'Resolved' ? '已結案' : inq.status === 'In Progress' ? '管家處理中' : '等待處理'}
-                      </span>
+                <>
+                  {/* 第一區塊：顯示管家發送的 CRM 通知 */}
+                  {crmLogs.length > 0 && (
+                    <div className="space-y-4 mb-6">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">來自管家的最新通知</h4>
+                      {crmLogs.map(log => (
+                        <div key={log.id} className="bg-white p-4 rounded-xl border border-blue-100 shadow-sm relative overflow-hidden">
+                          <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                          <div className="flex justify-between items-start mb-2 pl-2">
+                            <span className="text-xs font-bold text-blue-700 flex items-center"><UserCircle size={14} className="mr-1"/> 官方管家</span>
+                            <span className="text-[10px] text-slate-400 font-mono">{log.createdAt?.toDate ? log.createdAt.toDate().toLocaleString() : '剛剛'}</span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-800 pl-2 whitespace-pre-wrap">{log.content}</p>
+                        </div>
+                      ))}
                     </div>
-                    <p className="text-sm font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">「{inq.message}」</p>
-                    
-                    {/* ★ 顯示後台管家的回覆 */}
-                    {inq.adminReply ? (
-                      <div className="bg-blue-50 p-3 rounded-lg flex items-start gap-2 border border-blue-100 mt-2">
-                        <MessageCircle size={16} className="text-blue-500 shrink-0 mt-0.5"/>
-                        <p className="text-sm text-blue-800 font-medium">{inq.adminReply}</p>
-                      </div>
-                    ) : (
-                      <p className="text-xs text-slate-400 mt-2">管家已收到，將盡快為您處理。</p>
-                    )}
-                  </div>
-                ))
+                  )}
+
+                  {/* 第二區塊：顯示租客自己的報修與客服紀錄 */}
+                  {myInquiries.length > 0 && (
+                    <div className="space-y-4">
+                      <h4 className="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1 border-t border-slate-200 pt-4">您的報修與諮詢紀錄</h4>
+                      {myInquiries.map(inq => (
+                        <div key={inq.id} className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                          <div className="flex justify-between items-start mb-2">
+                            <span className="text-xs font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded">{inq.category || '系統通知'}</span>
+                            <span className={`text-[10px] font-black px-2 py-1 rounded ${inq.status === 'Resolved' ? 'bg-emerald-100 text-emerald-700' : inq.status === 'In Progress' ? 'bg-blue-100 text-blue-700' : 'bg-rose-100 text-rose-700'}`}>
+                              {inq.status === 'Resolved' ? '已結案' : inq.status === 'In Progress' ? '管家處理中' : '等待處理'}
+                            </span>
+                          </div>
+                          <p className="text-sm font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">「{inq.message}」</p>
+                          
+                          {/* 顯示舊版後台管家的回覆 */}
+                          {inq.adminReply ? (
+                            <div className="bg-blue-50 p-3 rounded-lg flex items-start gap-2 border border-blue-100 mt-2">
+                              <MessageCircle size={16} className="text-blue-500 shrink-0 mt-0.5"/>
+                              <p className="text-sm text-blue-800 font-medium">{inq.adminReply}</p>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-slate-400 mt-2">管家已收到，將盡快為您處理。</p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -449,8 +500,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 支付、合約、報修、帳單、檔案、檢視等 Modal 區塊保持不變... */}
-      {/* 為了節省空間，其餘 Modal 與上一版完全相同 */}
+      {/* 其餘 Payment, Contract, KYC, Ticket, Bills, ViewDoc Modals 皆維持原樣... */}
       
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
@@ -583,8 +633,7 @@ function DashboardContent() {
                   <div className="relative shadow-sm">
                     <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
                     <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
-                    </label>
+                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}</label>
                   </div>
                 </div>
                 <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
