@@ -638,20 +638,45 @@ function DashboardContent() {
                   <p className="text-sm font-bold">目前沒有任何帳單記錄</p>
                 </div>
               ) : (
-                otherBills.map(doc => (
-                  <button key={doc.id} onClick={() => { setViewingDoc(doc); setActiveModal('view_doc'); }} className="w-full flex justify-between items-center p-4 border border-slate-200 rounded-xl hover:border-cyan-400 hover:shadow-md transition-all bg-white text-left group">
-                    <div className="flex items-center gap-3">
-                      <div className={`p-2 rounded-lg ${doc.type === 'Receipt' ? 'bg-emerald-50 text-emerald-600' : 'bg-purple-50 text-purple-600'}`}>
-                        <FileText size={20} />
-                      </div>
-                      <div>
-                        <p className="font-bold text-sm text-slate-800">{doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單'}</p>
-                        <p className="text-[10px] text-slate-400 font-mono mt-0.5">開立日期: {doc.formData?.docDate}</p>
-                      </div>
-                    </div>
-                    <Eye size={18} className="text-slate-300 group-hover:text-cyan-600 transition-colors" />
-                  </button>
-                ))
+                // ★ 核心修復：先將 otherBills 依據 dueDate (到期日) 排序，確保 1, 2, 3 期按順序顯示
+                [...otherBills]
+                  .sort((a, b) => {
+                    const dateA = new Date(a.formData?.dueDate || a.createdAt).getTime();
+                    const dateB = new Date(b.formData?.dueDate || b.createdAt).getTime();
+                    return dateA - dateB;
+                  })
+                  .map(doc => {
+                    // ★ 核心修復：優先讀取單據第一項的 description 作為標題
+                    const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
+                    // ★ 判斷是否為「待繳費」狀態，加入 UI 提示
+                    const isPending = doc.status === 'Pending';
+                    const amount = doc.formData?.totalAmount;
+
+                    return (
+                      <button key={doc.id} onClick={() => { setViewingDoc(doc); setActiveModal('view_doc'); }} className={`w-full flex justify-between items-center p-4 border rounded-xl hover:shadow-md transition-all text-left group ${isPending ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400' : 'bg-white border-slate-200 hover:border-cyan-400'}`}>
+                        <div className="flex items-center gap-3">
+                          <div className={`p-2 rounded-lg shrink-0 ${doc.type === 'Receipt' ? 'bg-emerald-50 text-emerald-600' : 'bg-purple-50 text-purple-600'}`}>
+                            <FileText size={20} />
+                          </div>
+                          <div>
+                            {/* ★ 使用動態標題，並加上待繳費標籤 */}
+                            <p className="font-bold text-sm text-slate-800 flex flex-wrap items-center gap-2">
+                              {dynamicTitle}
+                              {isPending && <span className="bg-amber-100 text-amber-700 text-[9px] px-1.5 py-0.5 rounded font-black border border-amber-200 whitespace-nowrap">待繳費</span>}
+                            </p>
+                            <p className="text-[10px] text-slate-400 font-mono mt-1">
+                              到期/更新日: {doc.formData?.dueDate || doc.formData?.docDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : '')}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3">
+                           {/* 顯示金額，讓租客更清楚 */}
+                           {amount && <span className="text-sm font-black font-mono text-slate-700 hidden sm:block">${amount.toLocaleString()}</span>}
+                           <Eye size={18} className="text-slate-300 group-hover:text-cyan-600 transition-colors shrink-0" />
+                        </div>
+                      </button>
+                    )
+                  })
               )}
             </div>
           </div>
