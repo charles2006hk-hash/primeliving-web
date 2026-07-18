@@ -16,7 +16,8 @@ export default function Navbar() {
 
   return (
     <>
-      <nav className="fixed top-0 w-full bg-white/95 backdrop-blur-sm z-[100] border-b border-slate-100 shadow-sm h-14 md:h-16 flex items-center">
+      {/* ★ 修正：降低背景不透明度 (bg-white/80) 並增強模糊效果 (backdrop-blur-md) */}
+      <nav className="fixed top-0 w-full bg-white/80 backdrop-blur-md z-[100] border-b border-slate-100 shadow-sm h-14 md:h-16 flex items-center">
         <div className="max-w-7xl mx-auto px-4 w-full flex items-center justify-between">
           
           {/* ★ 修復：移除 hidden，並動態調整手機版與電腦版的字體大小 */}
@@ -57,7 +58,8 @@ export default function Navbar() {
         </div>
 
         {isMobileMenuOpen && (
-          <div className="absolute top-14 left-0 w-full bg-white border-b border-slate-100 shadow-lg md:hidden flex flex-col px-6 py-6 gap-6 animate-in slide-in-from-top-2 duration-200">
+          // ★ 手機版選單也可以稍微加上模糊效果 (可選)
+          <div className="absolute top-14 left-0 w-full bg-white/95 backdrop-blur-md border-b border-slate-100 shadow-lg md:hidden flex flex-col px-6 py-6 gap-6 animate-in slide-in-from-top-2 duration-200">
             <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className={`text-base ${linkStyle('/')}`}>首頁</Link>
             <Link href="/properties" onClick={() => setIsMobileMenuOpen(false)} className={`text-base ${linkStyle('/properties')}`}>精選房源</Link>
             <Link href="/about" onClick={() => setIsMobileMenuOpen(false)} className={`text-base ${linkStyle('/about')}`}>關於我們</Link>
