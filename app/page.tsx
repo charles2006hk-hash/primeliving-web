@@ -206,41 +206,66 @@ export default function HomePage() {
         </section>
 
         {/* ==================== 最新盤源 ==================== */}
-        <section className="max-w-7xl mx-auto px-4">
-          <div className="flex justify-between items-end mb-12 border-b border-slate-300/50 pb-4">
-            <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
-               <div className="w-2 h-8 bg-orange-500 rounded-full shadow-md shadow-orange-500/50"/> 最新上架盤源
-            </h2>
-            <Link href="/properties" className="text-sm font-black text-orange-600 hover:underline">查看全部</Link>
-          </div>
+<section className="max-w-7xl mx-auto px-4">
+  <div className="flex justify-between items-end mb-12 border-b border-slate-300/50 pb-4">
+    <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
+       <div className="w-2 h-8 bg-orange-500 rounded-full shadow-md shadow-orange-500/50"/> 最新上架盤源
+    </h2>
+    <Link href="/properties" className="text-sm font-black text-orange-600 hover:underline">查看全部</Link>
+  </div>
+  
+  <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+    {featuredProps.map((prop: any) => {
+      // 若有房源跳轉至篩選結果，若滿租則直接進入總表（或可配合觸發表單）
+      const smartDestinationUrl = prop.hasPublishedRooms ? `/properties?search=${prop.name}` : `/properties`;
+      
+      return (
+        <Link href={smartDestinationUrl} key={prop.id} className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative">
           
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {featuredProps.map((prop: any) => {
-              const smartDestinationUrl = prop.hasPublishedRooms ? `/properties?search=${prop.name}` : `/properties`;
-              return (
-                <Link href={smartDestinationUrl} key={prop.id} className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col">
-                  <div className="h-52 relative overflow-hidden bg-slate-100 shrink-0">
-                    {prop.primaryImage ? (
-                      <img src={getProxiedUrl(prop.primaryImage)} alt={prop.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" />
-                    ) : (
-                      <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 font-black italic"><Home size={32} className="mb-2 opacity-20" />Prime Living</div>
-                    )}
-                    <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-black text-slate-800 shadow-sm border border-white/50">
-                      <MapPin size={12} className="inline mr-1 text-orange-500"/> {prop.region} {prop.district}
-                    </div>
-                  </div>
-                  <div className="p-6">
-                    <h3 className="font-black text-lg text-slate-900 mb-4 truncate">{prop.name}</h3>
-                    <div className="flex gap-4 border-t border-slate-200/60 pt-4 text-[10px] font-black text-slate-600">
-                      <span className="flex items-center gap-1 bg-blue-50 px-2 py-1 rounded-md text-blue-700"><ShieldCheck size={14}/> 官方直營</span>
-                      <span className="flex items-center gap-1 bg-cyan-50 px-2 py-1 rounded-md text-cyan-700"><Wind size={14}/> 拎包入住</span>
-                    </div>
-                  </div>
-                </Link>
-              );
-            })}
+          {/* ★ 新增：滿租時的灰色半透明遮罩與標籤 */}
+          {!prop.hasPublishedRooms && (
+            <div className="absolute inset-0 bg-slate-100/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
+              <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-lg -rotate-12 border-2 border-slate-700">
+                SOLD OUT
+              </div>
+            </div>
+          )}
+
+          <div className="h-52 relative overflow-hidden bg-slate-100 shrink-0">
+            {prop.primaryImage ? (
+              <img src={getProxiedUrl(prop.primaryImage)} alt={prop.name} className={`w-full h-full object-cover transition-transform duration-500 ${prop.hasPublishedRooms ? 'group-hover:scale-105' : 'grayscale-[30%]'}`} />
+            ) : (
+              <div className="w-full h-full flex flex-col items-center justify-center text-slate-400 font-black italic"><HomeIcon size={32} className="mb-2 opacity-20" />Prime Living</div>
+            )}
+            <div className="absolute top-4 left-4 px-3 py-1 bg-white/90 backdrop-blur-sm rounded-lg text-[10px] font-black text-slate-800 shadow-sm border border-white/50 z-10">
+              <MapPin size={12} className="inline mr-1 text-orange-500"/> {prop.region} {prop.district}
+            </div>
           </div>
-        </section>
+
+          <div className="p-6 relative z-10">
+            <h3 className={`font-black text-lg mb-4 truncate ${prop.hasPublishedRooms ? 'text-slate-900' : 'text-slate-500'}`}>{prop.name}</h3>
+            <div className="flex gap-4 border-t border-slate-200/60 pt-4 text-[10px] font-black">
+              <span className={`flex items-center gap-1 px-2 py-1 rounded-md ${prop.hasPublishedRooms ? 'bg-blue-50 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>
+                <ShieldCheck size={14}/> 官方直營
+              </span>
+              
+              {/* 根據房間庫存切換標籤 */}
+              {prop.hasPublishedRooms ? (
+                <span className="flex items-center gap-1 bg-cyan-50 px-2 py-1 rounded-md text-cyan-700">
+                  <Wind size={14}/> 拎包入住
+                </span>
+              ) : (
+                <span className="flex items-center gap-1 bg-rose-50 px-2 py-1 rounded-md text-rose-700">
+                  <AlertCircle size={14}/> 已全數滿租
+                </span>
+              )}
+            </div>
+          </div>
+        </Link>
+      );
+    })}
+  </div>
+</section>
 
         {/* ==================== 租客好評 ==================== */}
         <section className="max-w-7xl mx-auto px-4">
