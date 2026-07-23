@@ -44,20 +44,18 @@ export default function Footer() {
         {/* 戰略聯營機構 (Strategic Partner) */}
         <div className="col-span-1">
           <h4 className="text-white font-bold mb-6 uppercase tracking-widest text-xs">戰略聯營機構</h4>
-          <a 
-            href="https://www.hkgwzj.cn/" 
-            target="_blank" 
-            rel="noopener noreferrer"
+          {/* ★ 修改 href 指向內部維護頁 */}
+          <Link 
+            href="/partner" 
             className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 hover:bg-white/10 transition group"
-            title="訪問 HK港灣之家 官網"
+            title="訪問 HK港灣之家"
           >
-            {/* 這裡使用傳入的 Logo */}
             <img src="/115.jpg" alt="HK港灣之家 Logo" className="h-10 w-10 object-contain rounded bg-white p-1 group-hover:scale-105 transition-transform" />
             <div>
               <p className="text-white text-sm font-bold leading-tight group-hover:text-orange-400 transition-colors">HK港灣之家</p>
               <p className="text-[10px] text-slate-500 mt-1 leading-tight">金港灣集團旗下</p>
             </div>
-          </a>
+          </Link>
         </div>
       </div>
 
