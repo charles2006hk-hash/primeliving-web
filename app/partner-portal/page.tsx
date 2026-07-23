@@ -120,8 +120,9 @@ export default function PartnerPortalPage() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (formData.inviteCode !== 'PRIME2026') {
-      return alert('邀請碼錯誤，請聯繫 Prime Living 負責人。');
+    // 前端簡易防呆 (不再寫死密碼比對，交給後端)
+    if (!formData.inviteCode.trim()) {
+      return alert('請輸入邀請碼！');
     }
     if (previewUrls.length === 0) {
       return alert('請至少上傳一張盤源相片。');
@@ -129,7 +130,7 @@ export default function PartnerPortalPage() {
 
     setIsSubmitting(true);
     try {
-      // ★ 儲存合作夥伴資訊至 LocalStorage，下次自動載入
+      // 儲存合作夥伴資訊至 LocalStorage，下次自動載入
       localStorage.setItem('prime_partner_name', formData.partnerName);
       localStorage.setItem('prime_partner_contact', formData.partnerContact);
       localStorage.setItem('prime_invite_code', formData.inviteCode);
@@ -137,14 +138,14 @@ export default function PartnerPortalPage() {
       const storage = getStorage();
       const uploadedImageUrls: string[] = [];
 
-      // ★ 將選擇為「封面」的圖片挪到陣列的第一個 (Index 0)
+      // 將選擇為「封面」的圖片挪到陣列的第一個 (Index 0)
       const orderedPreviews = [...previewUrls];
       if (primaryImageIndex > 0 && primaryImageIndex < orderedPreviews.length) {
         const [coverImage] = orderedPreviews.splice(primaryImageIndex, 1);
         orderedPreviews.unshift(coverImage);
       }
 
-      // 1. 壓縮並上傳所有圖片
+      // 1. 圖片處理：前端壓縮並上傳至 Storage
       for (let i = 0; i < orderedPreviews.length; i++) {
         const file = orderedPreviews[i].file;
         const compressedBlob = await compressImage(file);
@@ -161,40 +162,35 @@ export default function PartnerPortalPage() {
             (error) => reject(error),
             async () => {
               const url = await getDownloadURL(uploadTask.snapshot.ref);
-              uploadedImageUrls.push(url); // 因為我們已經排序過，第一張保證是封面
+              uploadedImageUrls.push(url);
               resolve();
             }
           );
         });
       }
 
-      // 2. 寫入 Firestore 盤源資料庫
-      await addDoc(collection(db, 'properties'), {
-        name: formData.propertyName,
-        region: formData.region,
-        address: formData.address,
-        expectedRent: Number(formData.expectedRent) || 0,
-        plannedRooms: Number(formData.roomCount) || 0,
-        description: formData.description,
-        
-        sourceType: 'partner',
-        approvalStatus: 'pending',
-        status: '準備狀態',
-        webStatus: 'draft',
-        
-        partnerInfo: {
-          name: formData.partnerName,
-          contact: formData.partnerContact
+      // 2. 資料傳輸：呼叫我們自己寫的 Server API
+      const response = await fetch('/api/partner-submit', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
-        
-        images: uploadedImageUrls,
-        createdAt: serverTimestamp(),
+        body: JSON.stringify({
+          ...formData,
+          images: uploadedImageUrls
+        })
       });
 
+      const result = await response.json();
+
+      if (!response.ok || !result.success) {
+        throw new Error(result.error || '提交失敗');
+      }
+
       setIsSuccess(true);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert('提交失敗，請檢查網路狀態或聯繫管理員。');
+      alert(error.message || '提交失敗，請檢查網路狀態或聯繫管理員。');
     } finally {
       setIsSubmitting(false);
       setUploadProgress(0);
