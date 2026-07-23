@@ -10,9 +10,7 @@ import Link from 'next/link';
 // ★ 反向代理 URL 轉換器
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
-  // 避免重複包裝
   if (url.startsWith('/api/image')) return url;
-  // 將原汁原味的 Firebase 網址，打包交給我們的 API
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
@@ -27,7 +25,7 @@ interface PropertyRoom {
   features?: string[];
   propertyName?: string;
   primaryImage?: string;
-  images?: string[]; // 支援專屬圖片
+  images?: string[]; 
 }
 
 async function getPublishedRooms() {
@@ -37,8 +35,8 @@ async function getPublishedRooms() {
     const propMap: Record<string, string> = {};
     propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
 
-    const q = query(collection(db, 'rooms'), where('webStatus', '==', 'published'));
-    const roomSnap = await getDocs(q);
+    // ★ 修改 1：拿掉 where 過濾條件，改為抓取所有房間，後續在記憶體中精確篩選
+    const roomSnap = await getDocs(collection(db, 'rooms'));
 
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
@@ -47,13 +45,11 @@ async function getPublishedRooms() {
       const data = doc.data();
       let primaryImage = null;
 
-      // ★ 優先找此房間的專屬圖片
       if (data.images && data.images.length > 0) {
          const firstAssigned = mediaDocs.find(m => m.id === data.images[0]);
          if (firstAssigned) primaryImage = firstAssigned.url;
       }
 
-      // 如果沒專屬圖片，用盤源的主圖墊底
       if (!primaryImage) {
          const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
          primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
@@ -65,7 +61,10 @@ async function getPublishedRooms() {
         propertyName: propMap[data.propertyId] || '精選盤源',
         primaryImage: primaryImage
       } as PropertyRoom;
-    }).filter(r => r.status !== 'Occupied');
+    })
+    // ★ 修改 2：只保留「已上架(published)」或「已出租(Occupied)」的房間
+    // 這樣可以避免把正在裝修、且從未打算公開的隱藏房間暴露出來
+    .filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
   } catch (error) {
     return [];
   }
@@ -125,35 +124,80 @@ export default async function PropertiesPage({
              <Link href="/properties" className="text-orange-600 text-sm mt-2 block hover:underline">查看全部房源</Link>
           </div>
         ) : (
-          filteredRooms.map((room) => (
-            <Link href={`/properties/${room.id}`} key={room.id} className="group bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-xl hover:border-orange-200 hover:-translate-y-1 transition-all duration-300 flex flex-col">
-              <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
-                {room.primaryImage ? (
-                  // ★ 套用過牆代理
-                  <img src={getProxiedUrl(room.primaryImage)} alt={room.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" />
-                ) : (
-                  <div className="w-full h-full flex flex-col items-center justify-center text-slate-300"><Home size={32} className="mb-2 opacity-50"/><span className="uppercase tracking-widest text-[10px] font-bold opacity-50">Prime Living</span></div>
+          filteredRooms.map((room) => {
+            // ★ 修改 3：動態判斷是否滿租
+            const isSoldOut = room.webStatus === 'draft' || room.status === 'Occupied';
+            // 若滿租，點擊後不會跳轉，停留在原頁面
+            const hrefUrl = isSoldOut ? '#' : `/properties/${room.id}`;
+
+            return (
+              <Link 
+                href={hrefUrl} 
+                key={room.id} 
+                className={`group bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden transition-all duration-300 flex flex-col relative ${
+                  isSoldOut ? 'cursor-default' : 'hover:shadow-xl hover:border-orange-200 hover:-translate-y-1'
+                }`}
+              >
+                {/* ★ 修改 4：滿租遮罩層 */}
+                {isSoldOut && (
+                  <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
+                    <div className="bg-slate-800/90 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
+                      SOLD OUT
+                    </div>
+                  </div>
                 )}
-                <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20">
-                   <MapPin size={12} className="text-orange-500"/> {room.propertyName}
-                </div>
-              </div>
-              <div className="p-6 flex flex-col flex-1">
-                <div className="flex justify-between items-start mb-3">
-                  <h3 className="text-xl font-black text-slate-800 truncate pr-2 mb-1">{room.name}</h3>
-                  <div className="text-right shrink-0">
-                    <span className="text-orange-600 font-black text-2xl">${(room.baseRent || 0).toLocaleString()}</span>
+
+                <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
+                  {room.primaryImage ? (
+                    <img 
+                      src={getProxiedUrl(room.primaryImage)} 
+                      alt={room.name} 
+                      className={`w-full h-full object-cover transition-transform duration-700 ${
+                        isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'
+                      }`} 
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
+                      <Home size={32} className="mb-2 opacity-50"/>
+                      <span className="uppercase tracking-widest text-[10px] font-bold opacity-50">Prime Living</span>
+                    </div>
+                  )}
+                  <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20 z-10">
+                     <MapPin size={12} className={`text-orange-500 ${isSoldOut ? 'grayscale' : ''}`}/> {room.propertyName}
                   </div>
                 </div>
-                <div className="mt-auto pt-4 border-t border-slate-50 flex items-center justify-between text-xs font-bold text-slate-500">
-                   <div className="flex gap-3">
-                     <span className="flex items-center gap-1"><BedDouble size={14}/> 拎包入住</span>
-                   </div>
-                   <span className="bg-slate-900 text-white px-4 py-2 rounded-lg group-hover:bg-orange-600 transition-colors">立即查看</span>
+                
+                <div className="p-6 flex flex-col flex-1 relative z-10">
+                  <div className="flex justify-between items-start mb-3">
+                    <h3 className={`text-xl font-black truncate pr-2 mb-1 ${isSoldOut ? 'text-slate-400' : 'text-slate-800'}`}>
+                      {room.name}
+                    </h3>
+                    <div className="text-right shrink-0">
+                      <span className={`font-black text-2xl ${isSoldOut ? 'text-slate-400' : 'text-orange-600'}`}>
+                        ${(room.baseRent || 0).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                  
+                  <div className="mt-auto pt-4 border-t border-slate-50 flex items-center justify-between text-xs font-bold text-slate-500">
+                     <div className="flex gap-3">
+                       <span className={`flex items-center gap-1 ${isSoldOut ? 'text-slate-400' : ''}`}>
+                         <BedDouble size={14}/> 拎包入住
+                       </span>
+                     </div>
+                     
+                     <span className={`px-4 py-2 rounded-lg transition-colors ${
+                       isSoldOut 
+                        ? 'bg-slate-200 text-slate-400' 
+                        : 'bg-slate-900 text-white group-hover:bg-orange-600'
+                     }`}>
+                       {isSoldOut ? '已全數租出' : '立即查看'}
+                     </span>
+                  </div>
                 </div>
-              </div>
-            </Link>
-          ))
+              </Link>
+            )
+          })
         )}
       </div>
     </div>
