@@ -44,25 +44,32 @@ export default function Footer() {
         {/* 戰略聯營機構 (Strategic Partner) */}
         <div className="col-span-1">
           <h4 className="text-white font-bold mb-6 uppercase tracking-widest text-xs">戰略聯營機構</h4>
-          <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 hover:bg-white/10 transition">
-            <img src="/115.jpg" alt="HK港灣之家" className="h-10 w-10 object-contain rounded bg-white p-1" />
+          <a 
+            href="https://www.hkgwzj.cn/" 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 hover:bg-white/10 transition group"
+            title="訪問 HK港灣之家 官網"
+          >
+            {/* 這裡使用傳入的 Logo */}
+            <img src="/115.jpg" alt="HK港灣之家 Logo" className="h-10 w-10 object-contain rounded bg-white p-1 group-hover:scale-105 transition-transform" />
             <div>
-              <p className="text-white text-sm font-bold leading-tight">金港灣集團有限公司</p>
-              <p className="text-[9px] text-slate-400 font-mono mt-1 leading-tight">GOLDEN HARBOUR<br/>GROUP LIMITED</p>
+              <p className="text-white text-sm font-bold leading-tight group-hover:text-orange-400 transition-colors">HK港灣之家</p>
+              <p className="text-[10px] text-slate-500 mt-1 leading-tight">金港灣集團旗下</p>
             </div>
-          </div>
+          </a>
         </div>
       </div>
 
       <div className="max-w-7xl mx-auto mt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] font-bold uppercase tracking-[0.15em]">
         <p>© {new Date().getFullYear()} PRIME LIVING PROPERTY (HK) MANAGEMENT LTD. ALL RIGHTS RESERVED.</p>
-        <div className="flex flex-wrap gap-4 text-[10px] font-bold uppercase tracking-wider">
-  <Link href="/legal?tab=privacy" className="hover:text-white transition-colors">隱私政策 Privacy Policy</Link>
-  <span className="text-slate-600">|</span>
-  <Link href="/legal?tab=terms" className="hover:text-white transition-colors">服務條款 Terms & Conditions</Link>
-  <span className="text-slate-600">|</span>
-  <Link href="/legal?tab=refund" className="hover:text-white transition-colors">取消與退款政策 Refund Policy</Link>
-</div>
+        <div className="flex flex-wrap gap-4">
+          <Link href="/legal?tab=privacy" className="hover:text-white transition-colors">隱私政策 Privacy Policy</Link>
+          <span className="text-slate-700">|</span>
+          <Link href="/legal?tab=terms" className="hover:text-white transition-colors">服務條款 Terms & Conditions</Link>
+          <span className="text-slate-700">|</span>
+          <Link href="/legal?tab=refund" className="hover:text-white transition-colors">取消與退款政策 Refund Policy</Link>
+        </div>
       </div>
     </footer>
   );
