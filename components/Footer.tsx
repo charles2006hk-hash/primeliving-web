@@ -56,10 +56,13 @@ export default function Footer() {
 
       <div className="max-w-7xl mx-auto mt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] font-bold uppercase tracking-[0.15em]">
         <p>© {new Date().getFullYear()} PRIME LIVING PROPERTY (HK) MANAGEMENT LTD. ALL RIGHTS RESERVED.</p>
-        <div className="flex gap-6">
-          <Link href="/legal?tab=privacy" className="hover:text-white transition-colors">隱私政策</Link>
-          <Link href="/legal?tab=terms" className="hover:text-white transition-colors">服務條款</Link>
-        </div>
+        <div className="flex flex-wrap gap-4 text-[10px] font-bold uppercase tracking-wider">
+  <Link href="/legal?tab=privacy" className="hover:text-white transition-colors">隱私政策 Privacy Policy</Link>
+  <span className="text-slate-600">|</span>
+  <Link href="/legal?tab=terms" className="hover:text-white transition-colors">服務條款 Terms & Conditions</Link>
+  <span className="text-slate-600">|</span>
+  <Link href="/legal?tab=refund" className="hover:text-white transition-colors">取消與退款政策 Refund Policy</Link>
+</div>
       </div>
     </footer>
   );
