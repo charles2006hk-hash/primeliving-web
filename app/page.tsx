@@ -1,17 +1,18 @@
 'use client';
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { collection, getDocs, query, limit, orderBy } from 'firebase/firestore'; 
+import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 import { 
   Search, MapPin, Home as HomeIcon, ChevronDown, Sparkles, 
-  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2
+  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle
 } from 'lucide-react';
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
 
+// 圖片代理處理，避免跨域或直接讀取失敗
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
@@ -22,24 +23,36 @@ const getProxiedUrl = (url?: string | null) => {
 };
 
 export default function HomePage() {
-  const [areaGuides, setAreaGuides] = React.useState<any[]>([]);
-  const [testimonials, setTestimonials] = React.useState<any[]>([]);
-  const [featuredProps, setFeaturedProps] = React.useState<any[]>([]);
-  const [loading, setLoading] = React.useState(true);
+  // --- 基礎數據狀態 ---
+  const [areaGuides, setAreaGuides] = useState<any[]>([]);
+  const [testimonials, setTestimonials] = useState<any[]>([]);
+  const [featuredProps, setFeaturedProps] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  React.useEffect(() => {
+  // --- 滿租轉化機制 (Lead Generation) 狀態 ---
+  const [loadingArea, setLoadingArea] = useState<string | null>(null);
+  const [fullArea, setFullArea] = useState<string | null>(null);
+  const [leadName, setLeadName] = useState('');
+  const [leadPhone, setLeadPhone] = useState('');
+  const [leadReq, setLeadReq] = useState('');
+  const [submittingLead, setSubmittingLead] = useState(false);
+
+  // 初始化拉取 Firebase 數據
+  useEffect(() => {
     async function fetchAllData() {
       try {
         if (!db) return;
-
+        // 1. 拉取區域百科
         const qArea = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         setAreaGuides(snapArea.docs.map(d => ({ id: d.id, ...d.data(), imageUrl: d.data().imageUrl || d.data().img || ''})));
 
+        // 2. 拉取租客評價
         const qTest = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
         setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })));
 
+        // 3. 拉取最新盤源與房間狀態
         const qProp = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
         const roomsSnap = await getDocs(collection(db, 'rooms'));
@@ -55,39 +68,70 @@ export default function HomePage() {
           return { id: doc.id, ...data, primaryImage: primaryImg, hasPublishedRooms };
         });
         setFeaturedProps(propsData);
-
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
+      } catch (e) { 
+        console.error("載入首頁數據失敗:", e); 
+      } finally { 
+        setLoading(false); 
       }
     }
     fetchAllData();
   }, []);
 
+  // ★ 處理生活圈百科點擊 (1.5秒延遲與庫存判定)
+  const handleAreaClick = (e: React.MouseEvent, areaName: string) => {
+    e.preventDefault();
+    setLoadingArea(areaName);
+    
+    setTimeout(() => {
+      setLoadingArea(null);
+      // 邏輯判定：假設目前只有沙田與大埔有房源 (可依實際業務修改)
+      if (areaName.includes('沙田') || areaName.includes('大埔')) {
+        window.location.href = `/properties?search=${encodeURIComponent(areaName.split(' ')[0])}`;
+      } else {
+        setFullArea(areaName); // 觸發滿租彈窗
+      }
+    }, 1500);
+  };
+
+  // ★ 百科卡片表單提交入 CRM (Firebase inquiries collection)
+  const handleAreaLeadSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSubmittingLead(true);
+    try {
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: `visitor_${Date.now()}`,
+        name: leadName,
+        phone: leadPhone,
+        message: `【百科卡片-候補需求】\n目標生活圈：${fullArea}\n預期入住與預算：${leadReq}`,
+        type: 'official_notice',
+        status: 'New', // 在後台顯示為新進需求
+        createdAt: serverTimestamp(),
+        isExistingTenant: false // 標記為潛在客戶
+      });
+      alert('✅ 需求已成功發送給管家團隊！若有房源釋出將第一時間通知您。');
+      setFullArea(null); 
+      setLeadName(''); 
+      setLeadPhone(''); 
+      setLeadReq('');
+    } catch (error) {
+      console.error("寫入 CRM 失敗:", error);
+      alert('發送失敗，請稍後再試或直接聯絡客服。');
+    } finally {
+      setSubmittingLead(false);
+    }
+  };
+
   return (
-    // ★ 1. 增強版底層：移除純白，改用微暖漸層底色
     <main className="relative min-h-screen bg-gradient-to-br from-orange-50 via-rose-50 to-amber-50 overflow-hidden selection:bg-orange-200">
       
-      {/* ★ 2. 強化版極光渲染層 (Aurora Mesh Gradient) */}
+      {/* 沉浸式極光背景層 */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
-        
-        {/* 保留原本的天氣環境光作為底紋 */}
-        <div className="absolute inset-0 opacity-60 mix-blend-overlay">
-          <WeatherAmbientBackground />
-        </div>
-
-        {/* 左上角：高飽和度橘色主光暈 */}
+        <div className="absolute inset-0 opacity-60 mix-blend-overlay"><WeatherAmbientBackground /></div>
         <div className="absolute -top-[10%] -left-[10%] w-[50vw] h-[50vw] rounded-full bg-orange-400/30 blur-[120px] mix-blend-multiply" />
-        
-        {/* 右側：玫瑰粉色輔助光暈 */}
         <div className="absolute top-[15%] -right-[10%] w-[45vw] h-[45vw] rounded-full bg-rose-400/20 blur-[130px] mix-blend-multiply" />
-        
-        {/* 左下與底部：琥珀色暖光托底 */}
         <div className="absolute -bottom-[10%] left-[10%] w-[60vw] h-[60vw] rounded-full bg-amber-400/25 blur-[150px] mix-blend-multiply" />
       </div>
 
-      {/* --- 內容層 --- */}
       <div className="relative z-10 pt-24 md:pt-32 pb-24 space-y-32">
         
         {/* ==================== Hero Section ==================== */}
@@ -95,12 +139,10 @@ export default function HomePage() {
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-orange-600 text-xs font-black tracking-widest mb-6 shadow-sm">
             <Sparkles size={14} /> 2026 赴港精英租房首選平台
           </div>
-
           <h1 className="text-4xl md:text-6xl font-black text-slate-900 mb-6 tracking-tight leading-[1.15]">
             您在香港的<br className="sm:hidden" />
             <span className="text-orange-500 whitespace-nowrap inline-block mt-2 sm:mt-0"> 星級理想家</span>
           </h1>
-
           <div className="w-full max-w-4xl drop-shadow-2xl">
             <HomeSearch />
           </div>
@@ -144,9 +186,18 @@ export default function HomePage() {
                         <p className="text-xs font-bold text-slate-800">{area.estates}</p>
                       </div>
                     </div>
-                    <Link href={`/properties?search=${area.name.split(' ')[0]}`} className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm">
-                      探索此區房源 <ArrowRight size={18} />
-                    </Link>
+                    {/* ★ 觸發庫存查詢邏輯 */}
+                    <button 
+                      onClick={(e) => handleAreaClick(e, area.name)} 
+                      disabled={loadingArea === area.name} 
+                      className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70"
+                    >
+                      {loadingArea === area.name ? (
+                        <><Loader2 className="animate-spin" size={18}/> 正在調度庫存...</>
+                      ) : (
+                        <>探索此區房源 <ArrowRight size={18} /></>
+                      )}
+                    </button>
                   </div>
                 </div>
               ))}
@@ -221,6 +272,71 @@ export default function HomePage() {
         </section>
 
       </div>
+
+      {/* ==================== 滿租候補表單 Modal ==================== */}
+      {fullArea && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white/95 backdrop-blur-xl border border-white rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
+            
+            <button 
+              onClick={() => setFullArea(null)} 
+              className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition"
+            >
+              <X size={24}/>
+            </button>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-rose-400"></div>
+            
+            <div className="w-16 h-16 bg-amber-100 rounded-full flex items-center justify-center mx-auto mb-4">
+              <AlertCircle size={32} className="text-amber-500" />
+            </div>
+            
+            <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">
+              抱歉，【{fullArea}】周邊的優質單位目前已全數租滿！
+            </h3>
+            <p className="text-slate-600 mb-8 font-medium max-w-2xl mx-auto text-center">
+              佳寓的高性價比房源通常會被迅速預訂。請留下您的需求，若有租客提前退租或新盤上架，專屬管家會為您優先保留。
+            </p>
+
+            <form onSubmit={handleAreaLeadSubmit} className="max-w-2xl mx-auto bg-slate-50/80 p-6 rounded-2xl shadow-inner border border-slate-200 text-left grid grid-cols-2 gap-4 mb-8">
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 mb-1">您的稱呼 *</label>
+                <input required type="text" value={leadName} onChange={e=>setLeadName(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 陳同學"/>
+              </div>
+              <div className="col-span-2 sm:col-span-1">
+                <label className="block text-xs font-bold text-slate-500 mb-1">聯絡電話 / WeChat *</label>
+                <input required type="text" value={leadPhone} onChange={e=>setLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="輸入電話或微信號"/>
+              </div>
+              <div className="col-span-2">
+                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間與預算</label>
+                <input type="text" value={leadReq} onChange={e=>setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住，預算 $6000 左右"/>
+              </div>
+              <div className="col-span-2 mt-2">
+                <button type="submit" disabled={submittingLead} className="w-full bg-orange-500 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-600 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
+                  {submittingLead ? <Loader2 className="animate-spin" size={24}/> : '送出候補優先登記'}
+                </button>
+              </div>
+            </form>
+
+            <div className="text-left bg-slate-50 p-6 rounded-3xl border border-slate-200">
+              <h4 className="text-xl font-black text-slate-900 mb-4">為您推薦其他熱門區域</h4>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                {[ 
+                  { name: '大埔中心 (近教大)', status: '尚有少量空房', search: '大埔' }, 
+                  { name: '沙田市中心 (近中大)', status: '熱門房源', search: '沙田' }, 
+                  { name: '紅磡 (近理大/城大)', status: '即將滿租', search: '紅磡' } 
+                ].map((rec, idx) => (
+                  <Link href={`/properties?search=${rec.search}`} key={idx} onClick={() => setFullArea(null)} className="bg-white rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-all border border-slate-200 cursor-pointer group flex flex-col p-4">
+                    <h5 className="font-bold text-slate-800 text-sm">{rec.name}</h5>
+                    <p className="text-xs text-emerald-600 mt-1.5 font-bold flex items-center gap-1">
+                      <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span> {rec.status}
+                    </p>
+                  </Link>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
