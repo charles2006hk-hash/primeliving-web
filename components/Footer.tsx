@@ -1,15 +1,15 @@
+'use client';
 import React from 'react';
 import Link from 'next/link';
 import { ShieldCheck, MapPin } from 'lucide-react';
 
 export default function Footer() {
   return (
-    <footer className="bg-slate-900 text-slate-400 py-16 px-4">
-      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-12">
+    <footer className="bg-slate-900 text-slate-400 py-16 px-4 border-t border-slate-800">
+      <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-5 gap-12 border-b border-white/10 pb-12">
         
         {/* 品牌介紹 */}
-        <div className="col-span-1 md:col-span-1">
-          {/* ★ Logo 與公司名稱並存 */}
+        <div className="col-span-1 md:col-span-2">
           <div className="flex items-center gap-3 mb-6">
             <div className="bg-white p-1.5 rounded-lg inline-flex">
               <img src="/logo.png" alt="Prime Living Logo" className="h-8 object-contain" />
@@ -22,7 +22,7 @@ export default function Footer() {
         </div>
 
         {/* 快捷連結 */}
-        <div>
+        <div className="col-span-1">
           <h4 className="text-white font-bold mb-6">快捷導航</h4>
           <ul className="space-y-4 text-sm font-medium">
             <li><Link href="/properties" className="hover:text-orange-500 transition-colors">精選房源</Link></li>
@@ -32,7 +32,7 @@ export default function Footer() {
         </div>
 
         {/* 服務區域 */}
-        <div>
+        <div className="col-span-1">
           <h4 className="text-white font-bold mb-6">服務區域</h4>
           <ul className="space-y-4 text-sm font-medium">
             <li className="flex items-center gap-2"><MapPin size={14}/> 九龍區域 (理大/城大/浸大)</li>
@@ -41,26 +41,24 @@ export default function Footer() {
           </ul>
         </div>
 
-        {/* 官方認證 */}
-        <div>
-          <h4 className="text-white font-bold mb-6">品牌保障</h4>
-          <div className="bg-white/5 p-4 rounded-2xl border border-white/10">
-            <div className="flex items-center gap-3 text-emerald-400 mb-3">
-              <ShieldCheck size={20} />
-              <span className="text-xs font-black uppercase tracking-widest">Official Direct</span>
+        {/* 戰略聯營機構 (Strategic Partner) */}
+        <div className="col-span-1">
+          <h4 className="text-white font-bold mb-6 uppercase tracking-widest text-xs">戰略聯營機構</h4>
+          <div className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 hover:bg-white/10 transition">
+            <img src="/115.jpg" alt="HK港灣之家" className="h-10 w-10 object-contain rounded bg-white p-1" />
+            <div>
+              <p className="text-white text-sm font-bold leading-tight">金港灣集團有限公司</p>
+              <p className="text-[9px] text-slate-400 font-mono mt-1 leading-tight">GOLDEN HARBOUR<br/>GROUP LIMITED</p>
             </div>
-            <p className="text-[10px] leading-relaxed">
-              所有房源均為佳寓官方直營，提供具備法律效力的印花租約，保障學子租房安全。
-            </p>
           </div>
         </div>
       </div>
 
-      <div className="max-w-7xl mx-auto mt-16 pt-8 border-t border-white/10 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] font-bold uppercase tracking-[0.2em]">
-        <p>© 2026 PRIMELIVING HONG KONG. ALL RIGHTS RESERVED.</p>
+      <div className="max-w-7xl mx-auto mt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-[10px] font-bold uppercase tracking-[0.15em]">
+        <p>© {new Date().getFullYear()} PRIME LIVING PROPERTY (HK) MANAGEMENT LTD. ALL RIGHTS RESERVED.</p>
         <div className="flex gap-6">
-          <Link href="/privacy" className="hover:text-white">隱私政策</Link>
-          <Link href="/terms" className="hover:text-white">服務條款</Link>
+          <Link href="/legal?tab=privacy" className="hover:text-white transition-colors">隱私政策</Link>
+          <Link href="/legal?tab=terms" className="hover:text-white transition-colors">服務條款</Link>
         </div>
       </div>
     </footer>
