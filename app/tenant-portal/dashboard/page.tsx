@@ -134,64 +134,84 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
 
-  // ★ 需求 1: 重構即時動態對數與帳單計算 (避免硬編碼及浮點數誤差)
-  const billingSummary = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  // ★ 財務精確計算輔助函數 (單位：分 Cents)
+const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
 
-    // 篩選出待繳費或對數未結清的單據
-    const pendingDocs = tenantDocs.filter(d => d.status === 'Pending' || d.paymentStatus === 'Unpaid');
+// ★ 動態帳單邏輯：預設包含「過期」+「今日到期」+「下一筆即將到期（含同日）」
+const billingSummary = useMemo(() => {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
 
-    let mustPayCents = 0;
-    let optionalPayCents = 0;
+  // 1. 篩選待繳單據
+  const pendingDocs = tenantDocs.filter(d => d.status === 'Pending' || d.paymentStatus === 'Unpaid');
 
-    const mustPayItems: any[] = [];
-    const optionalPayItems: any[] = [];
+  // 2. 解析並結構化單據資料
+  const allBills = pendingDocs.map(item => {
+    const fd = item.formData || {};
+    const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
+    const amountCents = toCents(amount);
 
-    pendingDocs.forEach(item => {
-      const fd = item.formData || {};
-      const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
-      const amountCents = toCents(amount);
+    const dueDateStr = fd.dueDate || fd.docDate || (item.createdAt?.toDate ? item.createdAt.toDate().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+    const dueDate = new Date(dueDateStr);
+    dueDate.setHours(0, 0, 0, 0);
 
-      const dueDateStr = fd.dueDate || fd.docDate || item.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
-      const dueDate = dueDateStr ? new Date(dueDateStr) : new Date();
-
-      const isOverdueOrDue = dueDate <= today;
-
-      const billItem = {
-        id: item.id,
-        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'),
-        amount: amount,
-        amountCents: amountCents,
-        dueDate: dueDateStr,
-        isOverdue: isOverdueOrDue
-      };
-
-      if (isOverdueOrDue) {
-        mustPayCents += amountCents;
-        mustPayItems.push(billItem);
-      } else {
-        optionalPayCents += amountCents;
-        optionalPayItems.push(billItem);
-      }
-    });
-
-    // 計算當前選擇的提早繳費金額
-    const selectedOptionalCents = optionalPayItems
-      .filter(item => selectedOptionalBillIds.includes(item.id))
-      .reduce((sum, item) => sum + item.amountCents, 0);
-
-    const grandTotalCents = mustPayCents + selectedOptionalCents;
+    const isOverdue = dueDate < today;
+    const isDueToday = dueDate.getTime() === today.getTime();
 
     return {
-      mustPayTotal: fromCents(mustPayCents),
-      optionalTotal: fromCents(optionalPayCents),
-      selectedOptionalTotal: fromCents(selectedOptionalCents),
-      grandTotal: fromCents(grandTotalCents),
-      mustPayItems,
-      optionalPayItems
+      id: item.id,
+      title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'),
+      amount,
+      amountCents,
+      dueDateStr,
+      dueDate,
+      isOverdue,
+      isDueToday
     };
-  }, [tenantDocs, selectedOptionalBillIds]);
+  });
+
+  // 依到期日由舊到新排序
+  allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+
+  // 3. 找出未過期 (未來) 的單據中的「最早到期日」
+  const futureBills = allBills.filter(b => b.dueDate > today);
+  const nextUpcomingTimestamp = futureBills.length > 0 ? futureBills[0].dueDate.getTime() : null;
+
+  // 4. 劃分「預設必須/自動納入項目」與「可選提早繳項目」
+  const defaultSelectedItems: typeof allBills = [];
+  const optionalPayItems: typeof allBills = [];
+
+  allBills.forEach(bill => {
+    if (bill.dueDate <= today) {
+      // 過期或今日到期 -> 強制預設選取
+      defaultSelectedItems.push(bill);
+    } else if (nextUpcomingTimestamp !== null && bill.dueDate.getTime() === nextUpcomingTimestamp) {
+      // 未來第一筆即將到期（含同日多筆） -> 自動納入預設支付
+      defaultSelectedItems.push(bill);
+    } else {
+      // 更遠未來的單據 -> 列為可選提早支付項目
+      optionalPayItems.push(bill);
+    }
+  });
+
+  // 5. 金額精確計算 (以 Cents 避開浮點數誤差)
+  const defaultSelectedCents = defaultSelectedItems.reduce((sum, b) => sum + b.amountCents, 0);
+  const userSelectedOptionalCents = optionalPayItems
+    .filter(b => selectedOptionalBillIds.includes(b.id))
+    .reduce((sum, b) => sum + b.amountCents, 0);
+
+  const grandTotalCents = defaultSelectedCents + userSelectedOptionalCents;
+  const hasOverdue = defaultSelectedItems.some(b => b.isOverdue);
+
+  return {
+    grandTotal: fromCents(grandTotalCents),
+    defaultSelectedTotal: fromCents(defaultSelectedCents),
+    defaultSelectedItems,
+    optionalPayItems,
+    hasOverdue
+  };
+}, [tenantDocs, selectedOptionalBillIds]);
 
   const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
   const handleChatOption = (opt: string) => { setChatCategory(opt); setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); };
@@ -561,79 +581,105 @@ function DashboardContent() {
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
             
-            {/* ★ 需求 1: 優化卡片，動態展示精確應付總額與選擇 */}
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
-              
-              <div className="flex justify-between items-start mb-4 relative z-10">
-                <div>
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次待繳總額 (HKD)</p>
-                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.grandTotal.toLocaleString()}</h2>
-                </div>
-                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-                  {tenantData.status}
+            {/* 待繳總額主卡片 */}
+<div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
+  <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
+
+  {/* 🚨 逾期特別提醒 Banner */}
+  {billingSummary.hasOverdue && (
+    <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
+      <AlertCircle size={16} className="text-red-400 shrink-0"/>
+      <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
+    </div>
+  )}
+
+  <div className="flex justify-between items-start mb-4 relative z-10">
+    <div>
+      <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次待繳總額 (HKD)</p>
+      <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.grandTotal.toLocaleString()}</h2>
+    </div>
+    <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
+      {billingSummary.hasOverdue ? '有逾期帳單' : tenantData.status}
+    </span>
+  </div>
+
+  {/* 帳單明細折疊開關 */}
+  <div className="mb-6 relative z-10">
+    <button 
+      onClick={() => setShowBillDetails(!showBillDetails)} 
+      className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition"
+    >
+      {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+      {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
+    </button>
+
+    {showBillDetails && (
+      <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
+        {/* 預設自動納入項目 (含過期 + 今日 + 下一筆到期) */}
+        <div>
+          <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (預設包含)：</p>
+          {billingSummary.defaultSelectedItems.length === 0 ? (
+            <p className="text-slate-400 py-1">目前無任何待繳單據</p>
+          ) : (
+            billingSummary.defaultSelectedItems.map(item => (
+              <div key={item.id} className="flex justify-between py-1 text-slate-200 items-center">
+                <span className="flex items-center gap-1.5">
+                  {item.isOverdue && (
+                    <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">
+                      已逾期
+                    </span>
+                  )}
+                  {item.isDueToday && (
+                    <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">
+                      今日到期
+                    </span>
+                  )}
+                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
                 </span>
+                <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
               </div>
+            ))
+          )}
+        </div>
 
-              {/* 明細展開按鈕 */}
-              <div className="mb-6 relative z-10">
-                <button 
-                  onClick={() => setShowBillDetails(!showBillDetails)} 
-                  className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition"
+        {/* 可選提早支付項目 (更遠未來的單據) */}
+        {billingSummary.optionalPayItems.length > 0 && (
+          <div className="pt-2 border-t border-white/10">
+            <p className="text-slate-400 font-bold mb-1.5">🗓️ 可選擇提早支付項目：</p>
+            {billingSummary.optionalPayItems.map(item => {
+              const isChecked = selectedOptionalBillIds.includes(item.id);
+              return (
+                <div 
+                  key={item.id} 
+                  onClick={() => {
+                    setSelectedOptionalBillIds(prev => 
+                      isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                    );
+                  }}
+                  className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
                 >
-                  {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                  {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
-                </button>
-
-                {showBillDetails && (
-                  <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
-                    <div>
-                      <p className="text-slate-400 font-bold mb-1 border-b border-white/10 pb-1">🚨 本期必繳單據 (已到期)：</p>
-                      {billingSummary.mustPayItems.length === 0 ? (
-                        <p className="text-slate-300 py-1">目前無到期應繳單據</p>
-                      ) : (
-                        billingSummary.mustPayItems.map(item => (
-                          <div key={item.id} className="flex justify-between py-1 text-slate-200">
-                            <span>{item.title} <span className="text-[10px] text-red-300">({item.dueDate} 到期)</span></span>
-                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {billingSummary.optionalPayItems.length > 0 && (
-                      <div className="pt-2 border-t border-white/10">
-                        <p className="text-slate-400 font-bold mb-1">🗓️ 可選擇提早支付項目：</p>
-                        {billingSummary.optionalPayItems.map(item => {
-                          const isChecked = selectedOptionalBillIds.includes(item.id);
-                          return (
-                            <div 
-                              key={item.id} 
-                              onClick={() => {
-                                setSelectedOptionalBillIds(prev => 
-                                  isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id]
-                                );
-                              }}
-                              className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
-                            >
-                              <div className="flex items-center gap-2">
-                                {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
-                                <span>{item.title} <span className="text-[10px] text-slate-400">({item.dueDate})</span></span>
-                              </div>
-                              <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
+                  <div className="flex items-center gap-2">
+                    {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
+                    <span>{item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span></span>
                   </div>
-                )}
-              </div>
+                  <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    )}
+  </div>
 
-              <button onClick={() => setActiveModal('payment')} disabled={billingSummary.grandTotal === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
-                <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
-              </button>
-            </div>
+  <button 
+    onClick={() => setActiveModal('payment')} 
+    disabled={billingSummary.grandTotal === 0} 
+    className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed"
+  >
+    <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
+  </button>
+</div>
 
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
