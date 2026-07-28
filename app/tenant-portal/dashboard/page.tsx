@@ -314,9 +314,6 @@ const billingSummary = useMemo(() => {
     } catch (error) { alert("簽署失敗"); } finally { setIsSigning(false); }
   };
 
-  // ==========================================
-// 1. 替換 handleDownloadPDF (解決 PDF 不能輸出與截圖縮放崩潰)
-// ==========================================
 const handleDownloadPDF = async () => {
   if (!contractRef.current) return;
   const htmlToImage = (window as any).htmlToImage;
@@ -327,16 +324,22 @@ const handleDownloadPDF = async () => {
   try {
     const element = contractRef.current;
     
-    // ★ 核心修復：強制宣告標準 A4 像素寬高，並透過 style 覆蓋 transform 縮放
-    // 解決 htmlToImage 遇到 CSS scale() 時捕捉失敗或報錯的 Bug
+    // ★ 核心防禦：加入 filter 過濾載入失敗 (naturalWidth === 0) 的圖片
+    // 徹底避免 404 圖片中斷 htmlToImage 的 Canvas 繪製流程
     const imgData = await htmlToImage.toPng(element, { 
       quality: 1.0, 
       pixelRatio: 2, 
       backgroundColor: '#ffffff',
-      // 標準 A4 尺寸 (96 DPI): 794 x 1123
       width: 794,
       height: 1123,
-      cacheBust: true, // 避免 Logo 圖片跨域或快取造成的 Canvas 污染
+      cacheBust: true,
+      filter: (node: HTMLElement) => {
+        // 若圖片未成功載入 (如 404)，直接跳過該 DOM 節點，防止拋出 Event 異常
+        if (node instanceof HTMLImageElement) {
+          return node.complete && node.naturalWidth > 0;
+        }
+        return true;
+      },
       style: {
         transform: 'none',
         transformOrigin: 'top left',
@@ -489,15 +492,24 @@ const renderA4Document = (docData: any, isSigningMode = false) => {
       <div className="absolute bottom-[60px] left-[75px] right-[75px] grid grid-cols-2 gap-16">
          
          {/* 業主簽署區 */}
-         <div className="border-t border-slate-800 text-center relative pt-2">
-           <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
-           <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
-           {(docData.isCompanyChopApplied || docData.stampPos) && (
-             <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '20px', top: docData.stampPos?.y || '-60px', width: '120px', height: '120px' }}>
-               <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
-             </div>
-           )}
-         </div>
+<div className="border-t border-slate-800 text-center relative pt-2">
+  <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
+  <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
+  
+  {(docData.isCompanyChopApplied || docData.stampPos) && (
+    <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '20px', top: docData.stampPos?.y || '-60px', width: '120px', height: '120px' }}>
+      <img 
+        src="/stamp.png" 
+        alt="Company Stamp" 
+        className="w-full h-full object-contain mix-blend-multiply"
+        onError={(e) => {
+          // ★ 防禦降級：若 stamp.png 載入失敗 (404)，隱藏破碎圖片圖示，避免 Canvas 崩潰
+          e.currentTarget.style.display = 'none';
+        }}
+      />
+    </div>
+  )}
+</div>
 
          {/* 租客簽署區 */}
          <div className="border-t border-slate-800 text-center relative pt-2">
