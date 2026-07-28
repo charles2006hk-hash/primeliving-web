@@ -502,8 +502,10 @@ const renderA4Document = (docData: any, isSigningMode = false) => {
         src="/stamp.png" 
         alt="Company Stamp" 
         className="w-full h-full object-contain mix-blend-multiply"
+        // ★ 補上與大系統相同的藍色濾鏡
+        style={{ filter: 'invert(16%) sepia(85%) saturate(3661%) hue-rotate(216deg) brightness(91%) contrast(103%)' }}
         onError={(e) => {
-          // ★ 防禦降級：若 stamp.png 載入失敗 (404)，隱藏破碎圖片圖示，避免 Canvas 崩潰
+          // 防禦降級：若圖片未載入成功則隱藏，避免 PDF 匯出崩潰
           e.currentTarget.style.display = 'none';
         }}
       />
