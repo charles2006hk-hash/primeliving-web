@@ -1,57 +1,82 @@
 import { NextResponse } from 'next/server';
-import Stripe from 'stripe';
+import crypto from 'crypto';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: '2023-10-16', 
-});
+// ============================================================================
+// ⚙️ 環境變數設定 (請確保這些變數已在 Vercel 中設定，絕對不可加上 NEXT_PUBLIC_)
+// ============================================================================
+const MERCHANT_ID = process.env.PAYDOLLAR_MERCHANT_ID || '';
+const SHA_SECRET = process.env.PAYDOLLAR_SHA_SECRET || '';
+const PAYDOLLAR_ENV = process.env.PAYDOLLAR_ENV || 'test';
+
+const PAYDOLLAR_ENDPOINT = PAYDOLLAR_ENV === 'production' 
+  ? 'https://www.paydollar.com/b2c2/eng/payment/payForm.jsp' 
+  : 'https://test.paydollar.com/b2cDemo/eng/payment/payForm.jsp';
 
 export async function POST(req: Request) {
   try {
-    const body = await req.json();
-    // ★ 接收前端傳來的 returnUrl
-    const { amountDue, tenantId, tenantName, roomInfo, returnUrl } = body;
-
-    if (!amountDue || amountDue <= 0) {
-      return NextResponse.json({ error: "繳費金額必須大於 0" }, { status: 400 });
+    // 🛡️ 資安防禦：確保環境變數已正確掛載
+    if (!MERCHANT_ID || !SHA_SECRET) {
+      console.error('Missing PayDollar Credentials in Server Environment.');
+      return NextResponse.json({ success: false, error: '系統支付網關配置錯誤，請聯絡管理員' }, { status: 500 });
     }
 
-    // ★ 直接使用前端給的最準確網址
-    const origin = returnUrl || 'http://localhost:3000';
+    const body = await req.json();
+    // ★ 完整保留您的參數：接收 amountDue, tenantId, tenantName, roomInfo, returnUrl
+    const { amountDue, tenantId, tenantName, roomInfo, returnUrl, email = '' } = body;
 
+    if (!amountDue || amountDue <= 0) {
+      return NextResponse.json({ success: false, error: '繳費金額必須大於 0' }, { status: 400 });
+    }
+
+    // ★ 保留業務邏輯：計算 3% 系統處理費
     const fee = Math.round(amountDue * 0.03);
     const totalAmount = amountDue + fee;
-    const unitAmount = Math.round(totalAmount * 100); 
+    
+    // 🧮 財務數據精確性：PayDollar 需要精確至小數點後兩位的字串
+    const formattedAmount = Number(totalAmount).toFixed(2);
 
-    const session = await stripe.checkout.sessions.create({
-      payment_method_types: ['card', 'alipay', 'wechat_pay'], 
-      payment_method_options: {
-        wechat_pay: {
-          client: 'web',
-        },
-      },
-      line_items: [
-        {
-          price_data: {
-            currency: 'hkd',
-            product_data: {
-              name: '租金繳納 (Rent Payment)',
-              description: `${tenantName} - ${roomInfo} (含 3% 系統處理費)`,
-            },
-            unit_amount: unitAmount,
-          },
-          quantity: 1,
-        },
-      ],
-      mode: 'payment',
-      // ★ 這裡的 origin 已經是 100% 準確的了！
-      success_url: `${origin}/tenant-portal/dashboard?success=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/tenant-portal/dashboard?canceled=true`,
-      client_reference_id: tenantId, 
-    });
+    // ★ 保留業務邏輯：動態重定向網址
+    const origin = returnUrl || 'http://localhost:3000';
+    // 建立 PayDollar 專用的訂單編號
+    const orderRef = `R-${tenantId}-${Date.now()}`;
 
-    return NextResponse.json({ url: session.url });
+    // 💳 PayDollar 固定參數定義
+    const currCode = '344'; // 344 為 HKD
+    const payType = 'N';    // N = Normal Sale
+    const payMethod = 'ALL';// 開放所有可用的支付方式
+    const lang = 'C';       // 預設為繁體中文
+
+    // ============================================================================
+    // 🔐 Secure Hash 加密簽名生成 (PayDollar Client Post 標準算法)
+    // ============================================================================
+    const rawString = `${MERCHANT_ID}${orderRef}${currCode}${formattedAmount}${payType}${SHA_SECRET}`;
+    const secureHash = crypto.createHash('sha1').update(rawString).digest('hex');
+
+    // 📦 封裝拋送給前端的參數
+    const paymentPayload: Record<string, string> = {
+      endpoint: PAYDOLLAR_ENDPOINT,
+      merchantId: MERCHANT_ID,
+      amount: formattedAmount,
+      orderRef: orderRef,
+      currCode: currCode,
+      payType: payType,
+      payMethod: payMethod,
+      lang: lang,
+      secureHash: secureHash,
+      // 租客資訊 (PayDollar 會顯示在付款頁面，並可用作對帳)
+      payerName: tenantName || '',
+      payerEmail: email,
+      remark: roomInfo || '', // 帶入房間資訊
+      // 將您原本的 success_url 與 cancel_url 對接到 PayDollar 的參數
+      successUrl: `${origin}/tenant-portal/dashboard?success=true&orderRef=${orderRef}`,
+      cancelUrl: `${origin}/tenant-portal/dashboard?canceled=true`,
+      failUrl: `${origin}/tenant-portal/dashboard?failed=true`
+    };
+
+    return NextResponse.json({ success: true, paymentPayload });
+
   } catch (error: any) {
-    console.error("🔥 Stripe Checkout Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    console.error('PayDollar Checkout API Error:', error);
+    return NextResponse.json({ success: false, error: error.message || '內部伺服器錯誤' }, { status: 500 });
   }
 }
