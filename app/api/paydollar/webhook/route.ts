@@ -1,9 +1,27 @@
 // app/api/paydollar/webhook/route.ts
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
+// 假設您已經在 lib/firebase-admin 初始化了 admin SDK
+// import { customInitApp } from '@/lib/firebase-admin';
+// import { getFirestore } from 'firebase-admin/firestore';
+
+// PayDollar Hash 生成函數 (請根據 PayDollar 官方技術文件的欄位順序調整)
+function verifySecureHash(data: Record<string, string>, secret: string): boolean {
+  // PayDollar 通常的串接順序 (請務必核對您的 PayDollar 商家技術文件)
+  // 常用順序: src-prc-successcode-Ref-PayRef-Cur-Amt-payerAuth-Secret
+  const { src, prc, successcode, Ref, PayRef, Cur, Amt, payerAuth, secureHash } = data;
+  
+  if (!secureHash) return false;
+
+  const buffer = [src, prc, successcode, Ref, PayRef, Cur, Amt, payerAuth, secret].join('-');
+  // PayDollar 舊版為 sha1，新版建議 sha256
+  const generatedHash = crypto.createHash('sha256').update(buffer).digest('hex').toUpperCase(); 
+  
+  return generatedHash === secureHash.toUpperCase();
+}
 
 export async function POST(request: Request) {
   try {
-    // ⚠️ 關鍵點 1：PayDollar 發送的是 application/x-www-form-urlencoded，絕對不能用 request.json()
     const contentType = request.headers.get('content-type') || '';
     let data: Record<string, string> = {};
 
@@ -11,57 +29,54 @@ export async function POST(request: Request) {
       const formData = await request.formData();
       data = Object.fromEntries(formData.entries()) as Record<string, string>;
     } else {
-      // 處理意外的格式
       const text = await request.text();
       const params = new URLSearchParams(text);
       data = Object.fromEntries(params.entries());
     }
 
-    // 取得 PayDollar 回傳的關鍵欄位
-    const ref = data.Ref;           // 商家訂單號
-    const successCode = data.successcode; // 0 代表成功
-    const payRef = data.PayRef;     // PayDollar 的交易序號
-    const prc = data.prc;           // 主要回傳碼
-    const src = data.src;           // 次要回傳碼
+    const { Ref: ref, successcode, PayRef: payRef, Amt: amt } = data;
 
-    console.log('[PayDollar Webhook] Received:', data);
-
-    // ⚠️ 關鍵點 2：針對 PayDollar 後台的 "Test" 按鈕做例外放行
-    // 當你在後台按 Test 時，Ref 會固定是 'TestDatafeed'
+    // 1. 測試按鈕放行
     if (ref === 'TestDatafeed') {
-      console.log('[PayDollar Webhook] Test connection successful.');
-      return new NextResponse('OK', { status: 200 }); // 必須回傳純文字 'OK'
+      return new NextResponse('OK', { status: 200 });
     }
 
-    // --- 以下為真實交易的處理邏輯 ---
-
-    // ⚠️ 安全提醒：這裡必須實作 Secure Hash 驗證，否則任何人都可以偽造成功付款的 POST 請求！
-    // const secureHash = data.secureHash;
-    // const isValid = verifyPaydollarHash(data, process.env.PAYDOLLAR_SECURE_SECRET);
-    // if (!isValid) {
-    //   console.error('[PayDollar Webhook] Invalid Secure Hash for Ref:', ref);
-    //   return new NextResponse('Invalid Hash', { status: 400 });
-    // }
-
-    // 處理訂單狀態更新
-    if (successCode === '0' && prc === '0' && src === '0') {
-      // TODO: 更新資料庫 (Firestore) 訂單狀態為已付款
-      // 例如：await updateOrderInFirestore(ref, { status: 'PAID', payRef });
-    } else {
-      // TODO: 處理付款失敗/取消的邏輯
+    // 2. 驗證 Secure Hash (安全防護：防止偽造付款成功通知)
+    const secret = process.env.PAYDOLLAR_SECURE_SECRET;
+    if (!secret) {
+      console.error('[Webhook] Missing PAYDOLLAR_SECURE_SECRET env variable');
+      return new NextResponse('Internal Server Error', { status: 500 });
     }
 
-    // ⚠️ 關鍵點 3：PayDollar 要求成功接收 Datafeed 後，必須回傳純文字 "OK" (不要回傳 JSON)
+    if (!verifySecureHash(data, secret)) {
+      console.error(`[Webhook] Invalid Secure Hash for Order: ${ref}`);
+      return new NextResponse('Invalid Hash', { status: 400 });
+    }
+
+    // 3. 處理財務邏輯與資料庫更新
+    if (successcode === '0') {
+      // customInitApp();
+      // const db = getFirestore();
+      
+      // 【財務數據處理原則】：避免 JS 浮點數誤差，建議轉為最小單位 (如 Cents) 儲存或整數運算
+      const amountInCents = Math.round(parseFloat(amt) * 100); 
+
+      // 範例：更新 Firestore 中的訂單狀態
+      // await db.collection('orders').doc(ref).update({
+      //   status: 'PAID',
+      //   payRef: payRef,
+      //   paidAmount: amountInCents,
+      //   paidAt: new Date().toISOString()
+      // });
+      
+      console.log(`[Webhook] Order ${ref} paid successfully. PayRef: ${payRef}`);
+    }
+
+    // 4. PayDollar 要求的成功回傳值
     return new NextResponse('OK', { status: 200 });
 
   } catch (error) {
-    console.error('[PayDollar Webhook] Internal Error:', error);
-    // 即使內部錯誤，也可以考慮回傳 200 OK 避免 PayDollar 持續重試，但這裡先以標準 500 處理
+    console.error('[PayDollar Webhook Error]:', error);
     return new NextResponse('Internal Server Error', { status: 500 });
   }
-}
-
-// 防禦性設計：如果 PayDollar 系統錯誤發送了 GET 請求
-export async function GET() {
-  return new NextResponse('Method Not Allowed', { status: 405 });
 }
