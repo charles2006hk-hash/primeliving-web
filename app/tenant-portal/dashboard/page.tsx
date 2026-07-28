@@ -85,40 +85,59 @@ function DashboardContent() {
     const sessionData = JSON.parse(sessionStr);
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
-      if (docSnap.exists()) {
-        const data = docSnap.data();
-        const end = new Date(data.leaseEnd);
-        const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-        
-        // 修正 2.3: 多重備用提取租客 ID，確保抓取成功
-        const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
-
-        setTenantData({ 
-          id: docSnap.id, 
-          email: data.email || '', 
-          name: data.name, 
-          daysRemaining: diffDays > 0 ? diffDays : 0, 
-          status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
-          roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
-          isContractSigned: data.isContractSigned || !!data.signature, 
-          signature: data.signature || '', 
-          propertyName: data.propertyName || '', 
-          roomId: data.roomId || '', 
-          roomName: data.roomName || data.roomId || '', 
-          leaseStart: data.leaseStart || '', 
-          leaseEnd: data.leaseEnd || '', 
-          deposit: data.deposit || 0, 
-          phone: data.phone || '', 
-          identityNumber: resolvedIdNumber,
-          isPhysicalSigned: data.isPhysicalSigned || false // 紀錄實體合約簽署狀態
-        });
-
-        if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
-        if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
-        if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
+      // 🚨 核心修復 1: 若租客被刪除重建導致 ID 失效，立即清除快取並登出，徹底解決黑屏死機
+      if (!docSnap.exists()) {
+        localStorage.removeItem('pm_tenant_session');
+        router.push('/tenant-portal');
+        return;
       }
+
+      const data = docSnap.data();
+      const end = data.leaseEnd ? new Date(data.leaseEnd) : new Date();
+      const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+      
+      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+
+      setTenantData({ 
+        id: docSnap.id, 
+        email: data.email || '', 
+        name: data.name, 
+        daysRemaining: diffDays > 0 ? diffDays : 0, 
+        status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
+        roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
+        isContractSigned: data.isContractSigned || !!data.signature, 
+        signature: data.signature || '', 
+        propertyName: data.propertyName || '', 
+        roomId: data.roomId || '', 
+        roomName: data.roomName || data.roomId || '', 
+        leaseStart: data.leaseStart || '', 
+        leaseEnd: data.leaseEnd || '', 
+        deposit: data.deposit || 0, 
+        phone: data.phone || '', 
+        identityNumber: resolvedIdNumber,
+        isPhysicalSigned: data.isPhysicalSigned || false 
+      });
+
+      if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
+      if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
+      if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
+      
       setLoading(false);
     });
+
+    const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
+    const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
+
+    const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
+    const unsubInq = onSnapshot(qInq, snap => {
+      let logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+      logs = logs.filter(log => log.type !== 'internal_note');
+      logs.sort((a: any, b: any) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
+      setMyInquiries(logs);
+    });
+
+    return () => { unsubTenant(); unsubDocs(); unsubInq(); };
+  }, [router]);
 
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
     const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
