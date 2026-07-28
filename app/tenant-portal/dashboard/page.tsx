@@ -35,6 +35,7 @@ function DashboardContent() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [selectedOptionalBillIds, setSelectedOptionalBillIds] = useState<string[]>([]);
+  const [deselectedDefaultBillIds, setDeselectedDefaultBillIds] = useState<string[]>([]);
   const [showBillDetails, setShowBillDetails] = useState(false);
 
   const [signature, setSignature] = useState('');
@@ -186,12 +187,18 @@ function DashboardContent() {
       }
     });
 
-    const defaultSelectedCents = defaultSelectedItems.reduce((sum, b) => sum + b.amountCents, 0);
+    // ★ 核心修改：計算總額時，排除掉被使用者取消勾選的預設單據
+    const defaultSelectedCents = defaultSelectedItems
+      .filter(b => !deselectedDefaultBillIds.includes(b.id))
+      .reduce((sum, b) => sum + b.amountCents, 0);
+
     const userSelectedOptionalCents = optionalPayItems
       .filter(b => selectedOptionalBillIds.includes(b.id))
       .reduce((sum, b) => sum + b.amountCents, 0);
 
     const grandTotalCents = defaultSelectedCents + userSelectedOptionalCents;
+    
+    // 只要名下有過期帳單就提示警告（不管有沒有被取消勾選）
     const hasOverdue = defaultSelectedItems.some(b => b.isOverdue);
 
     return {
@@ -201,7 +208,7 @@ function DashboardContent() {
       optionalPayItems,
       hasOverdue
     };
-  }, [tenantDocs, selectedOptionalBillIds]);
+  }, [tenantDocs, selectedOptionalBillIds, deselectedDefaultBillIds]); // ★ 必須加入 dependencies
 
   const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
   const handleChatOption = (opt: string) => { setChatCategory(opt); setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); };
@@ -617,6 +624,7 @@ function DashboardContent() {
                 </span>
               </div>
 
+              {/* 帳單明細折疊開關 */}
               <div className="mb-6 relative z-10">
                 <button 
                   onClick={() => setShowBillDetails(!showBillDetails)} 
@@ -628,24 +636,51 @@ function DashboardContent() {
 
                 {showBillDetails && (
                   <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
+                    
+                    {/* ★ 1. 本期應繳單據 (預設勾選，但允許取消勾選) */}
                     <div>
-                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (預設包含)：</p>
+                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (可取消勾選先不付)：</p>
                       {billingSummary.defaultSelectedItems.length === 0 ? (
                         <p className="text-slate-400 py-1">目前無任何待繳單據</p>
                       ) : (
-                        billingSummary.defaultSelectedItems.map(item => (
-                          <div key={item.id} className="flex justify-between py-1 text-slate-200 items-center">
-                            <span className="flex items-center gap-1.5">
-                              {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
-                              {item.isDueToday && <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">今日到期</span>}
-                              {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                            </span>
-                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                          </div>
-                        ))
+                        billingSummary.defaultSelectedItems.map(item => {
+                          // 判斷是否被取消勾選 (反向邏輯)
+                          const isChecked = !deselectedDefaultBillIds.includes(item.id);
+                          
+                          return (
+                            <div 
+                              key={item.id} 
+                              onClick={() => {
+                                setDeselectedDefaultBillIds(prev => 
+                                  isChecked ? [...prev, item.id] : prev.filter(id => id !== item.id)
+                                );
+                              }}
+                              className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isChecked ? <CheckSquare size={14} className="text-orange-400 shrink-0"/> : <Square size={14} className="text-slate-400 shrink-0"/>}
+                                <span className="flex items-center gap-1.5 flex-wrap">
+                                  {item.isOverdue && (
+                                    <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">
+                                      已逾期
+                                    </span>
+                                  )}
+                                  {item.isDueToday && (
+                                    <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">
+                                      今日到期
+                                    </span>
+                                  )}
+                                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                                </span>
+                              </div>
+                              <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                            </div>
+                          );
+                        })
                       )}
                     </div>
 
+                    {/* ★ 2. 可選擇提早支付項目 (預設未勾選) */}
                     {billingSummary.optionalPayItems.length > 0 && (
                       <div className="pt-2 border-t border-white/10">
                         <p className="text-slate-400 font-bold mb-1.5">🗓️ 可選擇提早支付項目：</p>
@@ -672,7 +707,6 @@ function DashboardContent() {
                   </div>
                 )}
               </div>
-
               <button 
                 onClick={() => setActiveModal('payment')} 
                 disabled={billingSummary.grandTotal === 0} 
