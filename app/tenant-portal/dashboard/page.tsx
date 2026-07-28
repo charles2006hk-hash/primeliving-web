@@ -1,16 +1,21 @@
 'use client';
 
-import React, { useEffect, useState, Suspense, useRef } from 'react';
+import React, { useEffect, useState, Suspense, useRef, useMemo } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
-  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud
+  Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
+  CheckSquare, Square, ChevronDown, ChevronUp
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
+
+// 財務精確計算輔助函數 (單位：分 Cents)
+const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
+const fromCents = (cents: number) => cents / 100;
 
 function DashboardContent() {
   const router = useRouter();
@@ -19,16 +24,19 @@ function DashboardContent() {
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
-  
   const [myInquiries, setMyInquiries] = useState<any[]>([]); 
   
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
-  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'paydollar'>('bank'); // ★ 修改狀態變數名稱
+  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'paydollar'>('bank');
   const [isUploading, setIsUploading] = useState(false);
-  const [isPayDollarLoading, setIsPayDollarLoading] = useState(false); // ★ 修改 loading 狀態名稱
+  const [isPayDollarLoading, setIsPayDollarLoading] = useState(false);
   const [isVerifying, setIsVerifying] = useState(false);
+
+  // 帳單勾選狀態 (可提早繳項目)
+  const [selectedOptionalBillIds, setSelectedOptionalBillIds] = useState<string[]>([]);
+  const [showBillDetails, setShowBillDetails] = useState(false);
 
   const [signature, setSignature] = useState('');
   const [isSigning, setIsSigning] = useState(false);
@@ -55,11 +63,18 @@ function DashboardContent() {
   const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
 
   useEffect(() => {
-    fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true').then(res => res.json()).then(data => {
+    fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true')
+      .then(res => res.json())
+      .then(data => {
         const t = data.current_weather.temperature;
         const code = data.current_weather.weathercode;
         let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', icon = <Sun size={28} className="text-amber-500" />;
-        if (code >= 50 && code <= 69) { desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; icon = <CloudRain size={28} className="text-blue-500" />; }
+        if (code >= 50 && code <= 69) { 
+          desc = '下雨'; 
+          bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; 
+          suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; 
+          icon = <CloudRain size={28} className="text-blue-500" />; 
+        }
         setWeather({ temp: t, desc, suggestion, bgClass, icon });
       }).catch(() => {});
   }, []);
@@ -74,7 +89,30 @@ function DashboardContent() {
         const data = docSnap.data();
         const end = new Date(data.leaseEnd);
         const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-        setTenantData({ id: docSnap.id, email: data.email || '', name: data.name, amountDue: data.amountDue || 0, dueDate: "本期帳單", daysRemaining: diffDays > 0 ? diffDays : 0, status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, isContractSigned: data.isContractSigned || !!data.signature, signature: data.signature || '', propertyName: data.propertyName || '', roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0, phone: data.phone || '', identityNumber: data.identityNumber || '' });
+        
+        // 修正 2.3: 多重備用提取租客 ID，確保抓取成功
+        const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+
+        setTenantData({ 
+          id: docSnap.id, 
+          email: data.email || '', 
+          name: data.name, 
+          daysRemaining: diffDays > 0 ? diffDays : 0, 
+          status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
+          roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
+          isContractSigned: data.isContractSigned || !!data.signature, 
+          signature: data.signature || '', 
+          propertyName: data.propertyName || '', 
+          roomId: data.roomId || '', 
+          roomName: data.roomName || data.roomId || '', 
+          leaseStart: data.leaseStart || '', 
+          leaseEnd: data.leaseEnd || '', 
+          deposit: data.deposit || 0, 
+          phone: data.phone || '', 
+          identityNumber: resolvedIdNumber,
+          isPhysicalSigned: data.isPhysicalSigned || false // 紀錄實體合約簽署狀態
+        });
+
         if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
         if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
         if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
@@ -89,16 +127,71 @@ function DashboardContent() {
     const unsubInq = onSnapshot(qInq, snap => {
       let logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       logs = logs.filter(log => log.type !== 'internal_note');
-      logs.sort((a: any, b: any) => {
-        const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
-        const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-        return tB - tA; 
-      });
+      logs.sort((a: any, b: any) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
       setMyInquiries(logs);
     });
 
     return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
+
+  // ★ 需求 1: 重構即時動態對數與帳單計算 (避免硬編碼及浮點數誤差)
+  const billingSummary = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    // 篩選出待繳費或對數未結清的單據
+    const pendingDocs = tenantDocs.filter(d => d.status === 'Pending' || d.paymentStatus === 'Unpaid');
+
+    let mustPayCents = 0;
+    let optionalPayCents = 0;
+
+    const mustPayItems: any[] = [];
+    const optionalPayItems: any[] = [];
+
+    pendingDocs.forEach(item => {
+      const fd = item.formData || {};
+      const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
+      const amountCents = toCents(amount);
+
+      const dueDateStr = fd.dueDate || fd.docDate || item.createdAt?.toDate?.()?.toISOString?.().split('T')[0];
+      const dueDate = dueDateStr ? new Date(dueDateStr) : new Date();
+
+      const isOverdueOrDue = dueDate <= today;
+
+      const billItem = {
+        id: item.id,
+        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'),
+        amount: amount,
+        amountCents: amountCents,
+        dueDate: dueDateStr,
+        isOverdue: isOverdueOrDue
+      };
+
+      if (isOverdueOrDue) {
+        mustPayCents += amountCents;
+        mustPayItems.push(billItem);
+      } else {
+        optionalPayCents += amountCents;
+        optionalPayItems.push(billItem);
+      }
+    });
+
+    // 計算當前選擇的提早繳費金額
+    const selectedOptionalCents = optionalPayItems
+      .filter(item => selectedOptionalBillIds.includes(item.id))
+      .reduce((sum, item) => sum + item.amountCents, 0);
+
+    const grandTotalCents = mustPayCents + selectedOptionalCents;
+
+    return {
+      mustPayTotal: fromCents(mustPayCents),
+      optionalTotal: fromCents(optionalPayCents),
+      selectedOptionalTotal: fromCents(selectedOptionalCents),
+      grandTotal: fromCents(grandTotalCents),
+      mustPayItems,
+      optionalPayItems
+    };
+  }, [tenantDocs, selectedOptionalBillIds]);
 
   const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
   const handleChatOption = (opt: string) => { setChatCategory(opt); setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); };
@@ -112,12 +205,9 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  // ★ PayDollar 付款完成返回後的驗證邏輯
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      // 在 Webhook 機制下，PayDollar 會在背景更新 Firebase。
-      // 前端只需等待一小段時間讓 Firebase 同步，或是提示使用者重新整理
       alert("🎉 歡迎回來！我們正在處理您的付款結果，請稍候片刻帳單即會自動結算。"); 
       router.replace('/tenant-portal/dashboard');
     } catch (error) {} finally { setIsVerifying(false); }
@@ -128,9 +218,7 @@ function DashboardContent() {
     const success = searchParams?.get('success'); 
     const failed = searchParams?.get('failed');
     
-    if (success === 'true' && orderRef) { 
-      verifyPayDollarPayment(orderRef); 
-    }
+    if (success === 'true' && orderRef) { verifyPayDollarPayment(orderRef); }
     if (failed === 'true') {
       alert("❌ 支付失敗或已取消，請確認您的信用卡狀態後重試。");
       router.replace('/tenant-portal/dashboard');
@@ -141,18 +229,25 @@ function DashboardContent() {
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-  const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => { setIsUploading(true); setTimeout(() => { setIsUploading(false); setActiveModal('none'); alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); }, 2000); };
+  const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => { 
+    setIsUploading(true); 
+    setTimeout(() => { 
+      setIsUploading(false); 
+      setActiveModal('none'); 
+      alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); 
+    }, 2000); 
+  };
   
-  // ★ 核心替換：改呼叫 PayDollar 結帳 API
+  // 線上刷卡結帳：使用動態精確計算之 grandTotal
   const handlePayDollarCheckout = async () => {
-    if (!tenantData) return;
+    if (!tenantData || billingSummary.grandTotal <= 0) return alert("目前沒有需要繳納的金額。");
     setIsPayDollarLoading(true);
     try {
       const response = await fetch('/api/paydollar/checkout', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ 
-          amountDue: tenantData.amountDue, 
+          amountDue: billingSummary.grandTotal, 
           tenantId: tenantData.id, 
           tenantName: tenantData.name, 
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
@@ -162,15 +257,9 @@ function DashboardContent() {
       });
       
       const data = await response.json();
-      
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '無法初始化支付，請稍後再試');
-      }
+      if (!response.ok || !data.success) throw new Error(data.error || '無法初始化支付，請稍後再試');
 
-      // 獲取 PayDollar 所需的參數
       const { paymentPayload } = data;
-
-      // 動態建立 Form 並 POST 到 PayDollar 支付頁面
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = paymentPayload.endpoint;
@@ -217,7 +306,7 @@ function DashboardContent() {
       const pdfWidth = pdf.internal.pageSize.getWidth();
       const pdfHeight = (contractRef.current.offsetHeight * pdfWidth) / contractRef.current.offsetWidth;
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Document_${tenantData.name}.pdf`);
+      pdf.save(`Contract_${tenantData.name}.pdf`);
     } catch (error) { alert("生成 PDF 失敗。"); } finally { setIsSignDownloading(false); }
   };
 
@@ -246,6 +335,13 @@ function DashboardContent() {
     } catch (error) { alert("儲存失敗。"); } finally { setIsSavingProfile(false); }
   };
 
+  // ★ 需求 2.4: 靜態處理地址，去淨前面的簡短名稱，僅保留詳細地址
+  const formatDetailAddress = (fullAddr: string, shortName: string) => {
+    if (!fullAddr) return '';
+    if (!shortName) return fullAddr;
+    return fullAddr.replace(new RegExp(`^${shortName}\\s*`, 'i'), '').trim();
+  };
+
   const renderA4Document = (docData: any, isSigningMode = false) => {
     if (!docData) return null;
     const fd = docData.formData || {};
@@ -257,18 +353,140 @@ function DashboardContent() {
     const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
     const formatCurrencyStr = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
+    // 地址洗淨
+    const displayAddress = formatDetailAddress(fd.propertyAddress || tenantData?.propertyName, tenantData?.propertyName);
+
+    // ★ 需求 2.1: 租客簽名與蓋章顯示 logic
+    // 若實體合約已簽署且無電子簽名，則自動以租客姓名生成電子簽名
+    const activeTenantSignature = fd.tenantSignature || tenantData.signature || ((tenantData.isPhysicalSigned || fd.isPhysicalSigned) ? tenantData.name : '');
+
     return (
       <div ref={isSigningMode ? contractRef : undefined} className="w-[210mm] min-h-[297mm] bg-white px-[20mm] py-[15mm] text-slate-900 font-sans relative shadow-lg origin-top scale-[0.5] sm:scale-[0.6] md:scale-75 lg:scale-90 print:shadow-none print:scale-100">
-        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4"><img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/><div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div></div>
-        <div className="text-right mb-6"><h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2><p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p><p className="text-xs font-mono mt-3">Date: {fd.docDate}</p></div>
-        <div className="flex justify-between gap-6 mb-6"><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3><p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p></div><div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3><p className="font-bold text-sm">{fd.tenantName || '__________________'}</p><p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || '__________________'}</p><p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || '__________________'}</p></div></div>
-        <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold">{fd.propertyAddress}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart} to {fd.leaseEnd}</td></tr></tbody></table></div>
-        {docData.type === 'Statement' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Receipt' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>) : docData.type === 'Lease' ? (<div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td><td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td><td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td></tr></tbody></table></div>) : null}
+        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
+          <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
+          <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
+        </div>
+        <div className="text-right mb-6">
+          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
+          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 條 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
+          <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
+        </div>
+        
+        <div className="flex justify-between gap-6 mb-6">
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
+            <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
+          </div>
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
+            <p className="font-bold text-sm">{fd.tenantName || tenantData.name || '__________________'}</p>
+            <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || tenantData.phone || '__________________'}</p>
+            {/* ★ 需求 2.3: 正確渲染租客 ID */}
+            <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || tenantData.identityNumber || '未提供'}</p>
+          </div>
+        </div>
+
+        <div className="mb-6">
+          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
+          <table className="w-full text-sm border-collapse border border-slate-300">
+            <tbody>
+              <tr>
+                <td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td>
+                {/* ★ 需求 2.4: 去掉前端重複名稱，只顯示精準詳細地址 */}
+                <td colSpan={3} className="border border-slate-300 p-3 font-bold">{displayAddress}</td>
+              </tr>
+              <tr>
+                <td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td>
+                <td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName || tenantData.roomName}</td>
+                <td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td>
+                <td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart || tenantData.leaseStart} to {fd.leaseEnd || tenantData.leaseEnd}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+        {docData.type === 'Statement' ? (
+          <div className="mb-6">
+            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div>
+            <table className="w-full text-sm border-collapse border border-slate-300">
+              <tbody>
+                <tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td></tr>
+                <tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td></tr>
+                <tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td></tr>
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-50 font-black">
+                  <td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td>
+                  <td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td>
+                </tr>
+                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : docData.type === 'Receipt' ? (
+          <div className="mb-6">
+            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div>
+            <table className="w-full text-sm border-collapse border border-slate-300">
+              <thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead>
+              <tbody>
+                {baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}
+                {deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}
+                {items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}
+              </tbody>
+              <tfoot>
+                <tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr>
+                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
+              </tfoot>
+            </table>
+          </div>
+        ) : docData.type === 'Lease' ? (
+          <div className="mb-6">
+            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div>
+            <table className="w-full text-sm border-collapse border border-slate-300">
+              <tbody>
+                <tr>
+                  <td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td>
+                  <td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td>
+                  <td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td>
+                  <td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        ) : null}
+
         {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
-        {docData.type === 'Lease' && (<div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4"><p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p><p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p></div>)}
+        
+        {docData.type === 'Lease' && (
+          <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
+            <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
+            <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
+          </div>
+        )}
+
         <div className="absolute bottom-[30mm] left-[20mm] right-[20mm] flex justify-between">
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative"><p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>{docData.stampPos && (<div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos.x, top: docData.stampPos.y, width: '35mm', height: '35mm' }}><img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" /></div>)}</div>
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative"><p className="font-bold text-xs uppercase relative z-10">Tenant</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>{(tenantData.isContractSigned || fd.tenantSignature) && docData.type === 'Lease' && (<div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 bg-white/80 py-2"><p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{fd.tenantSignature || tenantData.signature}</p><p className="text-[9px] text-slate-400 font-mono mt-1">Signed</p></div>)}</div>
+           {/* ★ 需求 2.1: 印章完美渲染與固定定位 */}
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
+             <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
+             <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
+             {(docData.isCompanyChopApplied || docData.stampPos) && (
+               <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '10mm', top: docData.stampPos?.y || '-15mm', width: '35mm', height: '35mm' }}>
+                 <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
+               </div>
+             )}
+           </div>
+
+           {/* ★ 需求 2.1: 自動生成電子簽名或渲染既有簽名 */}
+           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
+             <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
+             <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
+             {activeTenantSignature && docData.type === 'Lease' && (
+               <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 py-2">
+                 <p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{activeTenantSignature}</p>
+                 <p className="text-[9px] text-slate-400 font-mono mt-1">Signed</p>
+               </div>
+             )}
+           </div>
         </div>
       </div>
     );
@@ -342,26 +560,78 @@ function DashboardContent() {
 
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
+            
+            {/* ★ 需求 1: 優化卡片，動態展示精確應付總額與選擇 */}
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
-              <div className="flex justify-between items-start mb-8 relative z-10">
+              
+              <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本期待繳總額 (HKD)</p>
-                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${(tenantData.amountDue || 0).toLocaleString()}</h2>
+                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次待繳總額 (HKD)</p>
+                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.grandTotal.toLocaleString()}</h2>
                 </div>
                 <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
                   {tenantData.status}
                 </span>
               </div>
-              <div className="flex items-center gap-4 text-xs font-bold text-slate-300 mb-8 relative z-10">
-                {tenantData.amountDue > 0 ? (
-                  <div className="flex items-center gap-1.5 bg-white/10 px-4 py-2 rounded-xl backdrop-blur-sm border border-white/10"><Calendar size={14} className="text-orange-400"/> 繳費期限: {tenantData.dueDate}</div>
-                ) : (
-                  <div className="flex items-center gap-1.5 bg-emerald-500/20 text-emerald-300 px-4 py-2 rounded-xl backdrop-blur-sm border border-emerald-500/20"><CheckCircle2 size={14}/> 本期已繳清</div>
+
+              {/* 明細展開按鈕 */}
+              <div className="mb-6 relative z-10">
+                <button 
+                  onClick={() => setShowBillDetails(!showBillDetails)} 
+                  className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition"
+                >
+                  {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                  {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
+                </button>
+
+                {showBillDetails && (
+                  <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
+                    <div>
+                      <p className="text-slate-400 font-bold mb-1 border-b border-white/10 pb-1">🚨 本期必繳單據 (已到期)：</p>
+                      {billingSummary.mustPayItems.length === 0 ? (
+                        <p className="text-slate-300 py-1">目前無到期應繳單據</p>
+                      ) : (
+                        billingSummary.mustPayItems.map(item => (
+                          <div key={item.id} className="flex justify-between py-1 text-slate-200">
+                            <span>{item.title} <span className="text-[10px] text-red-300">({item.dueDate} 到期)</span></span>
+                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {billingSummary.optionalPayItems.length > 0 && (
+                      <div className="pt-2 border-t border-white/10">
+                        <p className="text-slate-400 font-bold mb-1">🗓️ 可選擇提早支付項目：</p>
+                        {billingSummary.optionalPayItems.map(item => {
+                          const isChecked = selectedOptionalBillIds.includes(item.id);
+                          return (
+                            <div 
+                              key={item.id} 
+                              onClick={() => {
+                                setSelectedOptionalBillIds(prev => 
+                                  isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                                );
+                              }}
+                              className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
+                            >
+                              <div className="flex items-center gap-2">
+                                {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
+                                <span>{item.title} <span className="text-[10px] text-slate-400">({item.dueDate})</span></span>
+                              </div>
+                              <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
                 )}
               </div>
-              <button onClick={() => setActiveModal('payment')} disabled={tenantData.amountDue === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
-                <CreditCard size={18}/> {tenantData.amountDue === 0 ? '無待繳帳單' : '立即繳費'}
+
+              <button onClick={() => setActiveModal('payment')} disabled={billingSummary.grandTotal === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
+                <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
               </button>
             </div>
 
@@ -514,7 +784,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 核心付款 Modal 升級：加入 PayDollar 選項 */}
+      {/* 付款 Modal: 動態計算總額 */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -530,7 +800,7 @@ function DashboardContent() {
                 <div className="animate-in fade-in slide-in-from-left-4 duration-300 space-y-5">
                   <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3"><CheckCircle2 className="text-blue-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-blue-900 mb-1">推薦使用：0% 手續費</p><p className="text-xs text-blue-700 font-medium">請轉帳至以下指定戶口，並上傳入數紙以供管家核對。</p></div></div>
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
-                    <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">應付總額 (HKD)</p><p className="text-3xl font-black text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div>
+                    <div><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">本次應付總額 (HKD)</p><p className="text-3xl font-black text-slate-800">${billingSummary.grandTotal.toLocaleString()}</p></div>
                     <div className="pt-4 border-t border-slate-100 space-y-3">
                       <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">帳戶銀行</p><p className="text-sm font-bold text-slate-800">恆生銀行 (HANG SENG BANK)</p></div>
                       <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">帳戶名稱</p><p className="text-[10px] font-bold text-slate-800 bg-slate-100 px-2 py-1 rounded">PRIME LIVING PROPERTY (HK) MANAGEMENT LIMITED</p></div>
@@ -544,7 +814,11 @@ function DashboardContent() {
               {paymentMethod === 'paydollar' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300 space-y-5">
                   <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3"><AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-amber-900 mb-1">注意：將收取 3% 處理費</p><p className="text-xs text-amber-700 font-medium">線上刷卡由 PayDollar (AsiaPay) 提供安全支付支援，費用包含金流平台手續費。</p></div></div>
-                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單</p><p className="font-mono font-bold text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${(Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div><div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${((tenantData.amountDue || 0) + Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div></div>
+                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
+                    <div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單金額</p><p className="font-mono font-bold text-slate-800">${billingSummary.grandTotal.toLocaleString()}</p></div>
+                    <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.grandTotal) * 0.03)).toLocaleString()}</p></div>
+                    <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.grandTotal) + Math.round(toCents(billingSummary.grandTotal) * 0.03))).toLocaleString()}</p></div>
+                  </div>
                   <button onClick={handlePayDollarCheckout} disabled={isPayDollarLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">
                     {isPayDollarLoading ? <><Loader2 size={18} className="animate-spin"/> 連線安全金流...</> : <>前往安全結帳 <ChevronRight size={18}/></>}
                   </button>
@@ -684,14 +958,14 @@ function DashboardContent() {
               ) : (
                 [...otherBills]
                   .sort((a, b) => {
-                    const dateA = new Date(a.formData?.dueDate || a.createdAt).getTime();
-                    const dateB = new Date(b.formData?.dueDate || b.createdAt).getTime();
+                    const dateA = new Date(a.formData?.dueDate || a.createdAt?.toDate?.() || 0).getTime();
+                    const dateB = new Date(b.formData?.dueDate || b.createdAt?.toDate?.() || 0).getTime();
                     return dateA - dateB;
                   })
                   .map(doc => {
                     const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
-                    const isPending = doc.status === 'Pending';
-                    const amount = doc.formData?.totalAmount;
+                    const isPending = doc.status === 'Pending' || doc.paymentStatus === 'Unpaid';
+                    const amount = doc.formData?.totalAmount || doc.formData?.amount;
 
                     return (
                       <button key={doc.id} onClick={() => { setViewingDoc(doc); setActiveModal('view_doc'); }} className={`w-full flex justify-between items-center p-4 border rounded-xl hover:shadow-md transition-all text-left group ${isPending ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400' : 'bg-white border-slate-200 hover:border-cyan-400'}`}>
@@ -710,7 +984,7 @@ function DashboardContent() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                           {amount && <span className="text-sm font-black font-mono text-slate-700 hidden sm:block">${amount.toLocaleString()}</span>}
+                           {amount && <span className="text-sm font-black font-mono text-slate-700 hidden sm:block">${Number(amount).toLocaleString()}</span>}
                            <Eye size={18} className="text-slate-300 group-hover:text-cyan-600 transition-colors shrink-0" />
                         </div>
                       </button>
