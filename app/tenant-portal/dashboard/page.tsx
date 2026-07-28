@@ -20,15 +20,14 @@ function DashboardContent() {
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   
-  // ★ 儲存租客自己送出的報修與訊息，以及後台發送的通知 (統一由 inquiries 讀取)
   const [myInquiries, setMyInquiries] = useState<any[]>([]); 
   
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
-  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'stripe'>('bank');
+  const [paymentMethod, setPaymentMethod] = useState<'bank' | 'paydollar'>('bank'); // ★ 修改狀態變數名稱
   const [isUploading, setIsUploading] = useState(false);
-  const [isStripeLoading, setIsStripeLoading] = useState(false);
+  const [isPayDollarLoading, setIsPayDollarLoading] = useState(false); // ★ 修改 loading 狀態名稱
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [signature, setSignature] = useState('');
@@ -75,7 +74,7 @@ function DashboardContent() {
         const data = docSnap.data();
         const end = new Date(data.leaseEnd);
         const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-        setTenantData({ id: docSnap.id, name: data.name, amountDue: data.monthlyRent || 0, dueDate: "本月 1 日", daysRemaining: diffDays > 0 ? diffDays : 0, status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, isContractSigned: data.isContractSigned || !!data.signature, signature: data.signature || '', propertyName: data.propertyName || '', roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0, phone: data.phone || '', identityNumber: data.identityNumber || '' });
+        setTenantData({ id: docSnap.id, email: data.email || '', name: data.name, amountDue: data.amountDue || 0, dueDate: "本期帳單", daysRemaining: diffDays > 0 ? diffDays : 0, status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, isContractSigned: data.isContractSigned || !!data.signature, signature: data.signature || '', propertyName: data.propertyName || '', roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0, phone: data.phone || '', identityNumber: data.identityNumber || '' });
         if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
         if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
         if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
@@ -86,17 +85,14 @@ function DashboardContent() {
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
     const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
 
-    // ★ 單一資料源：拉取該租客的所有 interactions & inquiries
     const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
     const unsubInq = onSnapshot(qInq, snap => {
       let logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      // ★ 防火牆：過濾掉後台管家的「內部私密筆記」
       logs = logs.filter(log => log.type !== 'internal_note');
-      // ★ 前端排序：避開 Firebase 複合索引報錯
       logs.sort((a: any, b: any) => {
         const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : 0;
         const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : 0;
-        return tB - tA; // 降序，最新的在上面
+        return tB - tA; 
       });
       setMyInquiries(logs);
     });
@@ -116,36 +112,86 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  const verifyAndSettlePayment = async (sessionId: string) => {
+  // ★ PayDollar 付款完成返回後的驗證邏輯
+  const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      const sessionStr = localStorage.getItem('pm_tenant_session');
-      const tId = sessionStr ? JSON.parse(sessionStr).id : null;
-      const res = await fetch(`/api/checkout/verify?session_id=${sessionId}`);
-      const data = await res.json();
-      if (data.payment_status === 'paid' && tId) {
-        await addDoc(collection(db, 'transactions'), { type: 'income', status: 'completed', title: '租金與雜費繳納 (線上刷卡)', amount: data.amount_total / 100, dueDate: new Date().toISOString().split('T')[0], completedDate: new Date().toISOString().split('T')[0], tenantId: tId, remarks: `Stripe 自動結算 (Session: ${sessionId.slice(-8)})`, createdAt: serverTimestamp() });
-        await updateDoc(doc(db, 'tenants', tId), { monthlyRent: 0 });
-        alert("🎉 繳費成功！系統已自動結算並更新您的帳單。"); router.replace('/tenant-portal/dashboard');
-      }
+      // 在 Webhook 機制下，PayDollar 會在背景更新 Firebase。
+      // 前端只需等待一小段時間讓 Firebase 同步，或是提示使用者重新整理
+      alert("🎉 歡迎回來！我們正在處理您的付款結果，請稍候片刻帳單即會自動結算。"); 
+      router.replace('/tenant-portal/dashboard');
     } catch (error) {} finally { setIsVerifying(false); }
   };
 
-  useEffect(() => { const sessionId = searchParams?.get('session_id'); const success = searchParams?.get('success'); if (success === 'true' && sessionId) { verifyAndSettlePayment(sessionId); } }, [searchParams]);
+  useEffect(() => { 
+    const orderRef = searchParams?.get('orderRef'); 
+    const success = searchParams?.get('success'); 
+    const failed = searchParams?.get('failed');
+    
+    if (success === 'true' && orderRef) { 
+      verifyPayDollarPayment(orderRef); 
+    }
+    if (failed === 'true') {
+      alert("❌ 支付失敗或已取消，請確認您的信用卡狀態後重試。");
+      router.replace('/tenant-portal/dashboard');
+    }
+  }, [searchParams]);
 
   const latestLease = tenantDocs.find(d => d.type === 'Lease');
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
   const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => { setIsUploading(true); setTimeout(() => { setIsUploading(false); setActiveModal('none'); alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); }, 2000); };
-  const handleStripeCheckout = async () => {
+  
+  // ★ 核心替換：改呼叫 PayDollar 結帳 API
+  const handlePayDollarCheckout = async () => {
     if (!tenantData) return;
-    setIsStripeLoading(true);
+    setIsPayDollarLoading(true);
     try {
-      const response = await fetch('/api/checkout', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ amountDue: tenantData.amountDue, tenantId: tenantData.id, tenantName: tenantData.name, roomInfo: tenantData.roomInfo, returnUrl: window.location.origin }) });
+      const response = await fetch('/api/paydollar/checkout', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ 
+          amountDue: tenantData.amountDue, 
+          tenantId: tenantData.id, 
+          tenantName: tenantData.name, 
+          roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
+          email: tenantData.email || '',
+          returnUrl: window.location.origin 
+        }) 
+      });
+      
       const data = await response.json();
-      if (data.url) window.location.href = data.url; else { alert("錯誤：" + data.error); setIsStripeLoading(false); }
-    } catch (error) { alert("系統連線錯誤"); setIsStripeLoading(false); }
+      
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '無法初始化支付，請稍後再試');
+      }
+
+      // 獲取 PayDollar 所需的參數
+      const { paymentPayload } = data;
+
+      // 動態建立 Form 並 POST 到 PayDollar 支付頁面
+      const form = document.createElement('form');
+      form.method = 'POST';
+      form.action = paymentPayload.endpoint;
+
+      Object.entries(paymentPayload).forEach(([key, value]) => {
+        if (key !== 'endpoint' && value !== undefined && value !== null) {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = key;
+          input.value = String(value);
+          form.appendChild(input);
+        }
+      });
+
+      document.body.appendChild(form);
+      form.submit();
+
+    } catch (error: any) { 
+      alert("系統連線錯誤：" + error.message); 
+      setIsPayDollarLoading(false); 
+    }
   };
 
   const handleSignLease = async () => {
@@ -231,12 +277,6 @@ function DashboardContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>;
   if (!tenantData) return null;
 
-  const stripeFee = Math.round((tenantData.amountDue || 0) * 0.03);
-  const totalWithStripe = (tenantData.amountDue || 0) + stripeFee;
-  
-  // ★ 紅點邏輯：判斷舊版 Inquiries 或是新版 CRM 紀錄是否有管家新通知
-  const hasUpdates = myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice');
-
   return (
     <div className={`min-h-screen pb-12 selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 ${weather.bgClass}`}>
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
@@ -282,17 +322,16 @@ function DashboardContent() {
             </div>
           </div>
           
-          {/* ★ 通知鈴鐺 (點擊開啟通知中心) */}
           <button 
             onClick={() => setActiveModal('notifications')} 
             className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${
-              hasUpdates 
+              myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') 
                 ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' 
                 : 'bg-white/60 border-white/60 hover:shadow-md'
             }`}
           >
-            <Bell size={20} className={hasUpdates ? 'text-red-600' : 'text-slate-600'} />
-            {hasUpdates && (
+            <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'text-red-600' : 'text-slate-600'} />
+            {myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') && (
               <span className="absolute top-1.5 right-1.5 flex h-3.5 w-3.5">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                 <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-white"></span>
@@ -360,9 +399,6 @@ function DashboardContent() {
         </div>
       </div>
 
-      {/* ==================== 模態框區塊 ==================== */}
-
-      {/* ★ 通知中心 Modal (時間軸閉環) */}
       {activeModal === 'notifications' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[75vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -385,7 +421,6 @@ function DashboardContent() {
 
                   return (
                     <div key={log.id} className="space-y-3 mb-4">
-                      {/* 如果是官方通知 (管家後台按的催繳單) */}
                       {isOfficial && (
                         <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-sm relative overflow-hidden">
                           <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
@@ -397,7 +432,6 @@ function DashboardContent() {
                         </div>
                       )}
 
-                      {/* 如果是租客發送的報修/詢問 */}
                       {isMyTicket && (
                         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
                           <div className="flex justify-between items-start mb-2">
@@ -408,7 +442,6 @@ function DashboardContent() {
                           </div>
                           <p className="text-sm font-bold text-slate-800 mb-2 border-b border-slate-100 pb-2">「{log.message || log.content}」</p>
                           
-                          {/* 顯示管家的回覆 */}
                           {log.adminReply ? (
                             <div className="bg-blue-50 p-3 rounded-lg flex items-start gap-2 border border-blue-100 mt-2">
                               <MessageCircle size={16} className="text-blue-500 shrink-0 mt-0.5"/>
@@ -428,7 +461,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 智能客服機器人 Modal */}
       {activeModal === 'contact' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[85vh] sm:h-[70vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300 overflow-hidden">
@@ -482,12 +514,18 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* ★ 核心付款 Modal 升級：加入 PayDollar 選項 */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative"><div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" /><h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0">選擇付款方式</h3><button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button></div>
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
-              <div className="flex bg-slate-100 p-1.5 rounded-2xl"><button onClick={() => setPaymentMethod('bank')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><Landmark size={18}/> 轉帳/FPS</button><button onClick={() => setPaymentMethod('stripe')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'stripe' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}><CreditCard size={18}/> 線上刷卡</button></div>
+              
+              <div className="flex bg-slate-100 p-1.5 rounded-2xl">
+                <button onClick={() => setPaymentMethod('bank')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'bank' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500'}`}><Landmark size={18}/> 轉帳/FPS</button>
+                <button onClick={() => setPaymentMethod('paydollar')} className={`flex-1 py-3 text-sm font-black rounded-xl transition-all flex justify-center items-center gap-2 ${paymentMethod === 'paydollar' ? 'bg-white text-purple-600 shadow-sm' : 'text-slate-500'}`}><CreditCard size={18}/> 線上刷卡 (PayDollar)</button>
+              </div>
+              
               {paymentMethod === 'bank' && (
                 <div className="animate-in fade-in slide-in-from-left-4 duration-300 space-y-5">
                   <div className="bg-blue-50 border border-blue-100 p-4 rounded-2xl flex items-start gap-3"><CheckCircle2 className="text-blue-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-blue-900 mb-1">推薦使用：0% 手續費</p><p className="text-xs text-blue-700 font-medium">請轉帳至以下指定戶口，並上傳入數紙以供管家核對。</p></div></div>
@@ -502,11 +540,17 @@ function DashboardContent() {
                   <div className="relative"><input type="file" onChange={handleUploadReceipt} disabled={isUploading} className="hidden" id="receipt-upload" accept="image/*,.pdf" /><label htmlFor="receipt-upload" className={`flex items-center justify-center w-full py-4 rounded-2xl cursor-pointer font-black transition-all shadow-lg ${isUploading ? 'bg-slate-100 text-slate-400' : 'bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/20'}`}>{isUploading ? <><Loader2 size={18} className="animate-spin mr-2" /> 檔案上傳中...</> : <><UploadCloud size={18} className="mr-2" /> 點擊上傳轉帳截圖</>}</label></div>
                 </div>
               )}
-              {paymentMethod === 'stripe' && (
+              
+              {paymentMethod === 'paydollar' && (
                 <div className="animate-in fade-in slide-in-from-right-4 duration-300 space-y-5">
-                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3"><AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-amber-900 mb-1">注意：將收取 3% 處理費</p><p className="text-xs text-amber-700 font-medium">線上刷卡由 Stripe 提供安全支付，費用包含金流平台手續費。</p></div></div>
-                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期租金</p><p className="font-mono font-bold text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${(Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div><div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">刷卡總額</p><p className="text-3xl font-black text-purple-700">${((tenantData.amountDue || 0) + Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div></div>
-                  <button onClick={handleStripeCheckout} disabled={isStripeLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">{isStripeLoading ? <><Loader2 size={18} className="animate-spin"/> 連線金流...</> : <>前往 Stripe 結帳 <ChevronRight size={18}/></>}</button>
+                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3"><AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/><div><p className="text-sm font-black text-amber-900 mb-1">注意：將收取 3% 處理費</p><p className="text-xs text-amber-700 font-medium">線上刷卡由 PayDollar (AsiaPay) 提供安全支付支援，費用包含金流平台手續費。</p></div></div>
+                  <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white"><div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單</p><p className="font-mono font-bold text-slate-800">${(tenantData.amountDue || 0).toLocaleString()}</p></div><div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${(Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div><div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${((tenantData.amountDue || 0) + Math.round((tenantData.amountDue || 0) * 0.03)).toLocaleString()}</p></div></div>
+                  <button onClick={handlePayDollarCheckout} disabled={isPayDollarLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">
+                    {isPayDollarLoading ? <><Loader2 size={18} className="animate-spin"/> 連線安全金流...</> : <>前往安全結帳 <ChevronRight size={18}/></>}
+                  </button>
+                  <div className="flex justify-center items-center gap-2">
+                    <img src="https://www.paydollar.com/b2c2/images/logo_paydollar.gif" alt="PayDollar" className="h-4 object-contain opacity-50 grayscale hover:grayscale-0 transition-all" />
+                  </div>
                 </div>
               )}
             </div>
@@ -638,7 +682,6 @@ function DashboardContent() {
                   <p className="text-sm font-bold">目前沒有任何帳單記錄</p>
                 </div>
               ) : (
-                // ★ 核心修復：先將 otherBills 依據 dueDate (到期日) 排序，確保 1, 2, 3 期按順序顯示
                 [...otherBills]
                   .sort((a, b) => {
                     const dateA = new Date(a.formData?.dueDate || a.createdAt).getTime();
@@ -646,9 +689,7 @@ function DashboardContent() {
                     return dateA - dateB;
                   })
                   .map(doc => {
-                    // ★ 核心修復：優先讀取單據第一項的 description 作為標題
                     const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
-                    // ★ 判斷是否為「待繳費」狀態，加入 UI 提示
                     const isPending = doc.status === 'Pending';
                     const amount = doc.formData?.totalAmount;
 
@@ -659,7 +700,6 @@ function DashboardContent() {
                             <FileText size={20} />
                           </div>
                           <div>
-                            {/* ★ 使用動態標題，並加上待繳費標籤 */}
                             <p className="font-bold text-sm text-slate-800 flex flex-wrap items-center gap-2">
                               {dynamicTitle}
                               {isPending && <span className="bg-amber-100 text-amber-700 text-[9px] px-1.5 py-0.5 rounded font-black border border-amber-200 whitespace-nowrap">待繳費</span>}
@@ -670,7 +710,6 @@ function DashboardContent() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                           {/* 顯示金額，讓租客更清楚 */}
                            {amount && <span className="text-sm font-black font-mono text-slate-700 hidden sm:block">${amount.toLocaleString()}</span>}
                            <Eye size={18} className="text-slate-300 group-hover:text-cyan-600 transition-colors shrink-0" />
                         </div>
