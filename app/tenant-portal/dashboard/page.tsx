@@ -314,21 +314,50 @@ const billingSummary = useMemo(() => {
     } catch (error) { alert("簽署失敗"); } finally { setIsSigning(false); }
   };
 
-  const handleDownloadPDF = async () => {
-    if (!contractRef.current) return;
-    const htmlToImage = (window as any).htmlToImage;
-    const jspdfObj = (window as any).jspdf;
-    if (!htmlToImage || !jspdfObj) return alert("⚠️ 系統準備中，請稍後再試！");
-    setIsSignDownloading(true);
-    try {
-      const imgData = await htmlToImage.toPng(contractRef.current, { quality: 1.0, pixelRatio: 2, backgroundColor: '#ffffff' });
-      const pdf = new jspdfObj.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const pdfWidth = pdf.internal.pageSize.getWidth();
-      const pdfHeight = (contractRef.current.offsetHeight * pdfWidth) / contractRef.current.offsetWidth;
-      pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-      pdf.save(`Contract_${tenantData.name}.pdf`);
-    } catch (error) { alert("生成 PDF 失敗。"); } finally { setIsSignDownloading(false); }
-  };
+  // ==========================================
+// 1. 替換 handleDownloadPDF (解決 PDF 不能輸出與截圖縮放崩潰)
+// ==========================================
+const handleDownloadPDF = async () => {
+  if (!contractRef.current) return;
+  const htmlToImage = (window as any).htmlToImage;
+  const jspdfObj = (window as any).jspdf;
+  if (!htmlToImage || !jspdfObj) return alert("⚠️ 系統準備中，請稍後再試！");
+  
+  setIsSignDownloading(true);
+  try {
+    const element = contractRef.current;
+    
+    // ★ 核心修復：強制宣告標準 A4 像素寬高，並透過 style 覆蓋 transform 縮放
+    // 解決 htmlToImage 遇到 CSS scale() 時捕捉失敗或報錯的 Bug
+    const imgData = await htmlToImage.toPng(element, { 
+      quality: 1.0, 
+      pixelRatio: 2, 
+      backgroundColor: '#ffffff',
+      // 標準 A4 尺寸 (96 DPI): 794 x 1123
+      width: 794,
+      height: 1123,
+      cacheBust: true, // 避免 Logo 圖片跨域或快取造成的 Canvas 污染
+      style: {
+        transform: 'none',
+        transformOrigin: 'top left',
+        margin: '0',
+        position: 'relative'
+      }
+    });
+
+    const pdf = new jspdfObj.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = pdf.internal.pageSize.getHeight();
+    
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    pdf.save(`Contract_${tenantData.name}.pdf`);
+  } catch (error) { 
+    console.error("PDF 匯出錯誤:", error);
+    alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); 
+  } finally { 
+    setIsSignDownloading(false); 
+  }
+};
 
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -362,155 +391,130 @@ const billingSummary = useMemo(() => {
     return fullAddr.replace(new RegExp(`^${shortName}\\s*`, 'i'), '').trim();
   };
 
-  const renderA4Document = (docData: any, isSigningMode = false) => {
-    if (!docData) return null;
-    const fd = docData.formData || {};
-    const items = docData.items || [];
-    const baseRent = Number(fd.monthlyRent) || 0;
-    const deposit = Number(fd.deposit) || 0;
-    const extraTotal = items.reduce((sum: number, item: any) => sum + Number(item.amount), 0);
-    const receiptTotal = baseRent + deposit + extraTotal;
-    const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
-    const formatCurrencyStr = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
+  // ==========================================
+// 2. 替換 renderA4Document (解決合約走位與簽名排版)
+// ==========================================
+const renderA4Document = (docData: any, isSigningMode = false) => {
+  if (!docData) return null;
+  const fd = docData.formData || {};
+  const items = docData.items || [];
+  const baseRent = Number(fd.monthlyRent) || 0;
+  const deposit = Number(fd.deposit) || 0;
+  const extraTotal = items.reduce((sum: number, item: any) => sum + Number(item.amount), 0);
+  const receiptTotal = baseRent + deposit + extraTotal;
+  const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
+  const formatCurrencyStr = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-    // 地址洗淨
-    const displayAddress = formatDetailAddress(fd.propertyAddress || tenantData?.propertyName, tenantData?.propertyName);
+  // 地址洗淨
+  const displayAddress = fd.propertyAddress || tenantData?.propertyName || '';
 
-    // ★ 需求 2.1: 租客簽名與蓋章顯示 logic
-    // 若實體合約已簽署且無電子簽名，則自動以租客姓名生成電子簽名
-    const activeTenantSignature = fd.tenantSignature || tenantData.signature || ((tenantData.isPhysicalSigned || fd.isPhysicalSigned) ? tenantData.name : '');
+  // 判斷簽名：若已實體簽約或有電子簽名
+  const activeTenantSignature = fd.tenantSignature || tenantData.signature || ((tenantData.isPhysicalSigned || fd.isPhysicalSigned) ? tenantData.name : '');
 
-    return (
-      <div ref={isSigningMode ? contractRef : undefined} className="w-[210mm] min-h-[297mm] bg-white px-[20mm] py-[15mm] text-slate-900 font-sans relative shadow-lg origin-top scale-[0.5] sm:scale-[0.6] md:scale-75 lg:scale-90 print:shadow-none print:scale-100">
-        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
-          <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
-          <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
+  return (
+    // ★ 核心修復：A4 容器移除彈性縮放導致的內部走位，寬高強制鎖死
+    <div 
+      ref={isSigningMode ? contractRef : undefined} 
+      className="w-[794px] h-[1123px] bg-white px-[75px] py-[56px] text-slate-900 font-sans relative shadow-lg origin-top mx-auto"
+      style={{ boxSizing: 'border-box' }}
+    >
+      <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
+        <img src="/PrimelivingLetterhead.jpg" alt="Prime Living Letterhead" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
+        <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
+      </div>
+      
+      <div className="text-right mb-6">
+        <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
+        <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
+        <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
+      </div>
+      
+      <div className="flex justify-between gap-6 mb-6">
+        <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+          <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
+          <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
         </div>
-        <div className="text-right mb-6">
-          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
-          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 條 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
-          <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
+        <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
+          <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
+          <p className="font-bold text-sm">{fd.tenantName || tenantData.name || '__________________'}</p>
+          <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || tenantData.phone || '__________________'}</p>
+          <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || tenantData.identityNumber || '未提供'}</p>
         </div>
-        
-        <div className="flex justify-between gap-6 mb-6">
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
-            <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
-          </div>
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
-            <p className="font-bold text-sm">{fd.tenantName || tenantData.name || '__________________'}</p>
-            <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || tenantData.phone || '__________________'}</p>
-            {/* ★ 需求 2.3: 正確渲染租客 ID */}
-            <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || tenantData.identityNumber || '未提供'}</p>
-          </div>
-        </div>
+      </div>
 
+      <div className="mb-6">
+        <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
+        <table className="w-full text-sm border-collapse border border-slate-300 table-fixed">
+          <tbody>
+            <tr>
+              <td className="border border-slate-300 p-3 font-bold w-1/4 break-words">Property Address</td>
+              <td colSpan={3} className="border border-slate-300 p-3 font-bold break-words">{displayAddress}</td>
+            </tr>
+            <tr>
+              <td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td>
+              <td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4 break-words">{fd.roomName || tenantData.roomName}</td>
+              <td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td>
+              <td className="border border-slate-300 p-3 font-mono text-xs w-1/4 break-words">{fd.leaseStart || tenantData.leaseStart} to {fd.leaseEnd || tenantData.leaseEnd}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      {docData.type === 'Lease' && (
         <div className="mb-6">
-          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
-          <table className="w-full text-sm border-collapse border border-slate-300">
+          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div>
+          <table className="w-full text-sm border-collapse border border-slate-300 table-fixed">
             <tbody>
               <tr>
-                <td className="border border-slate-300 p-3 font-bold w-1/4">Property Address</td>
-                {/* ★ 需求 2.4: 去掉前端重複名稱，只顯示精準詳細地址 */}
-                <td colSpan={3} className="border border-slate-300 p-3 font-bold">{displayAddress}</td>
-              </tr>
-              <tr>
-                <td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td>
-                <td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4">{fd.roomName || tenantData.roomName}</td>
-                <td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td>
-                <td className="border border-slate-300 p-3 font-mono text-xs w-1/4">{fd.leaseStart || tenantData.leaseStart} to {fd.leaseEnd || tenantData.leaseEnd}</td>
+                <td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td>
+                <td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4 break-words">{formatCurrencyStr(baseRent)}</td>
+                <td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td>
+                <td className="border border-slate-300 p-3 font-mono font-bold w-1/4 break-words">{formatCurrencyStr(deposit)}</td>
               </tr>
             </tbody>
           </table>
         </div>
+      )}
 
-        {docData.type === 'Statement' ? (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <tbody>
-                <tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td></tr>
-                <tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td></tr>
-                <tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td></tr>
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-50 font-black">
-                  <td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td>
-                  <td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td>
-                </tr>
-                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
-              </tfoot>
-            </table>
-          </div>
-        ) : docData.type === 'Receipt' ? (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead>
-              <tbody>
-                {baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}
-                {deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}
-                {items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr>
-                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
-              </tfoot>
-            </table>
-          </div>
-        ) : docData.type === 'Lease' ? (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <tbody>
-                <tr>
-                  <td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td>
-                  <td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4">{formatCurrencyStr(baseRent)}</td>
-                  <td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td>
-                  <td className="border border-slate-300 p-3 font-mono font-bold w-1/4">{formatCurrencyStr(deposit)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        ) : null}
-
-        {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
-        
-        {docData.type === 'Lease' && (
-          <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
-            <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
-            <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
-          </div>
-        )}
-
-        <div className="absolute bottom-[30mm] left-[20mm] right-[20mm] flex justify-between">
-           {/* ★ 需求 2.1: 印章完美渲染與固定定位 */}
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
-             <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
-             {(docData.isCompanyChopApplied || docData.stampPos) && (
-               <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '10mm', top: docData.stampPos?.y || '-15mm', width: '35mm', height: '35mm' }}>
-                 <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
-               </div>
-             )}
-           </div>
-
-           {/* ★ 需求 2.1: 自動生成電子簽名或渲染既有簽名 */}
-           <div className="w-[40%] pt-8 border-t border-slate-800 text-center relative">
-             <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
-             {activeTenantSignature && docData.type === 'Lease' && (
-               <div className="absolute bottom-10 left-1/2 -translate-x-1/2 w-full text-center z-20 py-2">
-                 <p className="text-4xl text-slate-800" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{activeTenantSignature}</p>
-                 <p className="text-[9px] text-slate-400 font-mono mt-1">Signed</p>
-               </div>
-             )}
-           </div>
+      {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
+      
+      {docData.type === 'Lease' && (
+        <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
+          <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
+          <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
         </div>
+      )}
+
+      {/* ★ 核心修復：完美固定底部簽名排版，防止走位 */}
+      <div className="absolute bottom-[60px] left-[75px] right-[75px] grid grid-cols-2 gap-16">
+         
+         {/* 業主簽署區 */}
+         <div className="border-t border-slate-800 text-center relative pt-2">
+           <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
+           <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
+           {(docData.isCompanyChopApplied || docData.stampPos) && (
+             <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '20px', top: docData.stampPos?.y || '-60px', width: '120px', height: '120px' }}>
+               <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" />
+             </div>
+           )}
+         </div>
+
+         {/* 租客簽署區 */}
+         <div className="border-t border-slate-800 text-center relative pt-2">
+           {activeTenantSignature && docData.type === 'Lease' && (
+             <div className="absolute bottom-[100%] left-0 w-full text-center z-20 mb-[-12px] pointer-events-none">
+               <p className="text-[40px] text-slate-800 leading-none whitespace-nowrap" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>
+                 {activeTenantSignature}
+               </p>
+             </div>
+           )}
+           <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
+           <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
+         </div>
       </div>
-    );
-  };
+    </div>
+  );
+};
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>;
   if (!tenantData) return null;
@@ -879,23 +883,29 @@ const billingSummary = useMemo(() => {
       )}
 
       {activeModal === 'contract' && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-slate-100 w-full sm:max-w-[800px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 bg-white rounded-t-[2.5rem] sm:rounded-t-3xl border-b border-slate-200 flex-none relative">
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約</h3>
-              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+  <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+    <div className="bg-slate-100 w-full sm:max-w-[1000px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+      <div className="flex justify-between items-center p-6 bg-white rounded-t-[2.5rem] sm:rounded-t-3xl border-b border-slate-200 flex-none relative">
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+        <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約</h3>
+        <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+      </div>
+      
+      <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
+        {/* ★ 外層使用 CSS transform 縮放，內部維持絕對像素，確保 htmlToImage 不會崩潰 */}
+        <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar relative">
+          {latestLease ? (
+            <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-[1123px] w-[794px]">
+               {renderA4Document(latestLease, true)}
             </div>
-            <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
-              <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar">
-                {latestLease ? renderA4Document(latestLease, true) : (
-                  <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                     <AlertCircle size={48} className="mb-4 opacity-50" />
-                     <p className="font-bold">管家尚未發布合約</p>
-                     <p className="text-xs mt-1">請稍後再回來查看</p>
-                  </div>
-                )}
-              </div>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-full text-slate-400">
+               <AlertCircle size={48} className="mb-4 opacity-50" />
+               <p className="font-bold">管家尚未發布合約</p>
+               <p className="text-xs mt-1">請稍後再回來查看</p>
+            </div>
+          )}
+        </div>
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-l border-slate-200 p-6 flex flex-col justify-center">
                   {tenantData.isContractSigned ? (
