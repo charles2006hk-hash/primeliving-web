@@ -8,8 +8,8 @@ const corsHeaders = {
 };
 
 /**
- * 財務精確計算輔助模組 (單位：分 Cents)
- * 徹底防範 JavaScript 浮點數運算誤差
+ * 財務會計精確運算輔助模組
+ * 一律轉成仙 (Cents) 整數計算，杜絕 JS 浮點數精度誤差 (Floating Point Error)
  */
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
@@ -22,18 +22,18 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      passcode,        // 現場銷售內部通行密碼
-      region,          // 物業/屋苑名稱
+      passcode,        // 內部授權解鎖密碼
+      region,          // 屋苑 / 盤源物業
       roomName,        // 單位編號
       tenantName,      // 租客姓名
-      idNumber,        // 證件號碼 (用於 CRM 事後自動配對認領)
+      idNumber,        // 證件號碼 (用於 CRM 大系統事後自動配對)
       phone,           // 聯絡電話
-      amount,          // 收款金額
-      remarks,         // 款項備註
-      salesPerson      // 收款銷售員
+      amount,          // 收款金額 (HKD)
+      remarks,         // 用途說明
+      salesPerson      // 收款經辦人
     } = body;
 
-    // 1. 安全權限核驗：驗證傳入密碼是否與 Vercel 環境變數吻合
+    // 1. 安全校驗：核對通行金鑰是否與 Vercel 環境變數匹配
     const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
     if (!passcode || passcode !== validPin) {
       return NextResponse.json(
@@ -42,11 +42,11 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. 財務精度與必要欄位校驗
+    // 2. 財務精度與必要欄位驗證
     const paidAmountCents = toCents(amount);
     if (paidAmountCents <= 0 || !tenantName || !phone) {
       return NextResponse.json(
-        { success: false, error: '請完整填寫客戶姓名、電話及有效收款金額' },
+        { success: false, error: '請完整填寫客戶姓名、聯絡電話及有效金額' },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -54,7 +54,7 @@ export async function POST(request: Request) {
     const orderRef = `SALES-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const nowIso = new Date().toISOString();
 
-    // 3. 建立現場預收款訂單 (未歸戶狀態：pairingStatus = 'Unassigned')
+    // 3. 建立現場收款單據隊列 (嚴格設定為處理中 Pending / 未歸戶 Unassigned)
     const quickOrderData = {
       orderRef,
       region: region || '香港',
@@ -66,14 +66,15 @@ export async function POST(request: Request) {
       amount: fromCents(paidAmountCents),
       remarks: remarks || '現場收款',
       salesPerson: salesPerson || '內部專員',
-      status: 'Pending',
-      pairingStatus: 'Unassigned',
+      status: 'Pending',             // 只有金流 Webhook/Verify 成功確認後才允許更改為 Completed
+      paymentStatus: 'Unpaid',
+      pairingStatus: 'Unassigned',   // 大系統 CRM 現場認領標記
       gateway: 'PayDollar',
       createdAt: nowIso,
       updatedAt: nowIso
     };
 
-    // 原子化寫入 quick_orders 專用隊列與 transactions 網關表
+    // 4. 原子化寫入隊列：進入 quick_orders (現場待認領隊列) 與 transactions (財務網關表)
     const batch = adminDb.batch();
     batch.set(adminDb.collection('quick_orders').doc(orderRef), quickOrderData);
     batch.set(adminDb.collection('transactions').doc(orderRef), {
@@ -84,17 +85,19 @@ export async function POST(request: Request) {
     });
     await batch.commit();
 
-    // 4. 呼叫官方 PayDollar 簽章 API 生成支付參數
-    const response = await fetch(`${new URL(request.url).origin}/api/paydollar/checkout`, {
+    // 5. 呼叫後端簽章 API 生成 PayDollar 安全表單參數
+    const origin = new URL(request.url).origin;
+    const response = await fetch(`${origin}/api/paydollar/checkout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         amountDue: fromCents(paidAmountCents),
-        tenantId: `QUICK-${idNumber || phone}`,
+        tenantId: `QUICK-${(idNumber || phone).trim()}`,
         tenantName: quickOrderData.tenantName,
         roomInfo: quickOrderData.roomInfo,
-        returnUrl: `${new URL(request.url).origin}/sales-pay?success=true&orderRef=${orderRef}`,
-        orderRef
+        // ★ 核心修復：把 returnUrl 精確指向 /sales-pay，防禦路徑錯亂拼接
+        returnUrl: `${origin}/sales-pay`,
+        orderRef: orderRef
       })
     });
 
@@ -110,7 +113,7 @@ export async function POST(request: Request) {
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('[Sales Pay API Error]:', error);
+    console.error('[Sales Quick-Checkout API Error]:', error);
     return NextResponse.json(
       { success: false, error: error.message || '無法建立現場收款單' },
       { status: 500, headers: corsHeaders }
