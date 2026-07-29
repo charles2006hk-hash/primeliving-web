@@ -13,14 +13,14 @@ export async function OPTIONS() {
 
 export async function GET() {
   try {
-    // 1. 同時並行讀取設定、物業與房間（Server端在海外，不受 GFW 限制且速度極快）
+    // 1. 並行獲取所有銷售表單需連動的 CRM 數據 (Server端執行，毫秒級返回)
     const [settingsSnap, propsSnap, roomsSnap] = await Promise.all([
       adminDb.collection('settings').doc('general').get(),
       adminDb.collection('properties').get(),
       adminDb.collection('rooms').get()
     ]);
 
-    // 2. 解析員工清單
+    // 2. 解析銷售與員工名單
     let staffList: string[] = ['公司行政 (Office)'];
     if (settingsSnap.exists) {
       const data = settingsSnap.data();
@@ -33,7 +33,7 @@ export async function GET() {
       }
     }
 
-    // 3. 解析並過濾測試物業 (排除 test/測試/停用)
+    // 3. 過濾假盤源：自動排除名稱包含 test / 測試 / 停用 的物業
     const properties = propsSnap.docs
       .map(d => ({ id: d.id, ...d.data() } as { id: string; name: string; status?: string }))
       .filter(p => {
@@ -41,7 +41,7 @@ export async function GET() {
         return !name.includes('test') && !name.includes('測試') && p.status !== '停用';
       });
 
-    // 4. 解析房間/單位
+    // 4. 解析單元單位狀態
     const rooms = roomsSnap.docs.map(d => ({
       id: d.id,
       propertyId: d.data().propertyId || '',
@@ -50,7 +50,6 @@ export async function GET() {
       baseRent: d.data().baseRent || 0
     }));
 
-    // 5. 回傳精簡後的 JSON 供國內前端直接渲染
     return NextResponse.json({
       success: true,
       data: {
@@ -61,9 +60,9 @@ export async function GET() {
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('[Sales Form-Data API Error]:', error);
+    console.error('[Sales Form-Data BFF Error]:', error);
     return NextResponse.json(
-      { success: false, error: '無法讀取銷售表單初始化資料' },
+      { success: false, error: '無法自大系統讀取盤源初始化資料' },
       { status: 500, headers: corsHeaders }
     );
   }
