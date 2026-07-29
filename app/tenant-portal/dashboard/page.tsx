@@ -13,9 +13,17 @@ import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
 
-// ★ 財務精確計算輔助函數 (單位：分 Cents) 放置於組件外部
+// ★ 財務精確計算輔助函數 (單位：分 Cents) 放置於組件外部，避免 JS 浮點數誤差
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
+
+// ★ 安全時間戳解析器：相容 Firestore Timestamp、ISO String 與 Date 物件，防範 .toDate() 拋錯
+const getSafeTime = (val: any): number => {
+  if (!val) return 0;
+  if (typeof val.toDate === 'function') return val.toDate().getTime();
+  const t = new Date(val).getTime();
+  return isNaN(t) ? 0 : t;
+};
 
 function DashboardContent() {
   const router = useRouter();
@@ -35,7 +43,6 @@ function DashboardContent() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [selectedOptionalBillIds, setSelectedOptionalBillIds] = useState<string[]>([]);
-  const [deselectedDefaultBillIds, setDeselectedDefaultBillIds] = useState<string[]>([]);
   const [showBillDetails, setShowBillDetails] = useState(false);
 
   const [signature, setSignature] = useState('');
@@ -85,7 +92,6 @@ function DashboardContent() {
     const sessionData = JSON.parse(sessionStr);
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
-      // 🚨 核心防呆：如果租客在大系統被刪除，清空本機快取並踢出，避免黑屏
       if (!docSnap.exists()) {
         localStorage.removeItem('pm_tenant_session');
         router.push('/tenant-portal');
@@ -126,22 +132,31 @@ function DashboardContent() {
     });
 
     const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
-    const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a: any, b: any) => new Date(b.createdAt?.toDate() || 0).getTime() - new Date(a.createdAt?.toDate() || 0).getTime())));
+    const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(
+      snap.docs.map(d => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt))
+    ));
 
     const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
     const unsubInq = onSnapshot(qInq, snap => {
       let logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       logs = logs.filter(log => log.type !== 'internal_note');
-      logs.sort((a: any, b: any) => (b.createdAt?.toDate?.() || 0) - (a.createdAt?.toDate?.() || 0));
+      logs.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
       setMyInquiries(logs);
     });
 
     return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
 
+  // ★ 核心業務邏輯：帳單統計與 30 天內提早繳費運算引擎
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+
+    // ★ 定義未來 30 天期限截止點
+    const thirtyDaysLater = new Date(today);
+    thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+    thirtyDaysLater.setHours(23, 59, 59, 999);
 
     const pendingDocs = tenantDocs.filter(d => d.status === 'Pending' || d.paymentStatus === 'Unpaid');
 
@@ -150,24 +165,48 @@ function DashboardContent() {
       const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
       const amountCents = toCents(amount);
 
-      const dueDateStr = fd.dueDate || fd.docDate || (item.createdAt?.toDate ? item.createdAt.toDate().toISOString().split('T')[0] : new Date().toISOString().split('T')[0]);
+      // 安全解析到期日，優先採用 fd.dueDate，無則兼顧 Timestamp/String 安全轉化
+      let dueDateStr = fd.dueDate || fd.docDate;
+      if (!dueDateStr) {
+        if (typeof item.createdAt?.toDate === 'function') {
+          dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
+        } else if (typeof item.createdAt === 'string') {
+          dueDateStr = item.createdAt.split('T')[0];
+        } else {
+          dueDateStr = new Date().toISOString().split('T')[0];
+        }
+      }
+
       const dueDate = new Date(dueDateStr);
       dueDate.setHours(0, 0, 0, 0);
 
       const isOverdue = dueDate < today;
       const isDueToday = dueDate.getTime() === today.getTime();
 
-      return { id: item.id, title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), amount, amountCents, dueDateStr, dueDate, isOverdue, isDueToday };
+      return { 
+        id: item.id, 
+        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), 
+        amount, 
+        amountCents, 
+        dueDateStr, 
+        dueDate, 
+        isOverdue, 
+        isDueToday 
+      };
     });
 
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    // ★ 業務邏輯：逾期或今日到期 -> 強制繳交 (Mandatory)；未來到期 -> 自由選擇 (Optional)
+    // 1. 本期強制繳納項目：逾期或今日到期
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
-    const optionalItems = allBills.filter(b => b.dueDate > today);
+    
+    // ★ 2. 可選擇提早預繳項目：未來 30 天內即將到期的帳單 (dueDate > today 且 <= 30天內)
+    const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
     const mandatoryCents = mandatoryItems.reduce((sum, b) => sum + b.amountCents, 0);
-    const optionalCents = optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).reduce((sum, b) => sum + b.amountCents, 0);
+    const optionalCents = optionalItems
+      .filter(b => selectedOptionalBillIds.includes(b.id))
+      .reduce((sum, b) => sum + b.amountCents, 0);
 
     const grandTotalCents = mandatoryCents + optionalCents;
     const hasOverdue = mandatoryItems.some(b => b.isOverdue);
@@ -192,23 +231,19 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-// ★ 1. 交易核銷引擎：傳遞精確租客上下文與已勾選帳單清單，做到 100% 財務對平
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      // 1. 精確收集這次「實際繳納」的所有單據 ID
       const payingBillIds = [
         ...billingSummary.mandatoryItems.map(b => b.id),
         ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
       ];
 
-      // 2. 精確計算本次繳納的總金額 (防範重載時 grandTotal 變動導致的會計對帳誤差)
       const exactPayingTotal = [
         ...billingSummary.mandatoryItems,
         ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
       ].reduce((sum, b) => sum + b.amount, 0);
 
-      // 3. 向後端發送強連動核銷請求 (避開 Client-side Security Rules)
       const response = await fetch('/api/paydollar/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -217,8 +252,8 @@ function DashboardContent() {
           tenantId: tenantData?.id,
           tenantName: tenantData?.name,
           roomInfo: tenantData?.roomInfo,
-          fallbackAmount: exactPayingTotal, // ★ 傳入本次實際支付總額，確保大系統 amountDue 精確相減
-          billIds: payingBillIds            // ★ 傳入實際單據 ID 列表，強力覆寫為 Paid
+          fallbackAmount: exactPayingTotal,
+          billIds: payingBillIds
         }),
       });
 
@@ -227,10 +262,8 @@ function DashboardContent() {
         throw new Error(data.error || '無法完成核銷手續');
       }
 
-      // 4. 前端 UI 狀態歸零：清空自選帳單勾選狀態
       setSelectedOptionalBillIds([]);
 
-      // 5. 靜默清除網址列上的 ?success=true&orderRef=... 避免重新整理時重複發送 Request
       if (typeof window !== 'undefined') {
         window.history.replaceState(null, '', '/tenant-portal/dashboard');
       }
@@ -245,7 +278,6 @@ function DashboardContent() {
     }
   };
 
-  // ★ 2. 監聽 PayDollar 頁面返回結果
   useEffect(() => { 
     const orderRef = searchParams?.get('orderRef'); 
     const success = searchParams?.get('success'); 
@@ -264,20 +296,17 @@ function DashboardContent() {
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-  // ★ 上傳入數紙：建立「待人工核對 (Pending Verification)」單據，並同步至 CRM / 客服訊息
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !tenantData) return;
 
     setIsUploading(true);
     try {
-      // 1. 收集當前需繳付的單據 ID
       const payingBillIds = [
         ...billingSummary.mandatoryItems.map(b => b.id),
         ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
       ];
 
-      // 2. 將待核對紀錄寫入 Firestore inquiries (讓管家小鈴鐺/客服後台收到通知)
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id,
         name: tenantData.name || '',
@@ -286,13 +315,12 @@ function DashboardContent() {
         category: '轉帳付款核對',
         message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${billingSummary.grandTotal.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`,
         type: 'ticket',
-        status: 'In Progress', // 標記為處理中
+        status: 'In Progress',
         amount: billingSummary.grandTotal,
         billIds: payingBillIds,
         createdAt: serverTimestamp()
       });
 
-      // 3. (選擇性) 將關聯帳單的狀態設為「審核中(Under Review)」，避免租客重複繳交
       for (const billId of payingBillIds) {
         await updateDoc(doc(db, 'documents', billId), {
           paymentStatus: 'Under Review',
@@ -303,14 +331,12 @@ function DashboardContent() {
       alert("✅ 入數紙已成功送出！\n\n管家將於 24 小時內確認銀行進帳並開立正式收據，確認後本系統會自動清除逾期警告。");
       setActiveModal('none');
     } catch (error: any) {
-      console.error("上傳入數紙記錄失敗:", error);
       alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。");
     } finally {
       setIsUploading(false);
     }
   };
-  
-  // ★ 2. 發起結帳：先同步寫入 transactions，帶入完整帳單 ID 清單
+
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.grandTotal <= 0) {
       return alert("目前沒有需要繳納的金額。");
@@ -327,7 +353,6 @@ function DashboardContent() {
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
 
     try {
-      // 1. 強制等待 Firebase 寫入完成後，再請求後端簽章
       await setDoc(doc(db, 'transactions', orderRef), {
         orderRef,
         tenantId: tenantData.id,
@@ -340,7 +365,6 @@ function DashboardContent() {
         createdAt: serverTimestamp()
       });
 
-      // 2. 請求 API 生成 SHA-1 安全簽章
       const response = await fetch('/api/paydollar/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -359,7 +383,6 @@ function DashboardContent() {
         throw new Error(data.error || '無法生成支付請求');
       }
 
-      // 3. 跳轉 PayDollar 頁面
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
@@ -429,7 +452,6 @@ function DashboardContent() {
       pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
       pdf.save(`Contract_${tenantData.name}.pdf`);
     } catch (error) { 
-      console.error("PDF 匯出錯誤:", error);
       alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); 
     } finally { 
       setIsSignDownloading(false); 
@@ -719,16 +741,15 @@ function DashboardContent() {
                 {showBillDetails && (
                   <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
                     
-                    {/* ★ 1. 本期應繳單據 (強制鎖定不可取消) */}
+                    {/* ★ 1. 本期應繳單據 (過期或今日到期：鎖定必須繳納) */}
                     <div>
                       <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (已鎖定，必須繳納)：</p>
                       {billingSummary.mandatoryItems.length === 0 ? (
-                        <p className="text-slate-400 py-1">目前無任何待繳單據</p>
+                        <p className="text-slate-400 py-1">目前無任何逾期/本日到期單據</p>
                       ) : (
                         billingSummary.mandatoryItems.map(item => (
                           <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
                             <div className="flex items-center gap-2">
-                              {/* 鎖定的 Checkbox 視覺 */}
                               <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
                               <span className="flex items-center gap-1.5 flex-wrap">
                                 {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
@@ -742,17 +763,22 @@ function DashboardContent() {
                       )}
                     </div>
 
-                    {/* ★ 2. 未來期數 (可自由勾選) */}
+                    {/* ★ 2. 未來 30 天內即將到期單據 (可自由勾選提前預繳) */}
                     {billingSummary.optionalItems.length > 0 && (
                       <div className="pt-2 border-t border-white/10">
-                        <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來期數 (可選擇提早支付)：</p>
+                        <p className="text-slate-400 font-bold mb-1.5 flex items-center justify-between">
+                          <span>🗓️ 即將到期帳單 (未來30天內，可選擇提早支付)：</span>
+                        </p>
                         {billingSummary.optionalItems.map(item => {
                           const isChecked = selectedOptionalBillIds.includes(item.id);
                           return (
                             <div key={item.id} onClick={() => setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/10 px-1 rounded transition text-slate-200">
                               <div className="flex items-center gap-2">
                                 {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
-                                <span>{item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span></span>
+                                <span className="flex items-center gap-1.5 flex-wrap">
+                                  <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-blue-500/30">30天內到期</span>
+                                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                                </span>
                               </div>
                               <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
                             </div>
@@ -1098,8 +1124,8 @@ function DashboardContent() {
               ) : (
                 [...otherBills]
                   .sort((a, b) => {
-                    const dateA = new Date(a.formData?.dueDate || a.createdAt?.toDate?.() || 0).getTime();
-                    const dateB = new Date(b.formData?.dueDate || b.createdAt?.toDate?.() || 0).getTime();
+                    const dateA = getSafeTime(a.formData?.dueDate || a.createdAt);
+                    const dateB = getSafeTime(b.formData?.dueDate || b.createdAt);
                     return dateA - dateB;
                   })
                   .map(doc => {
@@ -1119,7 +1145,7 @@ function DashboardContent() {
                               {isPending && <span className="bg-amber-100 text-amber-700 text-[9px] px-1.5 py-0.5 rounded font-black border border-amber-200 whitespace-nowrap">待繳費</span>}
                             </p>
                             <p className="text-[10px] text-slate-400 font-mono mt-1">
-                              到期/更新日: {doc.formData?.dueDate || doc.formData?.docDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : '')}
+                              到期/更新日: {doc.formData?.dueDate || doc.formData?.docDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : (typeof doc.createdAt === 'string' ? doc.createdAt.split('T')[0] : ''))}
                             </p>
                           </div>
                         </div>
