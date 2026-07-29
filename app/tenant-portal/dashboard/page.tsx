@@ -157,58 +157,28 @@ function DashboardContent() {
       const isOverdue = dueDate < today;
       const isDueToday = dueDate.getTime() === today.getTime();
 
-      return {
-        id: item.id,
-        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'),
-        amount,
-        amountCents,
-        dueDateStr,
-        dueDate,
-        isOverdue,
-        isDueToday
-      };
+      return { id: item.id, title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), amount, amountCents, dueDateStr, dueDate, isOverdue, isDueToday };
     });
 
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    const futureBills = allBills.filter(b => b.dueDate > today);
-    const nextUpcomingTimestamp = futureBills.length > 0 ? futureBills[0].dueDate.getTime() : null;
+    // ★ 業務邏輯：逾期或今日到期 -> 強制繳交 (Mandatory)；未來到期 -> 自由選擇 (Optional)
+    const mandatoryItems = allBills.filter(b => b.dueDate <= today);
+    const optionalItems = allBills.filter(b => b.dueDate > today);
 
-    const defaultSelectedItems: typeof allBills = [];
-    const optionalPayItems: typeof allBills = [];
+    const mandatoryCents = mandatoryItems.reduce((sum, b) => sum + b.amountCents, 0);
+    const optionalCents = optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).reduce((sum, b) => sum + b.amountCents, 0);
 
-    allBills.forEach(bill => {
-      if (bill.dueDate <= today) {
-        defaultSelectedItems.push(bill);
-      } else if (nextUpcomingTimestamp !== null && bill.dueDate.getTime() === nextUpcomingTimestamp) {
-        defaultSelectedItems.push(bill);
-      } else {
-        optionalPayItems.push(bill);
-      }
-    });
-
-    // ★ 核心修改：計算總額時，排除掉被使用者取消勾選的預設單據
-    const defaultSelectedCents = defaultSelectedItems
-      .filter(b => !deselectedDefaultBillIds.includes(b.id))
-      .reduce((sum, b) => sum + b.amountCents, 0);
-
-    const userSelectedOptionalCents = optionalPayItems
-      .filter(b => selectedOptionalBillIds.includes(b.id))
-      .reduce((sum, b) => sum + b.amountCents, 0);
-
-    const grandTotalCents = defaultSelectedCents + userSelectedOptionalCents;
-    
-    // 只要名下有過期帳單就提示警告（不管有沒有被取消勾選）
-    const hasOverdue = defaultSelectedItems.some(b => b.isOverdue);
+    const grandTotalCents = mandatoryCents + optionalCents;
+    const hasOverdue = mandatoryItems.some(b => b.isOverdue);
 
     return {
       grandTotal: fromCents(grandTotalCents),
-      defaultSelectedTotal: fromCents(defaultSelectedCents),
-      defaultSelectedItems,
-      optionalPayItems,
+      mandatoryItems,
+      optionalItems,
       hasOverdue
     };
-  }, [tenantDocs, selectedOptionalBillIds, deselectedDefaultBillIds]); // ★ 必須加入 dependencies
+  }, [tenantDocs, selectedOptionalBillIds]);
 
   const initChat = () => { setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); setChatCategory(''); setChatInput(''); };
   const handleChatOption = (opt: string) => { setChatCategory(opt); setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); };
@@ -222,12 +192,21 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
+  // 處理返回驗證 (通知後端核銷)
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      alert("🎉 歡迎回來！我們正在處理您的付款結果，請稍候片刻帳單即會自動結算。"); 
+      // 呼叫全新的 Verify API
+      await fetch('/api/paydollar/verify', { 
+        method: 'POST', 
+        headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ orderRef }) 
+      });
+      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統已同步。"); 
       router.replace('/tenant-portal/dashboard');
-    } catch (error) {} finally { setIsVerifying(false); }
+    } catch (error) {
+      console.error(error);
+    } finally { setIsVerifying(false); }
   };
 
   useEffect(() => { 
@@ -255,9 +234,17 @@ function DashboardContent() {
     }, 2000); 
   };
   
+  // 發起結帳 (加入正在繳納的單據清單 payingBillIds)
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.grandTotal <= 0) return alert("目前沒有需要繳納的金額。");
     setIsPayDollarLoading(true);
+    
+    // 收集這次要繳的所有單據 ID
+    const payingBillIds = [
+      ...billingSummary.mandatoryItems.map(b => b.id),
+      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+    ];
+
     try {
       const response = await fetch('/api/paydollar/checkout', { 
         method: 'POST', 
@@ -268,18 +255,18 @@ function DashboardContent() {
           tenantName: tenantData.name, 
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
           email: tenantData.email || '',
-          returnUrl: window.location.origin 
+          returnUrl: window.location.origin,
+          payingBillIds // ★ 傳遞給後端
         }) 
       });
       
       const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '無法初始化支付，請稍後再試');
+      if (!response.ok || !data.success) throw new Error(data.error || '無法初始化支付');
 
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = paymentPayload.endpoint;
-
       Object.entries(paymentPayload).forEach(([key, value]) => {
         if (key !== 'endpoint' && value !== undefined && value !== null) {
           const input = document.createElement('input');
@@ -289,10 +276,8 @@ function DashboardContent() {
           form.appendChild(input);
         }
       });
-
       document.body.appendChild(form);
       form.submit();
-
     } catch (error: any) { 
       alert("系統連線錯誤：" + error.message); 
       setIsPayDollarLoading(false); 
@@ -637,63 +622,37 @@ function DashboardContent() {
                 {showBillDetails && (
                   <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
                     
-                    {/* ★ 1. 本期應繳單據 (預設勾選，但允許取消勾選) */}
+                    {/* ★ 1. 本期應繳單據 (強制鎖定不可取消) */}
                     <div>
-                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (可取消勾選先不付)：</p>
-                      {billingSummary.defaultSelectedItems.length === 0 ? (
+                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (已鎖定，必須繳納)：</p>
+                      {billingSummary.mandatoryItems.length === 0 ? (
                         <p className="text-slate-400 py-1">目前無任何待繳單據</p>
                       ) : (
-                        billingSummary.defaultSelectedItems.map(item => {
-                          // 判斷是否被取消勾選 (反向邏輯)
-                          const isChecked = !deselectedDefaultBillIds.includes(item.id);
-                          
-                          return (
-                            <div 
-                              key={item.id} 
-                              onClick={() => {
-                                setDeselectedDefaultBillIds(prev => 
-                                  isChecked ? [...prev, item.id] : prev.filter(id => id !== item.id)
-                                );
-                              }}
-                              className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
-                            >
-                              <div className="flex items-center gap-2">
-                                {isChecked ? <CheckSquare size={14} className="text-orange-400 shrink-0"/> : <Square size={14} className="text-slate-400 shrink-0"/>}
-                                <span className="flex items-center gap-1.5 flex-wrap">
-                                  {item.isOverdue && (
-                                    <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">
-                                      已逾期
-                                    </span>
-                                  )}
-                                  {item.isDueToday && (
-                                    <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">
-                                      今日到期
-                                    </span>
-                                  )}
-                                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                                </span>
-                              </div>
-                              <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                        billingSummary.mandatoryItems.map(item => (
+                          <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
+                            <div className="flex items-center gap-2">
+                              {/* 鎖定的 Checkbox 視覺 */}
+                              <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
+                              <span className="flex items-center gap-1.5 flex-wrap">
+                                {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                                {item.isDueToday && <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">今日到期</span>}
+                                {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                              </span>
                             </div>
-                          );
-                        })
+                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                          </div>
+                        ))
                       )}
                     </div>
 
-                    {/* ★ 2. 可選擇提早支付項目 (預設未勾選) */}
-                    {billingSummary.optionalPayItems.length > 0 && (
+                    {/* ★ 2. 未來期數 (可自由勾選) */}
+                    {billingSummary.optionalItems.length > 0 && (
                       <div className="pt-2 border-t border-white/10">
-                        <p className="text-slate-400 font-bold mb-1.5">🗓️ 可選擇提早支付項目：</p>
-                        {billingSummary.optionalPayItems.map(item => {
+                        <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來期數 (可選擇提早支付)：</p>
+                        {billingSummary.optionalItems.map(item => {
                           const isChecked = selectedOptionalBillIds.includes(item.id);
                           return (
-                            <div 
-                              key={item.id} 
-                              onClick={() => {
-                                setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id]);
-                              }}
-                              className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/5 px-1 rounded transition text-slate-200"
-                            >
+                            <div key={item.id} onClick={() => setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/10 px-1 rounded transition text-slate-200">
                               <div className="flex items-center gap-2">
                                 {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
                                 <span>{item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span></span>
