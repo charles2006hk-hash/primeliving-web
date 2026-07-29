@@ -247,12 +247,14 @@ function DashboardContent() {
   };
   
   // ★ 精確發起結帳：先寫入 Firestore Pending，再要簽章，防範 404 找不到交易
+  // ★ 發起結帳：強制記錄訂單與關聯單據 ID 到 Firestore，解決核銷時查無記錄問題
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.grandTotal <= 0) {
       return alert("目前沒有需要繳納的金額。");
     }
     setIsPayDollarLoading(true);
 
+    // 收集這次要繳交的所有單據 ID (本期強制 + 未來勾選)
     const payingBillIds = [
       ...billingSummary.mandatoryItems.map(b => b.id),
       ...billingSummary.optionalItems
@@ -263,7 +265,7 @@ function DashboardContent() {
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
 
     try {
-      // 1. 先把單據 ID 寫入 transactions，狀態設為 Pending
+      // 1. 強制於跳轉前寫入 transactions 集合
       await setDoc(doc(db, 'transactions', orderRef), {
         orderRef,
         tenantId: tenantData.id,
@@ -276,7 +278,7 @@ function DashboardContent() {
         createdAt: serverTimestamp()
       });
 
-      // 2. 請求 PayDollar 簽章
+      // 2. 請求 API 生成 SHA-1 安全加密簽章
       const response = await fetch('/api/paydollar/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -292,10 +294,10 @@ function DashboardContent() {
 
       const data = await response.json();
       if (!response.ok || !data.success) {
-        throw new Error(data.error || '無法初始化支付');
+        throw new Error(data.error || '無法生成支付請求');
       }
 
-      // 3. 表單送出跳轉
+      // 3. 自動構建表單跳轉 PayDollar 頁面
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
@@ -312,7 +314,7 @@ function DashboardContent() {
       document.body.appendChild(form);
       form.submit();
     } catch (error: any) {
-      alert("系統連線錯誤：" + error.message);
+      alert("連線金流系統出錯：" + error.message);
       setIsPayDollarLoading(false);
     }
   };
