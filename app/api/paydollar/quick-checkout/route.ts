@@ -7,7 +7,10 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// 財務精確計算 (仙 Cents)
+/**
+ * 財務精確計算輔助模組 (單位：分 Cents)
+ * 徹底防範 JavaScript 浮點數運算誤差
+ */
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -19,20 +22,31 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      region,          // 選擇地區 (e.g., 太湖花園, 碧濤花園)
-      roomName,        // 房間編號 (e.g., Room A, Room B)
+      passcode,        // 現場銷售內部通行密碼
+      region,          // 物業/屋苑名稱
+      roomName,        // 單位編號
       tenantName,      // 租客姓名
-      idNumber,        // 證件號碼 (後4碼或全碼，用作日後自動配對索引)
+      idNumber,        // 證件號碼 (用於 CRM 事後自動配對認領)
       phone,           // 聯絡電話
       amount,          // 收款金額
-      remarks,         // 備註 (e.g., 兩個月押金+首月租金)
-      salesPerson      // 收款經辦人 (銷售人員姓名)
+      remarks,         // 款項備註
+      salesPerson      // 收款銷售員
     } = body;
 
+    // 1. 安全權限核驗：驗證傳入密碼是否與 Vercel 環境變數吻合
+    const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
+    if (!passcode || passcode !== validPin) {
+      return NextResponse.json(
+        { success: false, error: '⛔ 授權無效：現場收款通行密碼錯誤或已過期' },
+        { status: 401, headers: corsHeaders }
+      );
+    }
+
+    // 2. 財務精度與必要欄位校驗
     const paidAmountCents = toCents(amount);
     if (paidAmountCents <= 0 || !tenantName || !phone) {
       return NextResponse.json(
-        { success: false, error: '請完整填寫租客姓名、電話及有效金額' },
+        { success: false, error: '請完整填寫客戶姓名、電話及有效收款金額' },
         { status: 400, headers: corsHeaders }
       );
     }
@@ -40,42 +54,44 @@ export async function POST(request: Request) {
     const orderRef = `SALES-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const nowIso = new Date().toISOString();
 
-    // 1. 建立現場預收款訂單 (狀態設為待支付 Pending，配對狀態為未分配 Unassigned)
+    // 3. 建立現場預收款訂單 (未歸戶狀態：pairingStatus = 'Unassigned')
     const quickOrderData = {
       orderRef,
       region: region || '香港',
-      roomName: roomName || '未指定房間',
+      roomName: roomName || '未指定單位',
       roomInfo: `${region || ''} - ${roomName || ''}`.trim(),
       tenantName: tenantName.trim(),
       idNumber: (idNumber || '').trim().toUpperCase(),
       phone: phone.trim(),
       amount: fromCents(paidAmountCents),
       remarks: remarks || '現場收款',
-      salesPerson: salesPerson || '一般員工',
+      salesPerson: salesPerson || '內部專員',
       status: 'Pending',
-      pairingStatus: 'Unassigned',  // ★ 關鍵：標記為未配對，日後可在大系統自動/手動認領
+      pairingStatus: 'Unassigned',
       gateway: 'PayDollar',
       createdAt: nowIso,
       updatedAt: nowIso
     };
 
-    // 同時寫入 quick_orders 與 transactions 主表
-    await adminDb.collection('quick_orders').doc(orderRef).set(quickOrderData);
-    await adminDb.collection('transactions').doc(orderRef).set({
+    // 原子化寫入 quick_orders 專用隊列與 transactions 網關表
+    const batch = adminDb.batch();
+    batch.set(adminDb.collection('quick_orders').doc(orderRef), quickOrderData);
+    batch.set(adminDb.collection('transactions').doc(orderRef), {
       ...quickOrderData,
       type: 'income',
       category: '現場預收款',
-      title: `[現場收款] ${tenantName} - ${quickOrderData.roomInfo} ($${fromCents(paidAmountCents).toLocaleString()})`
+      title: `[現場收款] ${quickOrderData.tenantName} - ${quickOrderData.roomInfo} ($${quickOrderData.amount.toLocaleString()})`
     });
+    await batch.commit();
 
-    // 2. 呼叫官方安全支付簽章 API (直接共用原先的支付生成邏輯)
+    // 4. 呼叫官方 PayDollar 簽章 API 生成支付參數
     const response = await fetch(`${new URL(request.url).origin}/api/paydollar/checkout`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         amountDue: fromCents(paidAmountCents),
-        tenantId: `QUICK-${idNumber || phone}`,  // 暫存 ID
-        tenantName: tenantName,
+        tenantId: `QUICK-${idNumber || phone}`,
+        tenantName: quickOrderData.tenantName,
         roomInfo: quickOrderData.roomInfo,
         returnUrl: `${new URL(request.url).origin}/sales-pay?success=true&orderRef=${orderRef}`,
         orderRef
