@@ -8,7 +8,7 @@ import {
   CheckSquare, Square, ChevronDown, ChevronUp
 } from 'lucide-react';
 import Link from 'next/link';
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
@@ -192,29 +192,91 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  // 處理返回驗證 (通知後端核銷)
+  // ★ 1. 交易核銷引擎：移回前端執行，藉由租客已登入的安全權限合法寫入單據
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      // 呼叫全新的 Verify API
-      await fetch('/api/paydollar/verify', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ orderRef }) 
+      const txRef = doc(db, 'transactions', orderRef);
+      const txSnap = await getDoc(txRef);
+
+      if (!txSnap.exists()) {
+        alert("系統查無此筆交易紀錄。若您確定已扣款，請聯絡管家人工核銷。");
+        router.replace('/tenant-portal/dashboard');
+        return;
+      }
+
+      const txData = txSnap.data();
+      // 防重入保護：如果已核銷則直接返回
+      if (txData.status === 'Success') {
+        router.replace('/tenant-portal/dashboard');
+        return;
+      }
+
+      // A. 批次更新本次繳交的所有帳單狀態為「已繳清」
+      const billIds: string[] = txData.billIds || [];
+      for (const billId of billIds) {
+        await updateDoc(doc(db, 'documents', billId), {
+          paymentStatus: 'Paid',
+          status: 'Completed',
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      // B. 自動為租客與大系統開立一張「線上付款正式收據」
+      await addDoc(collection(db, 'documents'), {
+        type: 'Receipt',
+        paymentStatus: 'Paid',
+        status: 'Completed',
+        summary: `${txData.tenantName} - 線上付款正式收據 (${orderRef})`,
+        isCompanyChopApplied: true, // 自動蓋藍色公司印章
+        formData: {
+          tenantId: txData.tenantId,
+          tenantName: txData.tenantName,
+          roomName: txData.roomInfo,
+          docDate: new Date().toISOString().split('T')[0],
+          paymentMethod: 'PayDollar',
+          totalReceived: Number(txData.amount) || 0,
+          remarks: `由 PayDollar 線上安全支付自動結算。\n訂單編號: ${orderRef}`,
+        },
+        createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
       });
-      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統已同步。"); 
+
+      // C. 檢查該租客是否還有剩餘待繳帳單，動態更新大系統紅燈警示
+      const qUnpaid = query(
+        collection(db, 'documents'), 
+        where('formData.tenantId', '==', txData.tenantId), 
+        where('paymentStatus', '==', 'Unpaid')
+      );
+      const snapUnpaid = await getDocs(qUnpaid);
+      await updateDoc(doc(db, 'tenants', txData.tenantId), {
+        hasUnpaidBills: !snapUnpaid.empty,
+        updatedAt: serverTimestamp()
+      });
+
+      // D. 標記交易為成功
+      await updateDoc(txRef, { status: 'Success', updatedAt: serverTimestamp() });
+
+      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已更新。");
       router.replace('/tenant-portal/dashboard');
-    } catch (error) {
-      console.error(error);
-    } finally { setIsVerifying(false); }
+    } catch (error: any) {
+      console.error("[Verification Error]:", error);
+      alert("核銷過程發生異常，請保留繳費明細並通知管家。");
+      router.replace('/tenant-portal/dashboard');
+    } finally {
+      setIsVerifying(false);
+    }
   };
 
+  // ★ 2. 監聽 PayDollar 頁面返回結果
   useEffect(() => { 
     const orderRef = searchParams?.get('orderRef'); 
     const success = searchParams?.get('success'); 
     const failed = searchParams?.get('failed');
     
-    if (success === 'true' && orderRef) { verifyPayDollarPayment(orderRef); }
+    if (success === 'true' && orderRef) { 
+      verifyPayDollarPayment(orderRef); 
+    }
     if (failed === 'true') {
       alert("❌ 支付失敗或已取消，請確認您的信用卡狀態後重試。");
       router.replace('/tenant-portal/dashboard');
@@ -234,35 +296,51 @@ function DashboardContent() {
     }, 2000); 
   };
   
-  // 發起結帳 (加入正在繳納的單據清單 payingBillIds)
+  // ★ 3. 發起結帳：前端先建立 Pending 交易記錄，再向後端索取加密 Hash
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.grandTotal <= 0) return alert("目前沒有需要繳納的金額。");
     setIsPayDollarLoading(true);
     
-    // 收集這次要繳的所有單據 ID
+    // 收集要繳付的單據 ID（強制項目 + 租客主動勾選的未來項目）
     const payingBillIds = [
       ...billingSummary.mandatoryItems.map(b => b.id),
       ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
     ];
 
+    // 生成自訂交易單號
+    const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
+
     try {
+      // A. 先在前端建立一筆未完成(Pending)的交易，記錄要核銷的單據編號
+      await setDoc(doc(db, 'transactions', orderRef), {
+        orderRef,
+        tenantId: tenantData.id,
+        tenantName: tenantData.name,
+        roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
+        amount: billingSummary.grandTotal, 
+        billIds: payingBillIds,
+        status: 'Pending',
+        gateway: 'PayDollar',
+        createdAt: serverTimestamp()
+      });
+
+      // B. 向後端要 PayDollar 的 SHA-1 安全加密簽章 (安全分離)
       const response = await fetch('/api/paydollar/checkout', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ 
           amountDue: billingSummary.grandTotal, 
-          tenantId: tenantData.id, 
           tenantName: tenantData.name, 
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
-          email: tenantData.email || '',
           returnUrl: window.location.origin,
-          payingBillIds // ★ 傳遞給後端
+          orderRef // 把剛剛生成的 OrderRef 丟給後端做 Hash
         }) 
       });
       
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || '無法初始化支付');
 
+      // C. 產生隱藏表單自動跳轉至 PayDollar 金流網頁
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
