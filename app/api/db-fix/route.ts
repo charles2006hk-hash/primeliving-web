@@ -11,16 +11,14 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
 }
 
-// 1. GET: 直接從 DB 底層撈取最近的 財務紀錄 (finances) 與 曾敏的帳單 (documents)
+// 1. GET: 撈取最新的 20 筆 財務紀錄 (finances) 與 曾敏的帳單 (documents)
 export async function GET() {
   try {
-    // 撈取 finances 集合最新 10 筆
     const financesSnap = await adminDb.collection('finances')
       .orderBy('createdAt', 'desc')
-      .limit(10)
+      .limit(20)
       .get();
 
-    // 撈取曾敏 (Room A) 名下的租金單據
     const billsSnap = await adminDb.collection('documents')
       .where('formData.tenantId', '==', '4Cy3Kn9lw4k64FQRwLZM')
       .get();
@@ -44,26 +42,34 @@ export async function GET() {
   }
 }
 
-// 2. POST: 執行資料庫直接修復與平帳
+// 2. POST: 執行資料庫直接修復與平帳 (相容 paymentStatus = undefined 的遺留異常)
 export async function POST(request: Request) {
   try {
     const { action } = await request.json();
     const batch = adminDb.batch();
     let affectedCount = 0;
 
-    // 動作 A: 強制平帳曾敏 1, 2, 3 期帳單，歸零欠款、去除逾期紅燈
+    // 動作 A: 強制平帳曾敏 1, 2, 3 期帳單 (相容 undefined / Pending)，歸零欠款並熄滅紅燈
     if (action === 'FORCE_CLEAR_ZENGMIN') {
       const tenantId = '4Cy3Kn9lw4k64FQRwLZM';
       const nowIso = new Date().toISOString();
 
-      // 1. 更新單據為 Paid
       const billsSnap = await adminDb.collection('documents')
         .where('formData.tenantId', '==', tenantId)
         .get();
 
       billsSnap.docs.forEach(doc => {
-        const desc = doc.data()?.formData?.items?.[0]?.description || '';
-        if (desc.includes('第一期') || desc.includes('第二期') || desc.includes('第三期') || desc.includes('押金') || desc.includes('水電')) {
+        const data = doc.data();
+        const desc = data?.formData?.items?.[0]?.description || '';
+        
+        // ★ 精確比對首3期、押金與水電，無視原有 paymentStatus 是否為 undefined
+        const isTargetBill = desc.includes('第一期') || 
+                             desc.includes('第二期') || 
+                             desc.includes('第三期') || 
+                             desc.includes('押金') || 
+                             desc.includes('水電');
+
+        if (isTargetBill && data.paymentStatus !== 'Paid') {
           batch.update(doc.ref, {
             paymentStatus: 'Paid',
             status: 'Completed',
@@ -73,7 +79,7 @@ export async function POST(request: Request) {
         }
       });
 
-      // 2. 將 tenants 表 amountDue 設為 0
+      // 歸零 tenants 主表欠款額
       const tenantRef = adminDb.collection('tenants').doc(tenantId);
       batch.update(tenantRef, {
         amountDue: 0,
@@ -83,19 +89,22 @@ export async function POST(request: Request) {
       affectedCount++;
     }
 
-    // 動作 B: 修正 $60,600 的錯誤「分紅提款」分類為 AR 租金收款
+    // 動作 B: 跨兩個表同時搜尋並修正 $60,600 的錯誤「分紅提款」為 AR
     if (action === 'FIX_60600_CATEGORY') {
       const collections = ['finances', 'finance_records'];
       for (const colName of collections) {
         const snap = await adminDb.collection(colName).where('amount', '==', 60600).get();
         snap.docs.forEach(doc => {
-          batch.update(doc.ref, {
-            type: 'AR',
-            category: '租金收款',
-            title: '曾敏 - Room A 租金繳納 ($60,600)',
-            updatedAt: new Date().toISOString()
-          });
-          affectedCount++;
+          const data = doc.data();
+          if (String(data.category || '').includes('分紅') || data.type !== 'AR') {
+            batch.update(doc.ref, {
+              type: 'AR',
+              category: '租金收款',
+              title: '曾敏 - Room A 租金繳納 ($60,600)',
+              updatedAt: new Date().toISOString()
+            });
+            affectedCount++;
+          }
         });
       }
     }
