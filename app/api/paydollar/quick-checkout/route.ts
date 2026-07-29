@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { adminDb } from '@/lib/firebase-admin';
+import crypto from 'crypto';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -8,11 +9,25 @@ const corsHeaders = {
 };
 
 /**
- * 財務會計精確運算輔助模組
- * 一律轉成仙 (Cents) 整數計算，杜絕 JS 浮點數精度誤差 (Floating Point Error)
+ * 財務會計精確運算：轉仙 (Cents) 處理，防止 IEEE 754 浮點數運算誤差
  */
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
+
+/**
+ * PayDollar 官方 SHA-1 安全加密簽章演算法
+ */
+function generatePayDollarSecureHash(
+  merchantId: string,
+  orderRef: string,
+  currCode: string,
+  amount: number,
+  payType: string,
+  secureHashSecret: string
+): string {
+  const str = `${merchantId}|${orderRef}|${currCode}|${amount}|${payType}|${secureHashSecret}`;
+  return crypto.createHash('sha1').update(str).digest('hex');
+}
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
@@ -22,18 +37,18 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      passcode,        // 內部授權解鎖密碼
-      region,          // 屋苑 / 盤源物業
+      passcode,        // 內部現場解鎖金鑰
+      region,          // 屋苑/大廈
       roomName,        // 單位編號
       tenantName,      // 租客姓名
-      idNumber,        // 證件號碼 (用於 CRM 大系統事後自動配對)
+      idNumber,        // 證件編號
       phone,           // 聯絡電話
-      amount,          // 收款金額 (HKD)
-      remarks,         // 用途說明
-      salesPerson      // 收款經辦人
+      amount,          // 收款金額
+      remarks,         // 備註用途
+      salesPerson      // 經辦人
     } = body;
 
-    // 1. 安全校驗：核對通行金鑰是否與 Vercel 環境變數匹配
+    // 1. 權限防禦：檢查通行金鑰 (對比 Vercel Environment Variables)
     const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
     if (!passcode || passcode !== validPin) {
       return NextResponse.json(
@@ -53,8 +68,9 @@ export async function POST(request: Request) {
 
     const orderRef = `SALES-${Date.now()}-${Math.floor(1000 + Math.random() * 9000)}`;
     const nowIso = new Date().toISOString();
+    const cleanAmount = fromCents(paidAmountCents);
 
-    // 3. 建立現場收款單據隊列 (嚴格設定為處理中 Pending / 未歸戶 Unassigned)
+    // 3. 建立現場未歸戶預收款隊列 (純守 Pending 狀態，等待金流 Webhook 觸發付訖)
     const quickOrderData = {
       orderRef,
       region: region || '香港',
@@ -63,53 +79,67 @@ export async function POST(request: Request) {
       tenantName: tenantName.trim(),
       idNumber: (idNumber || '').trim().toUpperCase(),
       phone: phone.trim(),
-      amount: fromCents(paidAmountCents),
+      amount: cleanAmount,
       remarks: remarks || '現場收款',
       salesPerson: salesPerson || '內部專員',
-      status: 'Pending',             // 只有金流 Webhook/Verify 成功確認後才允許更改為 Completed
+      status: 'Pending',
       paymentStatus: 'Unpaid',
-      pairingStatus: 'Unassigned',   // 大系統 CRM 現場認領標記
+      pairingStatus: 'Unassigned',  // CRM 待配對標記
       gateway: 'PayDollar',
       createdAt: nowIso,
       updatedAt: nowIso
     };
 
-    // 4. 原子化寫入隊列：進入 quick_orders (現場待認領隊列) 與 transactions (財務網關表)
     const batch = adminDb.batch();
     batch.set(adminDb.collection('quick_orders').doc(orderRef), quickOrderData);
     batch.set(adminDb.collection('transactions').doc(orderRef), {
       ...quickOrderData,
       type: 'income',
       category: '現場預收款',
-      title: `[現場收款] ${quickOrderData.tenantName} - ${quickOrderData.roomInfo} ($${quickOrderData.amount.toLocaleString()})`
+      title: `[現場收款] ${quickOrderData.tenantName} - ${quickOrderData.roomInfo} ($${cleanAmount.toLocaleString()})`
     });
     await batch.commit();
 
-    // 5. 呼叫後端簽章 API 生成 PayDollar 安全表單參數
-    const origin = new URL(request.url).origin;
-    const response = await fetch(`${origin}/api/paydollar/checkout`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        amountDue: fromCents(paidAmountCents),
-        tenantId: `QUICK-${(idNumber || phone).trim()}`,
-        tenantName: quickOrderData.tenantName,
-        roomInfo: quickOrderData.roomInfo,
-        // ★ 核心修復：把 returnUrl 精確指向 /sales-pay，防禦路徑錯亂拼接
-        returnUrl: `${origin}/sales-pay`,
-        orderRef: orderRef
-      })
-    });
+    // 4. PayDollar 參數配置與 SHA-1 簽章 (直接使用環境變數或專案商戶設定)
+    const merchantId = process.env.PAYDOLLAR_MERCHANT_ID || '88888888'; // 請確保 Vercel 已設 PAYDOLLAR_MERCHANT_ID
+    const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET || 'YOUR_SECRET_KEY';
+    const currCode = '344'; // 344 = HKD
+    const payType = 'N';    // N = Normal Sale
 
-    const data = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || '金流授權請求生成失敗');
-    }
+    const secureHash = generatePayDollarSecureHash(
+      merchantId,
+      orderRef,
+      currCode,
+      cleanAmount,
+      payType,
+      secureHashSecret
+    );
+
+    // ★ 核心修復：嚴格定義絕對回傳 URL，絕不二次拼接，導回 /sales-pay
+    const origin = new URL(request.url).origin;
+    const cleanReturnUrl = `${origin}/sales-pay`;
+
+    const paymentPayload = {
+      endpoint: process.env.PAYDOLLAR_PAYMENT_URL || 'https://test.paydollar.com/b2cDemo/eng/payment/payForm.jsp',
+      merchantId,
+      amount: cleanAmount,
+      orderRef,
+      currCode,
+      mpsMode: 'N',
+      successUrl: `${cleanReturnUrl}?success=true&orderRef=${orderRef}`,
+      failUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
+      cancelUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
+      payType,
+      lang: 'C',        // 繁體中文
+      payMethod: 'ALL', // 支援信用卡、FPS 等全部付款方式
+      secureHash,
+      remark: `${quickOrderData.roomInfo} - ${quickOrderData.tenantName}`
+    };
 
     return NextResponse.json({
       success: true,
       orderRef,
-      paymentPayload: data.paymentPayload
+      paymentPayload
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
