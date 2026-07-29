@@ -237,13 +237,50 @@ function DashboardContent() {
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
   const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
-  const handleUploadReceipt = (e: React.ChangeEvent<HTMLInputElement>) => { 
-    setIsUploading(true); 
-    setTimeout(() => { 
-      setIsUploading(false); 
-      setActiveModal('none'); 
-      alert("✅ 入數紙上傳成功！管家將在 24 小時內為您核對。"); 
-    }, 2000); 
+  // ★ 上傳入數紙：建立「待人工核對 (Pending Verification)」單據，並同步至 CRM / 客服訊息
+  const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !tenantData) return;
+
+    setIsUploading(true);
+    try {
+      // 1. 收集當前需繳付的單據 ID
+      const payingBillIds = [
+        ...billingSummary.mandatoryItems.map(b => b.id),
+        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+      ];
+
+      // 2. 將待核對紀錄寫入 Firestore inquiries (讓管家小鈴鐺/客服後台收到通知)
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id,
+        name: tenantData.name || '',
+        phone: tenantData.phone || '',
+        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
+        category: '轉帳付款核對',
+        message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${billingSummary.grandTotal.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`,
+        type: 'ticket',
+        status: 'In Progress', // 標記為處理中
+        amount: billingSummary.grandTotal,
+        billIds: payingBillIds,
+        createdAt: serverTimestamp()
+      });
+
+      // 3. (選擇性) 將關聯帳單的狀態設為「審核中(Under Review)」，避免租客重複繳交
+      for (const billId of payingBillIds) {
+        await updateDoc(doc(db, 'documents', billId), {
+          paymentStatus: 'Under Review',
+          updatedAt: serverTimestamp()
+        });
+      }
+
+      alert("✅ 入數紙已成功送出！\n\n管家將於 24 小時內確認銀行進帳並開立正式收據，確認後本系統會自動清除逾期警告。");
+      setActiveModal('none');
+    } catch (error: any) {
+      console.error("上傳入數紙記錄失敗:", error);
+      alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。");
+    } finally {
+      setIsUploading(false);
+    }
   };
   
   // ★ 精確發起結帳：先寫入 Firestore Pending，再要簽章，防範 404 找不到交易
