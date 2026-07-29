@@ -324,16 +324,17 @@ function DashboardContent() {
         createdAt: serverTimestamp()
       });
 
-      // B. 向後端要 PayDollar 的 SHA-1 安全加密簽章 (安全分離)
+      // 在 handlePayDollarCheckout 內部
       const response = await fetch('/api/paydollar/checkout', { 
         method: 'POST', 
         headers: { 'Content-Type': 'application/json' }, 
         body: JSON.stringify({ 
           amountDue: billingSummary.grandTotal, 
+          tenantId: tenantData.id,  // ★ 確保帶入 ID 供 API Safe-fallback 使用
           tenantName: tenantData.name, 
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
           returnUrl: window.location.origin,
-          orderRef // 把剛剛生成的 OrderRef 丟給後端做 Hash
+          orderRef                  // ★ 傳遞前端已寫入 transactions 的 OrderRef
         }) 
       });
       
