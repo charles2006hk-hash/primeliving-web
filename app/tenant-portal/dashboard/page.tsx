@@ -13,11 +13,11 @@ import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
 
-// ★ 財務精確計算輔助函數 (單位：分 Cents) 放置於組件外部，避免 JS 浮點數誤差
+// 財務精確計算 (單位：分 Cents) - 避免 JS 浮點數誤差
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
 
-// ★ 安全時間戳解析器：相容 Firestore Timestamp、ISO String 與 Date 物件，防範 .toDate() 拋錯
+// 安全時間戳解析器：相容 Firestore Timestamp、ISO String 與 Date 物件
 const getSafeTime = (val: any): number => {
   if (!val) return 0;
   if (typeof val.toDate === 'function') return val.toDate().getTime();
@@ -148,33 +148,70 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
 
+  // ★ 自動預選：當監聽到帳單資料時，將未來 30 天內即將到期的帳單自動納入預設勾選
+  useEffect(() => {
+    if (tenantDocs.length > 0) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const thirtyDaysLater = new Date(today);
+      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
+      thirtyDaysLater.setHours(23, 59, 59, 999);
+
+      const autoSelectIds: string[] = [];
+
+      tenantDocs.forEach(item => {
+        const isPaid = item.status === 'Completed' || item.status === 'Paid' || item.paymentStatus === 'Paid';
+        const isReview = item.paymentStatus === 'Under Review';
+        if (isPaid || isReview) return;
+
+        const fd = item.formData || {};
+        let dueDateStr = fd.dueDate || fd.docDate;
+        if (!dueDateStr) {
+          if (typeof item.createdAt?.toDate === 'function') dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
+          else if (typeof item.createdAt === 'string') dueDateStr = item.createdAt.split('T')[0];
+          else dueDateStr = new Date().toISOString().split('T')[0];
+        }
+
+        const dueDate = new Date(dueDateStr);
+        dueDate.setHours(0, 0, 0, 0);
+
+        // 如果到期日落在「明天～30天內」，自動勾選
+        if (dueDate > today && dueDate <= thirtyDaysLater) {
+          autoSelectIds.push(item.id);
+        }
+      });
+
+      setSelectedOptionalBillIds(autoSelectIds);
+    }
+  }, [tenantDocs]);
+
   // ★ 核心業務邏輯：帳單統計與 30 天內提早繳費運算引擎
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
 
-    // ★ 定義未來 30 天期限截止點
     const thirtyDaysLater = new Date(today);
     thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
     thirtyDaysLater.setHours(23, 59, 59, 999);
 
-    const pendingDocs = tenantDocs.filter(d => d.status === 'Pending' || d.paymentStatus === 'Unpaid');
+    // 寬鬆抓取所有未核銷帳單（排除已完成與審核中）
+    const pendingDocs = tenantDocs.filter(d => {
+      const isPaid = d.status === 'Completed' || d.status === 'Paid' || d.paymentStatus === 'Paid';
+      const isReview = d.paymentStatus === 'Under Review';
+      return !isPaid && !isReview;
+    });
 
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
       const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
       const amountCents = toCents(amount);
 
-      // 安全解析到期日，優先採用 fd.dueDate，無則兼顧 Timestamp/String 安全轉化
       let dueDateStr = fd.dueDate || fd.docDate;
       if (!dueDateStr) {
-        if (typeof item.createdAt?.toDate === 'function') {
-          dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
-        } else if (typeof item.createdAt === 'string') {
-          dueDateStr = item.createdAt.split('T')[0];
-        } else {
-          dueDateStr = new Date().toISOString().split('T')[0];
-        }
+        if (typeof item.createdAt?.toDate === 'function') dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
+        else if (typeof item.createdAt === 'string') dueDateStr = item.createdAt.split('T')[0];
+        else dueDateStr = new Date().toISOString().split('T')[0];
       }
 
       const dueDate = new Date(dueDateStr);
@@ -197,10 +234,10 @@ function DashboardContent() {
 
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    // 1. 本期強制繳納項目：逾期或今日到期
+    // 1. 本期應繳項目（逾期或今天到期）
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
     
-    // ★ 2. 可選擇提早預繳項目：未來 30 天內即將到期的帳單 (dueDate > today 且 <= 30天內)
+    // 2. 未來 30 天內即將到期項目（可選提早預繳，預設已全選）
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
     const mandatoryCents = mandatoryItems.reduce((sum, b) => sum + b.amountCents, 0);
@@ -210,12 +247,14 @@ function DashboardContent() {
 
     const grandTotalCents = mandatoryCents + optionalCents;
     const hasOverdue = mandatoryItems.some(b => b.isOverdue);
+    const hasUpcoming = optionalItems.length > 0;
 
     return {
       grandTotal: fromCents(grandTotalCents),
       mandatoryItems,
       optionalItems,
-      hasOverdue
+      hasOverdue,
+      hasUpcoming
     };
   }, [tenantDocs, selectedOptionalBillIds]);
 
@@ -711,6 +750,7 @@ function DashboardContent() {
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
 
+              {/* 警示 1：逾期警告 */}
               {billingSummary.hasOverdue && (
                 <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
                   <AlertCircle size={16} className="text-red-400 shrink-0"/>
@@ -718,13 +758,21 @@ function DashboardContent() {
                 </div>
               )}
 
+              {/* 警示 2：30 天內即將到期提示 */}
+              {!billingSummary.hasOverdue && billingSummary.hasUpcoming && (
+                <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
+                  <Clock size={16} className="text-amber-400 shrink-0"/>
+                  <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
+                </div>
+              )}
+
               <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次待繳總額 (HKD)</p>
+                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次應繳/預繳總額 (HKD)</p>
                   <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.grandTotal.toLocaleString()}</h2>
                 </div>
-                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-                  {billingSummary.hasOverdue ? '有逾期帳單' : tenantData.status}
+                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : billingSummary.hasUpcoming ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
+                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即將到期帳單' : tenantData.status}
                 </span>
               </div>
 
@@ -741,9 +789,9 @@ function DashboardContent() {
                 {showBillDetails && (
                   <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
                     
-                    {/* ★ 1. 本期應繳單據 (過期或今日到期：鎖定必須繳納) */}
+                    {/* 1. 本期強制繳納單據（已逾期或今日到期） */}
                     <div>
-                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期應繳單據 (已鎖定，必須繳納)：</p>
+                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期必須繳納單據：</p>
                       {billingSummary.mandatoryItems.length === 0 ? (
                         <p className="text-slate-400 py-1">目前無任何逾期/本日到期單據</p>
                       ) : (
@@ -763,12 +811,10 @@ function DashboardContent() {
                       )}
                     </div>
 
-                    {/* ★ 2. 未來 30 天內即將到期單據 (可自由勾選提前預繳) */}
+                    {/* 2. 未來 30 天內即將到期單據（預設全選，可彈性手動取消） */}
                     {billingSummary.optionalItems.length > 0 && (
                       <div className="pt-2 border-t border-white/10">
-                        <p className="text-slate-400 font-bold mb-1.5 flex items-center justify-between">
-                          <span>🗓️ 即將到期帳單 (未來30天內，可選擇提早支付)：</span>
-                        </p>
+                        <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來 30 天內即將到期帳單 (預設已為您勾選，可提前支付)：</p>
                         {billingSummary.optionalItems.map(item => {
                           const isChecked = selectedOptionalBillIds.includes(item.id);
                           return (
