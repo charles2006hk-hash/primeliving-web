@@ -6,8 +6,6 @@ import {
   Loader2, IdCard, Home, Lock, Building2
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-import { collection, onSnapshot, doc, query } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
 
 interface Room {
   id: string;
@@ -20,7 +18,6 @@ interface Room {
 interface Property {
   id: string;
   name: string;
-  status?: string;
 }
 
 function SalesQuickPayContent() {
@@ -34,7 +31,7 @@ function SalesQuickPayContent() {
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // CRM 盤源與人員資料
+  // CRM 資料狀態
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [crmStaffList, setCrmStaffList] = useState<string[]>(['公司行政 (Office)']);
@@ -56,7 +53,7 @@ function SalesQuickPayContent() {
     salesPerson: ''
   });
 
-  // A. 初始化：讀取本地儲存的銷售授權碼與歷史經手人員
+  // A. 讀取本地通行碼與經手人歷史
   useEffect(() => {
     const savedPin = localStorage.getItem('SALES_PAY_TOKEN');
     if (savedPin) {
@@ -69,59 +66,38 @@ function SalesQuickPayContent() {
     }
   }, []);
 
-  // B. 即時監聽 CRM 數據
+  // B. 透過 Vercel 後端代理 API 拉取數據（專為國內免翻牆優化）
   useEffect(() => {
-    if (!db) return;
-
-    // 1. 人員 / 員工設定
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (snap) => {
-      if (snap.exists()) {
-        const data = snap.data();
-        let list: string[] = ['公司行政 (Office)'];
-        if (data.shareholders) {
-          if (Array.isArray(data.shareholders)) {
-            list = [...data.shareholders, '公司行政 (Office)'];
-          } else if (typeof data.shareholders === 'string') {
-            list = [...data.shareholders.split(',').map((s: string) => s.trim()).filter(Boolean), '公司行政 (Office)'];
+    let isMounted = true;
+    const fetchFormData = async () => {
+      try {
+        const res = await fetch('/api/sales/form-data');
+        const json = await res.json();
+        if (json.success && isMounted) {
+          setCrmStaffList(json.data.staffList || ['公司行政 (Office)']);
+          setProperties(json.data.properties || []);
+          setRooms(json.data.rooms || []);
+          if (!formData.salesPerson && json.data.staffList?.length > 0) {
+            setFormData(prev => ({ ...prev, salesPerson: json.data.staffList[0] }));
           }
         }
-        setCrmStaffList(list);
-        if (!formData.salesPerson && list.length > 0) {
-          setFormData(prev => ({ ...prev, salesPerson: list[0] }));
-        }
+      } catch (err) {
+        console.error('資料初始化失敗:', err);
+      } finally {
+        if (isMounted) setDbLoading(false);
       }
-    });
-
-    // 2. 物業清單 (過濾掉名稱帶有 Test/測試 的假資料)
-    const unsubProps = onSnapshot(collection(db, 'properties'), (snap) => {
-      const validProps = snap.docs
-        .map(d => ({ id: d.id, ...d.data() } as Property))
-        .filter(p => {
-          const name = (p.name || '').toLowerCase();
-          return !name.includes('test') && !name.includes('測試') && p.status !== '停用';
-        });
-      setProperties(validProps);
-    });
-
-    // 3. 房間單位清單
-    const unsubRooms = onSnapshot(query(collection(db, 'rooms')), (snap) => {
-      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Room)));
-      setDbLoading(false);
-    });
-
-    return () => {
-      unsubSettings();
-      unsubProps();
-      unsubRooms();
     };
+
+    fetchFormData();
+    return () => { isMounted = false; };
   }, []);
 
-  // 合併 CRM 員工名單與本地輸入記憶作為智能聯想清單
+  // 經手人員合併清單 (CRM名單 + 本地輸入記憶)
   const combinedStaffList = useMemo(() => {
     return Array.from(new Set([...crmStaffList, ...savedStaffList]));
   }, [crmStaffList, savedStaffList]);
 
-  // 依據選擇的大樓/物業過濾房間，並將 未出租 (Vacant) 置頂
+  // 依物業過濾房間並將「🟢 未出租」置頂
   const filteredSortedRooms = useMemo(() => {
     if (!formData.propertyId) return [];
     return rooms
@@ -150,7 +126,7 @@ function SalesQuickPayContent() {
     }));
   };
 
-  // 選擇房間即時帶入房間名稱與基礎月租建議
+  // 選擇房間自動帶入基礎租金建議
   const handleRoomChange = (roomId: string) => {
     const selectedRoom = rooms.find(r => r.id === roomId);
     if (selectedRoom) {
@@ -191,7 +167,6 @@ function SalesQuickPayContent() {
     setPinInput('');
   };
 
-  // 記憶最新輸入的經手人員到 localStorage
   const saveStaffHistory = (name: string) => {
     const cleanName = name.trim();
     if (!cleanName) return;
@@ -250,7 +225,7 @@ function SalesQuickPayContent() {
     }
   };
 
-  // A. 未登入授權面板
+  // A. 未授權鎖定視圖
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
@@ -323,7 +298,7 @@ function SalesQuickPayContent() {
     );
   }
 
-  // C. 主表單
+  // C. 主表單 (雙層選擇 + 國內友善)
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 py-10 px-4 font-sans flex justify-center">
       <div className="max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl">
@@ -352,7 +327,7 @@ function SalesQuickPayContent() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* 1. 經辦銷售員 (自由鍵入 + 智能記憶聯想) */}
+          {/* 1. 經辦人 (自由鍵入 + 智能記憶聯想) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">收款經辦銷售員 (自由輸入或選擇) *</label>
             <input
@@ -369,7 +344,7 @@ function SalesQuickPayContent() {
             </datalist>
           </div>
 
-          {/* 2. 第一步：先選所屬大樓/屋苑 (已過濾測試假資料) */}
+          {/* 2. 主樓盤/物業 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>所屬大樓 / 盤源物業 *</span>
@@ -393,7 +368,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 3. 第二步：再選房間單位 (依物業過濾 + 未出租優先置頂) */}
+          {/* 3. 房間單位 (🟢 未出租置頂) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">
               意向/承租單位 (🟢 未出租優先置頂) *
@@ -422,7 +397,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 4. 客戶姓名與電話 */}
+          {/* 4. 姓名與電話 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">客戶/租客全名 *</label>
@@ -501,7 +476,6 @@ function SalesQuickPayContent() {
             />
           </div>
 
-          {/* 提交按鈕 */}
           <div className="pt-4">
             <button
               type="submit"
