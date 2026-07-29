@@ -11,10 +11,9 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
 }
 
-// 1. GET: 全方位掃描所有可能記錄了「$60,600」或「分紅」的帳戶集合
 export async function GET() {
   try {
-    const targetCollections = ['finances', 'finance_records', 'transactions', 'shareholder_draws', 'incomes', 'audit_logs'];
+    const targetCollections = ['finances', 'finance_records', 'transactions'];
     const foundRecords: any[] = [];
 
     for (const colName of targetCollections) {
@@ -24,14 +23,14 @@ export async function GET() {
         const amount = Number(data.amount || data.totalAmount || data.value || 0);
         const text = JSON.stringify(data);
 
-        // ★ 核心捕捉機制：金額落在 60,000 上下、或文字帶有「曾敏」、「分紅」、「60600」皆捕捉
-        if ((amount >= 50000 && amount <= 70000) || text.includes('曾敏') || text.includes('分紅') || text.includes('60600')) {
+        // 鎖定金額為 $60,600 的紀錄
+        if (amount === 60600 || text.includes('曾敏') || text.includes('60600')) {
           foundRecords.push({
             id: doc.id,
             _collection: colName,
-            title: data.title || data.description || data.summary || '未知標題',
-            category: data.category || data.type || '未分類',
-            type: data.type || 'N/A',
+            title: data.title || data.description || '曾敏 - Room A 租金繳納',
+            category: data.category || '租金收款',
+            type: data.type || 'AR',
             amount: amount,
             raw: data
           });
@@ -39,59 +38,50 @@ export async function GET() {
       });
     }
 
-    // 讀取曾敏名下的帳單
-    const billsSnap = await adminDb.collection('documents')
-      .where('formData.tenantId', '==', '4Cy3Kn9lw4k64FQRwLZM')
-      .get();
-
-    const parseDocs = (snap: any) => snap.docs.map((doc: any) => ({
-      id: doc.id,
-      ...doc.data()
-    }));
-
-    return NextResponse.json({
-      success: true,
-      data: {
-        finances: foundRecords, // 這裡回傳的全是精準捕獲的可疑紀錄
-        tenantBills: parseDocs(billsSnap)
-      }
-    }, { status: 200, headers: corsHeaders });
-
+    return NextResponse.json({ success: true, data: { finances: foundRecords } }, { status: 200, headers: corsHeaders });
   } catch (error: any) {
-    console.error('[DB-Fix GET Error]:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
 
-// 2. POST: 執行徹底的會計分類歸正
 export async function POST(request: Request) {
   try {
     const { action } = await request.json();
     const batch = adminDb.batch();
     let affectedCount = 0;
 
-    // 動作 B: 將所有帶有「分紅」或金額大約等於 60600 的可疑紀錄，全部修正為 AR - 租金收款
-    if (action === 'FIX_60600_CATEGORY') {
-      const targetCollections = ['finances', 'finance_records', 'transactions', 'shareholder_draws', 'incomes'];
+    // 將 transactions 中的 $60,600 正規化並同步寫入 finances & finance_records
+    if (action === 'MIGRATE_60600_TO_FINANCE') {
+      const transSnap = await adminDb.collection('transactions').where('amount', '==', 60600).get();
       
-      for (const colName of targetCollections) {
-        const snap = await adminDb.collection(colName).get();
-        snap.docs.forEach((doc: any) => {
-          const data = doc.data();
-          const amount = Number(data.amount || data.totalAmount || 0);
-          const text = JSON.stringify(data);
+      transSnap.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const nowIso = new Date().toISOString();
+        const docDate = data.createdAt?.split('T')[0] || nowIso.split('T')[0];
+        
+        // 標準會計分錄結構
+        const standardFinanceData = {
+          type: 'AR',
+          category: '租金收款',
+          title: '曾敏 - Room A 租金繳納 ($60,600)',
+          amount: 60600,
+          date: docDate,
+          paymentMethod: 'PayDollar',
+          tenantId: '4Cy3Kn9lw4k64FQRwLZM',
+          orderRef: doc.id,
+          status: 'Paid',
+          createdAt: data.createdAt || nowIso,
+          updatedAt: nowIso
+        };
 
-          if ((amount >= 60000 && amount <= 61000) || text.includes('分紅') && text.includes('曾敏')) {
-            batch.update(doc.ref, {
-              type: 'AR',
-              category: '租金收款',
-              title: '曾敏 - Room A 租金繳納 ($60,600)',
-              updatedAt: new Date().toISOString()
-            });
-            affectedCount++;
-          }
-        });
-      }
+        // 使用相同的 ID 寫入至兩個主表，避免重複建立
+        batch.set(adminDb.collection('finances').doc(`FIN-${doc.id}`), standardFinanceData, { merge: true });
+        batch.set(adminDb.collection('finance_records').doc(`FIN-${doc.id}`), standardFinanceData, { merge: true });
+        
+        // 確保原始紀錄分類正確
+        batch.update(doc.ref, { type: 'AR', category: '租金收款' });
+        affectedCount += 2;
+      });
     }
 
     if (affectedCount > 0) {
@@ -102,11 +92,10 @@ export async function POST(request: Request) {
       success: true,
       action,
       affectedCount,
-      message: `操作 [${action}] 執行成功，在底層找出了並異動了 ${affectedCount} 筆相關會計資料！`
+      message: `成功將 $60,600 租金款項遷移並補齊至主財務報表 (共更新 ${affectedCount} 筆資料)！`
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('[DB-Fix POST Error]:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
