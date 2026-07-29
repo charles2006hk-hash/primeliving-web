@@ -192,19 +192,33 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-// ★ 1. 交易核銷引擎：將 tenantId 與租客資訊一併傳給 API，確保 100% 命中核銷與記帳
+// ★ 1. 交易核銷引擎：傳遞精確租客上下文與已勾選帳單清單，做到 100% 財務對平
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
+      // 1. 精確收集這次「實際繳納」的所有單據 ID
+      const payingBillIds = [
+        ...billingSummary.mandatoryItems.map(b => b.id),
+        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+      ];
+
+      // 2. 精確計算本次繳納的總金額 (防範重載時 grandTotal 變動導致的會計對帳誤差)
+      const exactPayingTotal = [
+        ...billingSummary.mandatoryItems,
+        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
+      ].reduce((sum, b) => sum + b.amount, 0);
+
+      // 3. 向後端發送強連動核銷請求 (避開 Client-side Security Rules)
       const response = await fetch('/api/paydollar/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           orderRef,
-          tenantId: tenantData?.id,            // ★ 傳入當前登入者 ID 作為雙重防禦
+          tenantId: tenantData?.id,
           tenantName: tenantData?.name,
           roomInfo: tenantData?.roomInfo,
-          fallbackAmount: billingSummary.grandTotal // ★ 傳入金額作財務記帳容錯
+          fallbackAmount: exactPayingTotal, // ★ 傳入本次實際支付總額，確保大系統 amountDue 精確相減
+          billIds: payingBillIds            // ★ 傳入實際單據 ID 列表，強力覆寫為 Paid
         }),
       });
 
@@ -213,8 +227,15 @@ function DashboardContent() {
         throw new Error(data.error || '無法完成核銷手續');
       }
 
+      // 4. 前端 UI 狀態歸零：清空自選帳單勾選狀態
+      setSelectedOptionalBillIds([]);
+
+      // 5. 靜默清除網址列上的 ?success=true&orderRef=... 避免重新整理時重複發送 Request
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '/tenant-portal/dashboard');
+      }
+
       alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
-      router.replace('/tenant-portal/dashboard');
     } catch (error: any) {
       console.error("[Verification Error]:", error);
       alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
