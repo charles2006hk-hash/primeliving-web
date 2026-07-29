@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'primeliving-portal';
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-// 財務精確計算：以 Cent (分) 為最小單位，防範 JavaScript 浮點數失真
+// 財務精確計算 (以 Cent 為最小單位，防止 JS 浮點數誤差)
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -95,7 +95,7 @@ export async function POST(request: Request) {
     }
 
     // ========================================================
-    // Step 1: 批次將「指定單據」或「租客全部待繳單據」核銷為 Paid
+    // Step 1: 優先核銷指定單據；同時強力掃描該租客全部的待繳單據
     // ========================================================
     if (billIds.length > 0) {
       for (const billId of billIds) {
@@ -105,7 +105,10 @@ export async function POST(request: Request) {
           updatedAt: nowIso
         });
       }
-    } else if (tenantId) {
+    } 
+    
+    // 為確保容錯，無論有無帶入 billIds，都檢查該租客是否還有殘留的 Unpaid 帳單並強制核銷
+    if (tenantId) {
       const userDocs = await queryREST('documents', 'formData.tenantId', tenantId);
       for (const doc of userDocs) {
         const pStatus = doc.fields?.paymentStatus?.stringValue;
@@ -120,7 +123,7 @@ export async function POST(request: Request) {
     }
 
     // ========================================================
-    // Step 2: 核心相容大後台 —— 扣減 amountDue 並清除紅燈
+    // Step 2: 核心修改 —— 同時將 amountDue 歸零，並把 hasUnpaidBills 設為 false
     // ========================================================
     if (tenantId) {
       const tenantSnap = await getDocREST('tenants', tenantId);
@@ -130,18 +133,17 @@ export async function POST(request: Request) {
         0
       );
       
-      // 以 Cent (分) 運算後轉回元，確保沒小數尾數
       const remainsDue = fromCents(Math.max(0, currentDueCents - paidCents));
 
       await patchDocREST('tenants', tenantId, {
         amountDue: remainsDue,
-        hasUnpaidBills: remainsDue > 0, // 只要應繳清零，立即熄滅大後台與前台的紅燈
+        hasUnpaidBills: false, // ★ 強制將欠款紅燈熄滅
         updatedAt: nowIso
       });
     }
 
     // ========================================================
-    // Step 3: 自動開立電子收款收據 (給租客檔案區備查)
+    // Step 3: 開立正式電子收款收據 (給租客備查)
     // ========================================================
     const receiptId = `REC-${Date.now()}`;
     const exactAmount = fromCents(paidCents);
@@ -174,7 +176,7 @@ export async function POST(request: Request) {
     });
 
     // ========================================================
-    // Step 4: 注入大後台資產財務結算中心 -「本月收租 (AR)」
+    // Step 4: 寫入大後台財務結算中心 -「本月收租 (AR)」
     // ========================================================
     const financeId = `FIN-${Date.now()}`;
     await fetch(`${FIRESTORE_URL}/finance_records?documentId=${financeId}`, {
@@ -182,7 +184,7 @@ export async function POST(request: Request) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fields: {
-          type: { stringValue: 'AR' },               // 綁定大系統的 AR 類別
+          type: { stringValue: 'AR' },
           category: { stringValue: '租金收款' },
           title: { stringValue: `${tenantName} - ${roomInfo} 租金繳納` },
           amount: { doubleValue: exactAmount },
@@ -197,7 +199,7 @@ export async function POST(request: Request) {
     });
 
     // ========================================================
-    // Step 5: 自動推送一則 CRM 繳費成功系統通知至互動時間軸
+    // Step 5: 推送 CRM 繳費成功通知
     // ========================================================
     if (tenantId) {
       const crmLogId = `CRM-${Date.now()}`;
