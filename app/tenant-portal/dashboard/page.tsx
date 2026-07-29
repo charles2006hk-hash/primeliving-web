@@ -192,76 +192,26 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-  // ★ 1. 交易核銷引擎：移回前端執行，藉由租客已登入的安全權限合法寫入單據
+// ★ 1. 交易核銷引擎：改為向後端 API 發送驗證請求，避開 Client-side Security Rules 權限限制
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      const txRef = doc(db, 'transactions', orderRef);
-      const txSnap = await getDoc(txRef);
-
-      if (!txSnap.exists()) {
-        alert("系統查無此筆交易紀錄。若您確定已扣款，請聯絡管家人工核銷。");
-        router.replace('/tenant-portal/dashboard');
-        return;
-      }
-
-      const txData = txSnap.data();
-      // 防重入保護：如果已核銷則直接返回
-      if (txData.status === 'Success') {
-        router.replace('/tenant-portal/dashboard');
-        return;
-      }
-
-      // A. 批次更新本次繳交的所有帳單狀態為「已繳清」
-      const billIds: string[] = txData.billIds || [];
-      for (const billId of billIds) {
-        await updateDoc(doc(db, 'documents', billId), {
-          paymentStatus: 'Paid',
-          status: 'Completed',
-          updatedAt: serverTimestamp()
-        });
-      }
-
-      // B. 自動為租客與大系統開立一張「線上付款正式收據」
-      await addDoc(collection(db, 'documents'), {
-        type: 'Receipt',
-        paymentStatus: 'Paid',
-        status: 'Completed',
-        summary: `${txData.tenantName} - 線上付款正式收據 (${orderRef})`,
-        isCompanyChopApplied: true, // 自動蓋藍色公司印章
-        formData: {
-          tenantId: txData.tenantId,
-          tenantName: txData.tenantName,
-          roomName: txData.roomInfo,
-          docDate: new Date().toISOString().split('T')[0],
-          paymentMethod: 'PayDollar',
-          totalReceived: Number(txData.amount) || 0,
-          remarks: `由 PayDollar 線上安全支付自動結算。\n訂單編號: ${orderRef}`,
-        },
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
+      const response = await fetch('/api/paydollar/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderRef }),
       });
 
-      // C. 檢查該租客是否還有剩餘待繳帳單，動態更新大系統紅燈警示
-      const qUnpaid = query(
-        collection(db, 'documents'), 
-        where('formData.tenantId', '==', txData.tenantId), 
-        where('paymentStatus', '==', 'Unpaid')
-      );
-      const snapUnpaid = await getDocs(qUnpaid);
-      await updateDoc(doc(db, 'tenants', txData.tenantId), {
-        hasUnpaidBills: !snapUnpaid.empty,
-        updatedAt: serverTimestamp()
-      });
-
-      // D. 標記交易為成功
-      await updateDoc(txRef, { status: 'Success', updatedAt: serverTimestamp() });
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '無法完成核銷手續');
+      }
 
       alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已更新。");
       router.replace('/tenant-portal/dashboard');
     } catch (error: any) {
       console.error("[Verification Error]:", error);
-      alert("核銷過程發生異常，請保留繳費明細並通知管家。");
+      alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
       router.replace('/tenant-portal/dashboard');
     } finally {
       setIsVerifying(false);
