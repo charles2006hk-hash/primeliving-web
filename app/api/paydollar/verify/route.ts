@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'primeliving-portal';
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-// 嚴格整數(Cents)運算，避免 JavaScript 浮點數誤差
+// 財務精確計算：以 Cent (分) 為最小單位，防範 JavaScript 浮點數失真
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -58,9 +58,17 @@ async function queryREST(collectionName: string, fieldName: string, value: strin
 
 export async function POST(request: Request) {
   try {
-    const { orderRef, tenantId: reqTenantId, tenantName: reqTenantName, roomInfo: reqRoomInfo, fallbackAmount } = await request.json();
+    const { 
+      orderRef, 
+      tenantId: reqTenantId, 
+      tenantName: reqTenantName, 
+      roomInfo: reqRoomInfo, 
+      fallbackAmount,
+      billIds: reqBillIds
+    } = await request.json();
+
     if (!orderRef) {
-      return NextResponse.json({ success: false, error: '缺少交易單號 orderRef' }, { status: 400 });
+      return NextResponse.json({ success: false, error: '缺少交易單號' }, { status: 400 });
     }
 
     const nowIso = new Date().toISOString();
@@ -68,26 +76,27 @@ export async function POST(request: Request) {
     const txSnap = await getDocREST('transactions', orderRef);
 
     let tenantId = reqTenantId || '';
-    let tenantName = reqTenantName || '租客';
-    let roomInfo = reqRoomInfo || '';
-    let exactAmount = fromCents(toCents(fallbackAmount || 20400));
-    let billIds: string[] = [];
+    let tenantName = reqTenantName || 'Tolloy Yu';
+    let roomInfo = reqRoomInfo || 'Room C';
+    let paidCents = toCents(fallbackAmount || 20400);
+    let billIds: string[] = reqBillIds || [];
 
     if (txSnap) {
       if (txSnap.fields?.status?.stringValue === 'Success') {
-        return NextResponse.json({ success: true, message: '此款項已完成核銷' });
+        return NextResponse.json({ success: true, message: '此訂單已核銷，不重複記帳' });
       }
       tenantId = txSnap.fields?.tenantId?.stringValue || tenantId;
       tenantName = txSnap.fields?.tenantName?.stringValue || tenantName;
       roomInfo = txSnap.fields?.roomInfo?.stringValue || roomInfo;
       const rawAmount = txSnap.fields?.amount?.stringValue || txSnap.fields?.amount?.doubleValue;
-      if (rawAmount) exactAmount = fromCents(toCents(rawAmount));
-      billIds = txSnap.fields?.billIds?.arrayValue?.values?.map((v: any) => v.stringValue) || [];
+      if (rawAmount) paidCents = toCents(rawAmount);
+      const txBills = txSnap.fields?.billIds?.arrayValue?.values?.map((v: any) => v.stringValue);
+      if (txBills && txBills.length > 0) billIds = txBills;
     }
 
-    // ==========================================
-    // 1. 強制將單據改為 Paid / Completed
-    // ==========================================
+    // ========================================================
+    // Step 1: 批次將「指定單據」或「租客全部待繳單據」核銷為 Paid
+    // ========================================================
     if (billIds.length > 0) {
       for (const billId of billIds) {
         await patchDocREST('documents', billId, {
@@ -97,7 +106,6 @@ export async function POST(request: Request) {
         });
       }
     } else if (tenantId) {
-      // 容錯：若無指定 ID，自動掃描該租客名下所有的 Unpaid / Pending 帳單強制修改
       const userDocs = await queryREST('documents', 'formData.tenantId', tenantId);
       for (const doc of userDocs) {
         const pStatus = doc.fields?.paymentStatus?.stringValue;
@@ -111,10 +119,32 @@ export async function POST(request: Request) {
       }
     }
 
-    // ==========================================
-    // 2. 開立租客收據
-    // ==========================================
+    // ========================================================
+    // Step 2: 核心相容大後台 —— 扣減 amountDue 並清除紅燈
+    // ========================================================
+    if (tenantId) {
+      const tenantSnap = await getDocREST('tenants', tenantId);
+      const currentDueCents = toCents(
+        tenantSnap?.fields?.amountDue?.doubleValue || 
+        tenantSnap?.fields?.amountDue?.integerValue || 
+        0
+      );
+      
+      // 以 Cent (分) 運算後轉回元，確保沒小數尾數
+      const remainsDue = fromCents(Math.max(0, currentDueCents - paidCents));
+
+      await patchDocREST('tenants', tenantId, {
+        amountDue: remainsDue,
+        hasUnpaidBills: remainsDue > 0, // 只要應繳清零，立即熄滅大後台與前台的紅燈
+        updatedAt: nowIso
+      });
+    }
+
+    // ========================================================
+    // Step 3: 自動開立電子收款收據 (給租客檔案區備查)
+    // ========================================================
     const receiptId = `REC-${Date.now()}`;
+    const exactAmount = fromCents(paidCents);
     await fetch(`${FIRESTORE_URL}/documents?documentId=${receiptId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -123,7 +153,7 @@ export async function POST(request: Request) {
           type: { stringValue: 'Receipt' },
           paymentStatus: { stringValue: 'Paid' },
           status: { stringValue: 'Completed' },
-          summary: { stringValue: `${tenantName} - 線上繳款收據 (${orderRef})` },
+          summary: { stringValue: `${tenantName} - 線上租金繳納收據 (${orderRef})` },
           isCompanyChopApplied: { booleanValue: true },
           createdAt: { stringValue: nowIso },
           formData: {
@@ -135,7 +165,7 @@ export async function POST(request: Request) {
                 docDate: { stringValue: todayStr },
                 paymentMethod: { stringValue: 'PayDollar' },
                 totalReceived: { doubleValue: exactAmount },
-                remarks: { stringValue: `PayDollar 線上授權成功\n單號: ${orderRef}` }
+                remarks: { stringValue: `線上支付授權成功\n交易流水號: ${orderRef}` }
               }
             }
           }
@@ -143,18 +173,18 @@ export async function POST(request: Request) {
       })
     });
 
-    // ==========================================
-    // 3. 注入大系統「資產財務結算中心 - 本月收租 (AR)」
-    // ==========================================
+    // ========================================================
+    // Step 4: 注入大後台資產財務結算中心 -「本月收租 (AR)」
+    // ========================================================
     const financeId = `FIN-${Date.now()}`;
     await fetch(`${FIRESTORE_URL}/finance_records?documentId=${financeId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fields: {
-          type: { stringValue: 'AR' },
-          category: { stringValue: '租金收入' },
-          title: { stringValue: `${tenantName} - ${roomInfo} 租金繳交` },
+          type: { stringValue: 'AR' },               // 綁定大系統的 AR 類別
+          category: { stringValue: '租金收款' },
+          title: { stringValue: `${tenantName} - ${roomInfo} 租金繳納` },
           amount: { doubleValue: exactAmount },
           date: { stringValue: todayStr },
           paymentMethod: { stringValue: 'PayDollar' },
@@ -166,13 +196,27 @@ export async function POST(request: Request) {
       })
     });
 
-    // ==========================================
-    // 4. 清除租客欠款警示旗標
-    // ==========================================
+    // ========================================================
+    // Step 5: 自動推送一則 CRM 繳費成功系統通知至互動時間軸
+    // ========================================================
     if (tenantId) {
-      await patchDocREST('tenants', tenantId, {
-        hasUnpaidBills: false,
-        updatedAt: nowIso
+      const crmLogId = `CRM-${Date.now()}`;
+      await fetch(`${FIRESTORE_URL}/inquiries?documentId=${crmLogId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fields: {
+            tenantId: { stringValue: tenantId },
+            name: { stringValue: tenantName },
+            roomInfo: { stringValue: roomInfo },
+            message: `【系統通知：繳費確認】\n已成功通過 PayDollar 繳清租金 HK$${exactAmount.toLocaleString()}。單據與應付金額已更新。`,
+            author: { stringValue: '系統自動化' },
+            type: { stringValue: 'official_notice' },
+            status: { stringValue: 'Resolved' },
+            createdAt: { stringValue: nowIso },
+            isExistingTenant: { booleanValue: true }
+          }
+        })
       });
     }
 
