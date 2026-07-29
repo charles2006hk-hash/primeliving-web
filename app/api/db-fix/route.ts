@@ -11,14 +11,35 @@ export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
 }
 
-// 1. GET: 撈取最新的 20 筆 財務紀錄 (finances) 與 曾敏的帳單 (documents)
+// 1. GET: 全方位掃描所有可能記錄了「$60,600」或「分紅」的帳戶集合
 export async function GET() {
   try {
-    const financesSnap = await adminDb.collection('finances')
-      .orderBy('createdAt', 'desc')
-      .limit(20)
-      .get();
+    const targetCollections = ['finances', 'finance_records', 'transactions', 'shareholder_draws', 'incomes', 'audit_logs'];
+    const foundRecords: any[] = [];
 
+    for (const colName of targetCollections) {
+      const snap = await adminDb.collection(colName).limit(30).get();
+      snap.docs.forEach((doc: any) => {
+        const data = doc.data();
+        const amount = Number(data.amount || data.totalAmount || data.value || 0);
+        const text = JSON.stringify(data);
+
+        // ★ 核心捕捉機制：金額落在 60,000 上下、或文字帶有「曾敏」、「分紅」、「60600」皆捕捉
+        if ((amount >= 50000 && amount <= 70000) || text.includes('曾敏') || text.includes('分紅') || text.includes('60600')) {
+          foundRecords.push({
+            id: doc.id,
+            _collection: colName,
+            title: data.title || data.description || data.summary || '未知標題',
+            category: data.category || data.type || '未分類',
+            type: data.type || 'N/A',
+            amount: amount,
+            raw: data
+          });
+        }
+      });
+    }
+
+    // 讀取曾敏名下的帳單
     const billsSnap = await adminDb.collection('documents')
       .where('formData.tenantId', '==', '4Cy3Kn9lw4k64FQRwLZM')
       .get();
@@ -31,7 +52,7 @@ export async function GET() {
     return NextResponse.json({
       success: true,
       data: {
-        finances: parseDocs(financesSnap),
+        finances: foundRecords, // 這裡回傳的全是精準捕獲的可疑紀錄
         tenantBills: parseDocs(billsSnap)
       }
     }, { status: 200, headers: corsHeaders });
@@ -42,61 +63,25 @@ export async function GET() {
   }
 }
 
-// 2. POST: 執行資料庫直接修復與平帳 (相容 paymentStatus = undefined 的遺留異常)
+// 2. POST: 執行徹底的會計分類歸正
 export async function POST(request: Request) {
   try {
     const { action } = await request.json();
     const batch = adminDb.batch();
     let affectedCount = 0;
 
-    // 動作 A: 強制平帳曾敏 1, 2, 3 期帳單 (相容 undefined / Pending)，歸零欠款並熄滅紅燈
-    if (action === 'FORCE_CLEAR_ZENGMIN') {
-      const tenantId = '4Cy3Kn9lw4k64FQRwLZM';
-      const nowIso = new Date().toISOString();
-
-      const billsSnap = await adminDb.collection('documents')
-        .where('formData.tenantId', '==', tenantId)
-        .get();
-
-      billsSnap.docs.forEach(doc => {
-        const data = doc.data();
-        const desc = data?.formData?.items?.[0]?.description || '';
-        
-        // ★ 精確比對首3期、押金與水電，無視原有 paymentStatus 是否為 undefined
-        const isTargetBill = desc.includes('第一期') || 
-                             desc.includes('第二期') || 
-                             desc.includes('第三期') || 
-                             desc.includes('押金') || 
-                             desc.includes('水電');
-
-        if (isTargetBill && data.paymentStatus !== 'Paid') {
-          batch.update(doc.ref, {
-            paymentStatus: 'Paid',
-            status: 'Completed',
-            updatedAt: nowIso
-          });
-          affectedCount++;
-        }
-      });
-
-      // 歸零 tenants 主表欠款額
-      const tenantRef = adminDb.collection('tenants').doc(tenantId);
-      batch.update(tenantRef, {
-        amountDue: 0,
-        hasUnpaidBills: false,
-        updatedAt: nowIso
-      });
-      affectedCount++;
-    }
-
-    // 動作 B: 跨兩個表同時搜尋並修正 $60,600 的錯誤「分紅提款」為 AR
+    // 動作 B: 將所有帶有「分紅」或金額大約等於 60600 的可疑紀錄，全部修正為 AR - 租金收款
     if (action === 'FIX_60600_CATEGORY') {
-      const collections = ['finances', 'finance_records'];
-      for (const colName of collections) {
-        const snap = await adminDb.collection(colName).where('amount', '==', 60600).get();
-        snap.docs.forEach(doc => {
+      const targetCollections = ['finances', 'finance_records', 'transactions', 'shareholder_draws', 'incomes'];
+      
+      for (const colName of targetCollections) {
+        const snap = await adminDb.collection(colName).get();
+        snap.docs.forEach((doc: any) => {
           const data = doc.data();
-          if (String(data.category || '').includes('分紅') || data.type !== 'AR') {
+          const amount = Number(data.amount || data.totalAmount || 0);
+          const text = JSON.stringify(data);
+
+          if ((amount >= 60000 && amount <= 61000) || text.includes('分紅') && text.includes('曾敏')) {
             batch.update(doc.ref, {
               type: 'AR',
               category: '租金收款',
@@ -109,19 +94,6 @@ export async function POST(request: Request) {
       }
     }
 
-    // 動作 C: 一鍵清理 $1 / $10 的測試垃圾數據
-    if (action === 'CLEAN_TEST_RECORDS') {
-      const collections = ['finances', 'finance_records'];
-      for (const colName of collections) {
-        const snap1 = await adminDb.collection(colName).where('amount', '==', 1).get();
-        const snap10 = await adminDb.collection(colName).where('amount', '==', 10).get();
-        [...snap1.docs, ...snap10.docs].forEach(doc => {
-          batch.delete(doc.ref);
-          affectedCount++;
-        });
-      }
-    }
-
     if (affectedCount > 0) {
       await batch.commit();
     }
@@ -130,7 +102,7 @@ export async function POST(request: Request) {
       success: true,
       action,
       affectedCount,
-      message: `操作 [${action}] 執行成功，異動了 ${affectedCount} 筆資料庫文件！`
+      message: `操作 [${action}] 執行成功，在底層找出了並異動了 ${affectedCount} 筆相關會計資料！`
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
