@@ -271,51 +271,52 @@ function DashboardContent() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   const verifyPayDollarPayment = async (orderRef: string) => {
-    setIsVerifying(true);
-    try {
-      const payingBillIds = [
-        ...billingSummary.mandatoryItems.map(b => b.id),
-        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
-      ];
+  setIsVerifying(true);
+  try {
+    const payingBillIds = [
+      ...billingSummary.mandatoryItems.map(b => b.id),
+      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+    ];
 
-      const exactPayingTotal = [
-        ...billingSummary.mandatoryItems,
-        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
-      ].reduce((sum, b) => sum + b.amount, 0);
+    const exactPayingTotal = [
+      ...billingSummary.mandatoryItems,
+      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
+    ].reduce((sum, b) => sum + b.amount, 0);
 
-      const response = await fetch('/api/paydollar/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          orderRef,
-          tenantId: tenantData?.id,
-          tenantName: tenantData?.name,
-          roomInfo: tenantData?.roomInfo,
-          fallbackAmount: exactPayingTotal,
-          billIds: payingBillIds
-        }),
-      });
+    // ★ 傳遞 orderRef；若前端金額為 0，傳送 undefined 觸發後端 Firestore 自動回查
+    const response = await fetch('/api/paydollar/verify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ 
+        orderRef,
+        tenantId: tenantData?.id,
+        tenantName: tenantData?.name,
+        roomInfo: tenantData?.roomInfo,
+        fallbackAmount: exactPayingTotal > 0 ? exactPayingTotal : undefined,
+        billIds: payingBillIds.length > 0 ? payingBillIds : undefined
+      }),
+    });
 
-      const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '無法完成核銷手續');
-      }
-
-      setSelectedOptionalBillIds([]);
-
-      if (typeof window !== 'undefined') {
-        window.history.replaceState(null, '', '/tenant-portal/dashboard');
-      }
-
-      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
-    } catch (error: any) {
-      console.error("[Verification Error]:", error);
-      alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
-      router.replace('/tenant-portal/dashboard');
-    } finally {
-      setIsVerifying(false);
+    const data = await response.json();
+    if (!response.ok || !data.success) {
+      throw new Error(data.error || '無法完成核銷手續');
     }
-  };
+
+    setSelectedOptionalBillIds([]);
+
+    if (typeof window !== 'undefined') {
+      window.history.replaceState(null, '', '/tenant-portal/dashboard');
+    }
+
+    alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
+  } catch (error: any) {
+    console.error("[Verification Error]:", error);
+    alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
+    router.replace('/tenant-portal/dashboard');
+  } finally {
+    setIsVerifying(false);
+  }
+};
 
   useEffect(() => { 
     const orderRef = searchParams?.get('orderRef'); 
