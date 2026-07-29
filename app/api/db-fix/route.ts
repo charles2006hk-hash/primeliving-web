@@ -18,36 +18,23 @@ export async function POST(request: Request) {
     const tenantId = '4Cy3Kn9lw4k64FQRwLZM';
     let affectedCount = 0;
 
-    // 1. 強制修正 finances / finance_records 集合中的 $60,600 標籤，徹底去除「分紅提款」
-    const collections = ['finances', 'finance_records', 'transactions'];
+    // 1. 同時更新 transactions、finances、finance_records 三個集合，將 $60,600 正式設為 income / AR
+    const collections = ['transactions', 'finances', 'finance_records'];
     for (const colName of collections) {
       const snap = await adminDb.collection(colName).where('amount', '==', 60600).get();
       snap.docs.forEach((doc) => {
         batch.set(doc.ref, {
-          type: 'AR',
+          type: 'income',            // ★ 設為 income 讓大後台直接匹配藍色「應收」
           category: '租金收款',
           title: '曾敏 - Room A 租金繳納 ($60,600)',
+          status: 'completed',
           updatedAt: nowIso
         }, { merge: true });
         affectedCount++;
       });
     }
 
-    // 2. 修復大後台【本月收租 (AR)】視圖所讀取的單據 (documents)，將曾敏相關單據全數轉為 Paid
-    const billsSnap = await adminDb.collection('documents')
-      .where('formData.tenantId', '==', tenantId)
-      .get();
-
-    billsSnap.docs.forEach((doc) => {
-      batch.set(doc.ref, {
-        paymentStatus: 'Paid',
-        status: 'Completed',
-        updatedAt: nowIso
-      }, { merge: true });
-      affectedCount++;
-    });
-
-    // 3. 同步歸零 tenants 主表應繳金額，消滅待繳標籤
+    // 2. 將曾敏在 tenants 集合中的欠款歸零，讓「本月收租 (AR)」轉為綠色已繳費
     const tenantRef = adminDb.collection('tenants').doc(tenantId);
     batch.set(tenantRef, {
       amountDue: 0,
@@ -61,11 +48,10 @@ export async function POST(request: Request) {
     return NextResponse.json({
       success: true,
       affectedCount,
-      message: `成功完成全系統雙向會計對帳修正！共更新 ${affectedCount} 筆底層資料。`
+      message: `全系統修復成功！已將 transactions 與 finances 同步更新為 income (應收)。`
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('[DB Repair Error]:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
