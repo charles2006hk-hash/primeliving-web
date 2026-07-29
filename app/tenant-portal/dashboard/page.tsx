@@ -246,52 +246,56 @@ function DashboardContent() {
     }, 2000); 
   };
   
-  // ★ 3. 發起結帳：前端先建立 Pending 交易記錄，再向後端索取加密 Hash
+  // ★ 精確發起結帳：先寫入 Firestore Pending，再要簽章，防範 404 找不到交易
   const handlePayDollarCheckout = async () => {
-    if (!tenantData || billingSummary.grandTotal <= 0) return alert("目前沒有需要繳納的金額。");
+    if (!tenantData || billingSummary.grandTotal <= 0) {
+      return alert("目前沒有需要繳納的金額。");
+    }
     setIsPayDollarLoading(true);
-    
-    // 收集要繳付的單據 ID（強制項目 + 租客主動勾選的未來項目）
+
     const payingBillIds = [
       ...billingSummary.mandatoryItems.map(b => b.id),
-      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+      ...billingSummary.optionalItems
+        .filter(b => selectedOptionalBillIds.includes(b.id))
+        .map(b => b.id)
     ];
 
-    // 生成自訂交易單號
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
 
     try {
-      // A. 先在前端建立一筆未完成(Pending)的交易，記錄要核銷的單據編號
+      // 1. 先把單據 ID 寫入 transactions，狀態設為 Pending
       await setDoc(doc(db, 'transactions', orderRef), {
         orderRef,
         tenantId: tenantData.id,
         tenantName: tenantData.name,
         roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
-        amount: billingSummary.grandTotal, 
+        amount: billingSummary.grandTotal,
         billIds: payingBillIds,
         status: 'Pending',
         gateway: 'PayDollar',
         createdAt: serverTimestamp()
       });
 
-      // 在 handlePayDollarCheckout 內部
-      const response = await fetch('/api/paydollar/checkout', { 
-        method: 'POST', 
-        headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ 
-          amountDue: billingSummary.grandTotal, 
-          tenantId: tenantData.id,  // ★ 確保帶入 ID 供 API Safe-fallback 使用
-          tenantName: tenantData.name, 
-          roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, 
+      // 2. 請求 PayDollar 簽章
+      const response = await fetch('/api/paydollar/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          amountDue: billingSummary.grandTotal,
+          tenantId: tenantData.id,
+          tenantName: tenantData.name,
+          roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
           returnUrl: window.location.origin,
-          orderRef                  // ★ 傳遞前端已寫入 transactions 的 OrderRef
-        }) 
+          orderRef
+        })
       });
-      
-      const data = await response.json();
-      if (!response.ok || !data.success) throw new Error(data.error || '無法初始化支付');
 
-      // C. 產生隱藏表單自動跳轉至 PayDollar 金流網頁
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '無法初始化支付');
+      }
+
+      // 3. 表單送出跳轉
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
@@ -307,9 +311,9 @@ function DashboardContent() {
       });
       document.body.appendChild(form);
       form.submit();
-    } catch (error: any) { 
-      alert("系統連線錯誤：" + error.message); 
-      setIsPayDollarLoading(false); 
+    } catch (error: any) {
+      alert("系統連線錯誤：" + error.message);
+      setIsPayDollarLoading(false);
     }
   };
 
