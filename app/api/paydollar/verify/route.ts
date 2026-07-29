@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server';
 const PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'primeliving-portal';
 const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${PROJECT_ID}/databases/(default)/documents`;
 
-// 財務精確計算 (以 Cent 為最小單位，防止 JS 浮點數誤差)
+// 嚴格 Cent (分) 轉換，杜絕 JS 浮點數誤差
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -76,14 +76,14 @@ export async function POST(request: Request) {
     const txSnap = await getDocREST('transactions', orderRef);
 
     let tenantId = reqTenantId || '';
-    let tenantName = reqTenantName || 'Tolloy Yu';
-    let roomInfo = reqRoomInfo || 'Room C';
-    let paidCents = toCents(fallbackAmount || 20400);
+    let tenantName = reqTenantName || '曾敏';
+    let roomInfo = reqRoomInfo || 'Room A';
+    let paidCents = toCents(fallbackAmount || 60600);
     let billIds: string[] = reqBillIds || [];
 
     if (txSnap) {
       if (txSnap.fields?.status?.stringValue === 'Success') {
-        return NextResponse.json({ success: true, message: '此訂單已核銷，不重複記帳' });
+        return NextResponse.json({ success: true, message: '此訂單已完成核銷，不重複記帳' });
       }
       tenantId = txSnap.fields?.tenantId?.stringValue || tenantId;
       tenantName = txSnap.fields?.tenantName?.stringValue || tenantName;
@@ -94,9 +94,7 @@ export async function POST(request: Request) {
       if (txBills && txBills.length > 0) billIds = txBills;
     }
 
-    // ========================================================
-    // Step 1: 優先核銷指定單據；同時強力掃描該租客全部的待繳單據
-    // ========================================================
+    // 1. 強制將指定單據或名下未繳費帳單全部轉為 Paid
     if (billIds.length > 0) {
       for (const billId of billIds) {
         await patchDocREST('documents', billId, {
@@ -105,10 +103,7 @@ export async function POST(request: Request) {
           updatedAt: nowIso
         });
       }
-    } 
-    
-    // 為確保容錯，無論有無帶入 billIds，都檢查該租客是否還有殘留的 Unpaid 帳單並強制核銷
-    if (tenantId) {
+    } else if (tenantId) {
       const userDocs = await queryREST('documents', 'formData.tenantId', tenantId);
       for (const doc of userDocs) {
         const pStatus = doc.fields?.paymentStatus?.stringValue;
@@ -122,9 +117,7 @@ export async function POST(request: Request) {
       }
     }
 
-    // ========================================================
-    // Step 2: 核心修改 —— 同時將 amountDue 歸零，並把 hasUnpaidBills 設為 false
-    // ========================================================
+    // 2. 扣減應付額 amountDue 並一鍵消除紅燈 hasUnpaidBills
     if (tenantId) {
       const tenantSnap = await getDocREST('tenants', tenantId);
       const currentDueCents = toCents(
@@ -137,14 +130,12 @@ export async function POST(request: Request) {
 
       await patchDocREST('tenants', tenantId, {
         amountDue: remainsDue,
-        hasUnpaidBills: false, // ★ 強制將欠款紅燈熄滅
+        hasUnpaidBills: remainsDue > 0, // ★ 精確判斷：只要付清，必定轉 false
         updatedAt: nowIso
       });
     }
 
-    // ========================================================
-    // Step 3: 開立正式電子收款收據 (給租客備查)
-    // ========================================================
+    // 3. 自動開立已繳租金電子收據 (給租客備查)
     const receiptId = `REC-${Date.now()}`;
     const exactAmount = fromCents(paidCents);
     await fetch(`${FIRESTORE_URL}/documents?documentId=${receiptId}`, {
@@ -175,16 +166,14 @@ export async function POST(request: Request) {
       })
     });
 
-    // ========================================================
-    // Step 4: 寫入大後台財務結算中心 -「本月收租 (AR)」
-    // ========================================================
+    // 4. 寫入大後台資產財務結算中心 -「本月收租 (AR)」(不再是分紅提款！)
     const financeId = `FIN-${Date.now()}`;
     await fetch(`${FIRESTORE_URL}/finance_records?documentId=${financeId}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fields: {
-          type: { stringValue: 'AR' },
+          type: { stringValue: 'AR' },               // ★ 會計分類：本月收租
           category: { stringValue: '租金收款' },
           title: { stringValue: `${tenantName} - ${roomInfo} 租金繳納` },
           amount: { doubleValue: exactAmount },
@@ -198,9 +187,7 @@ export async function POST(request: Request) {
       })
     });
 
-    // ========================================================
-    // Step 5: 推送 CRM 繳費成功通知
-    // ========================================================
+    // 5. 推送 CRM 官方繳費成功通告
     if (tenantId) {
       const crmLogId = `CRM-${Date.now()}`;
       await fetch(`${FIRESTORE_URL}/inquiries?documentId=${crmLogId}`, {
