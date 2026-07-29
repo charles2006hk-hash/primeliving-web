@@ -192,14 +192,20 @@ function DashboardContent() {
   };
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
-// ★ 1. 交易核銷引擎：改為向後端 API 發送驗證請求，避開 Client-side Security Rules 權限限制
+// ★ 1. 交易核銷引擎：將 tenantId 與租客資訊一併傳給 API，確保 100% 命中核銷與記帳
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
       const response = await fetch('/api/paydollar/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderRef }),
+        body: JSON.stringify({ 
+          orderRef,
+          tenantId: tenantData?.id,            // ★ 傳入當前登入者 ID 作為雙重防禦
+          tenantName: tenantData?.name,
+          roomInfo: tenantData?.roomInfo,
+          fallbackAmount: billingSummary.grandTotal // ★ 傳入金額作財務記帳容錯
+        }),
       });
 
       const data = await response.json();
@@ -207,7 +213,7 @@ function DashboardContent() {
         throw new Error(data.error || '無法完成核銷手續');
       }
 
-      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已更新。");
+      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
       router.replace('/tenant-portal/dashboard');
     } catch (error: any) {
       console.error("[Verification Error]:", error);
@@ -283,15 +289,13 @@ function DashboardContent() {
     }
   };
   
-  // ★ 精確發起結帳：先寫入 Firestore Pending，再要簽章，防範 404 找不到交易
-  // ★ 發起結帳：強制記錄訂單與關聯單據 ID 到 Firestore，解決核銷時查無記錄問題
+  // ★ 2. 發起結帳：先同步寫入 transactions，帶入完整帳單 ID 清單
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.grandTotal <= 0) {
       return alert("目前沒有需要繳納的金額。");
     }
     setIsPayDollarLoading(true);
 
-    // 收集這次要繳交的所有單據 ID (本期強制 + 未來勾選)
     const payingBillIds = [
       ...billingSummary.mandatoryItems.map(b => b.id),
       ...billingSummary.optionalItems
@@ -302,7 +306,7 @@ function DashboardContent() {
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
 
     try {
-      // 1. 強制於跳轉前寫入 transactions 集合
+      // 1. 強制等待 Firebase 寫入完成後，再請求後端簽章
       await setDoc(doc(db, 'transactions', orderRef), {
         orderRef,
         tenantId: tenantData.id,
@@ -315,7 +319,7 @@ function DashboardContent() {
         createdAt: serverTimestamp()
       });
 
-      // 2. 請求 API 生成 SHA-1 安全加密簽章
+      // 2. 請求 API 生成 SHA-1 安全簽章
       const response = await fetch('/api/paydollar/checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -334,7 +338,7 @@ function DashboardContent() {
         throw new Error(data.error || '無法生成支付請求');
       }
 
-      // 3. 自動構建表單跳轉 PayDollar 頁面
+      // 3. 跳轉 PayDollar 頁面
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
