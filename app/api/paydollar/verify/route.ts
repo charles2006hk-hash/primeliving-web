@@ -1,10 +1,9 @@
 import { NextResponse } from 'next/server';
+// ★ 採用系統既有的 firebase-admin 管理員實例，直接穿透 Security Rules
+import { adminDb } from '@/lib/firebase-admin'; // 或對應的 adminDb 匯入路徑，若無可直接用 admin.firestore()
+import * as admin from 'firebase-admin';
 
-// ★ 強制鎖定大後台統一專案 ID
-const TARGET_PROJECT_ID = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || 'jiayu-pm-system';
-const FIRESTORE_URL = `https://firestore.googleapis.com/v1/projects/${TARGET_PROJECT_ID}/databases/(default)/documents`;
-
-// 嚴格整數運算：將金額轉仙 (Cents)
+// 嚴格整數運算：把元轉仙 (Cents)，杜絕浮點數運算誤差
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -16,26 +15,6 @@ const corsHeaders = {
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
-}
-
-async function getDocREST(collection: string, docId: string) {
-  const res = await fetch(`${FIRESTORE_URL}/${collection}/${docId}`, { method: 'GET' });
-  return res.ok ? await res.json() : null;
-}
-
-async function patchDocREST(collection: string, docId: string, fields: Record<string, any>) {
-  const firestoreFields: Record<string, any> = {};
-  for (const [k, v] of Object.entries(fields)) {
-    if (typeof v === 'string') firestoreFields[k] = { stringValue: v };
-    else if (typeof v === 'number') firestoreFields[k] = { doubleValue: v };
-    else if (typeof v === 'boolean') firestoreFields[k] = { booleanValue: v };
-  }
-  const mask = Object.keys(fields).map(k => `updateMask.fieldPaths=${k}`).join('&');
-  await fetch(`${FIRESTORE_URL}/${collection}/${docId}?${mask}`, {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ fields: firestoreFields })
-  });
 }
 
 export async function POST(request: Request) {
@@ -56,145 +35,118 @@ export async function POST(request: Request) {
     let resolvedRoom = roomInfo || 'Room A';
     let targetBillIds: string[] = Array.isArray(billIds) ? billIds.filter(Boolean) : [];
 
-    // 1. 若無傳遞單據 ID，自動找出該租客名下到期/逾期的所有未繳帳單
+    // ★ 使用 Firestore Batch 批次處理，保證財務單據與應收欠款「原子性 (Atomic) 寫入」
+    const batch = adminDb.batch();
+
+    // 1. 若前端無帶入 ID，使用 Admin 權限查詢租客所有到期 / 逾期的待繳帳單
     if (targetBillIds.length === 0 && resolvedTenantId) {
-      const allDocsRes = await fetch(`${FIRESTORE_URL}/documents`);
-      if (allDocsRes.ok) {
-        const allDocsData = await allDocsRes.json();
-        targetBillIds = (allDocsData.documents || [])
-          .filter((item: any) => {
-            const f = item.fields || {};
-            const fd = f.formData?.mapValue?.fields || {};
-            const owner = fd.tenantId?.stringValue || f.tenantId?.stringValue;
-            const status = f.status?.stringValue || f.paymentStatus?.stringValue;
-            const dueDate = fd.dueDate?.stringValue || f.createdAt?.timestampValue || '';
-            return owner === resolvedTenantId && ['Pending', 'Unpaid'].includes(status) && dueDate <= todayStr;
-          })
-          .map((item: any) => item.name.split('/').pop());
-      }
+      const unpaidQuery = await adminDb.collection('documents')
+        .where('formData.tenantId', '==', resolvedTenantId)
+        .where('paymentStatus', 'in', ['Unpaid', 'Pending'])
+        .get();
+
+      targetBillIds = unpaidQuery.docs
+        .filter(doc => {
+          const dueDate = doc.data()?.formData?.dueDate || doc.data()?.createdAt || '';
+          return dueDate <= todayStr;
+        })
+        .map(doc => doc.id);
     }
 
-    // 2. 批次核銷單據狀態為 Paid
-    for (const billId of targetBillIds) {
-      await patchDocREST('documents', billId, {
+    // 2. 批次把單據改為已付 (Paid)
+    targetBillIds.forEach(billId => {
+      const billRef = adminDb.collection('documents').doc(billId);
+      batch.update(billRef, {
         paymentStatus: 'Paid',
         status: 'Completed',
         updatedAt: nowIso
       });
-    }
+    });
 
-    // 3. 扣減 tenants 應付餘額，餘額為 0 即滅掉逾期紅燈
+    // 3. 扣減租客帳務 balance 並消除紅燈
     if (resolvedTenantId) {
-      const tenantSnap = await getDocREST('tenants', resolvedTenantId);
-      const currentDueCents = toCents(
-        tenantSnap?.fields?.amountDue?.doubleValue || 
-        tenantSnap?.fields?.amountDue?.integerValue || 0
-      );
+      const tenantRef = adminDb.collection('tenants').doc(resolvedTenantId);
+      const tenantSnap = await tenantRef.get();
+      const currentDueCents = toCents(tenantSnap.data()?.amountDue || 0);
       const remainsDue = fromCents(Math.max(0, currentDueCents - paidCents));
 
-      await patchDocREST('tenants', resolvedTenantId, {
+      batch.update(tenantRef, {
         amountDue: remainsDue,
         hasUnpaidBills: remainsDue > 0,
         updatedAt: nowIso
       });
     }
 
-    // 4. 開立正式電子收款收據 (Receipt)
-    const receiptId = `REC-${Date.now()}`;
-    await fetch(`${FIRESTORE_URL}/documents?documentId=${receiptId}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        fields: {
-          type: { stringValue: 'Receipt' },
-          paymentStatus: { stringValue: 'Paid' },
-          status: { stringValue: 'Completed' },
-          summary: { stringValue: `${resolvedName} - 租金繳納收據 (${orderRef})` },
-          isCompanyChopApplied: { booleanValue: true },
-          createdAt: { stringValue: nowIso },
-          formData: {
-            mapValue: {
-              fields: {
-                tenantId: { stringValue: resolvedTenantId },
-                tenantName: { stringValue: resolvedName },
-                roomName: { stringValue: resolvedRoom },
-                docDate: { stringValue: todayStr },
-                paymentMethod: { stringValue: 'PayDollar' },
-                totalReceived: { doubleValue: exactAmount },
-                remarks: { stringValue: `線上支付授權成功\n交易流水號: ${orderRef}\n已完成核銷 ${targetBillIds.length} 張單據` }
-              }
-            }
-          }
-        }
-      })
+    // 4. 開立線上付款電子收據 (Receipt)
+    const receiptRef = adminDb.collection('documents').doc(`REC-${Date.now()}`);
+    batch.set(receiptRef, {
+      type: 'Statement',
+      paymentStatus: 'Paid',
+      status: 'Completed',
+      summary: `${resolvedName} - 租金繳納收據 (${orderRef})`,
+      isCompanyChopApplied: true,
+      createdAt: nowIso,
+      formData: {
+        tenantId: resolvedTenantId,
+        tenantName: resolvedName,
+        roomName: resolvedRoom,
+        docDate: todayStr,
+        paymentMethod: 'PayDollar',
+        totalReceived: exactAmount,
+        remarks: `線上支付授權成功\n交易流水號: ${orderRef}\n已完成核銷 ${targetBillIds.length} 張單據`
+      }
     });
 
-    // ★ 5. 雙向同步寫入 AR 財務帳 (同時寫入 finances 與 finance_records 兩個集合！)
+    // ★ 5. 雙管道會計入帳：使用 Admin 權限同步寫入 `finances` 與 `finance_records`
     const financeId = `FIN-${Date.now()}`;
-    const financePayload = {
-      fields: {
-        type: { stringValue: 'AR' },               // ★ 會計分類：租金應收 (AR)
-        category: { stringValue: '租金收款' },     // ★ 絕不是分紅提款
-        title: { stringValue: `${resolvedName} - ${resolvedRoom} 租金繳納` },
-        amount: { doubleValue: exactAmount },
-        date: { stringValue: todayStr },
-        paymentMethod: { stringValue: 'PayDollar' },
-        tenantId: { stringValue: resolvedTenantId },
-        orderRef: { stringValue: orderRef },
-        status: { stringValue: 'Paid' },
-        createdAt: { stringValue: nowIso }
-      }
+    const financeData = {
+      type: 'AR',                           // ★ 會計資產類別：應收帳款 (AR)
+      category: '租金收款',                 // ★ 精確分類：租金收款 (非分紅)
+      title: `${resolvedName} - ${resolvedRoom} 租金繳納`,
+      amount: exactAmount,
+      date: todayStr,
+      paymentMethod: 'PayDollar',
+      tenantId: resolvedTenantId,
+      orderRef: orderRef,
+      status: 'Paid',
+      createdAt: nowIso
     };
 
-    const [finRes1, finRes2] = await Promise.all([
-      fetch(`${FIRESTORE_URL}/finances?documentId=${financeId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(financePayload)
-      }),
-      fetch(`${FIRESTORE_URL}/finance_records?documentId=${financeId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(financePayload)
-      })
-    ]);
+    batch.set(adminDb.collection('finances').doc(financeId), financeData);
+    batch.set(adminDb.collection('finance_records').doc(financeId), financeData);
 
     // 6. CRM 通知日誌
     if (resolvedTenantId) {
-      const crmLogId = `CRM-${Date.now()}`;
-      await fetch(`${FIRESTORE_URL}/inquiries?documentId=${crmLogId}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          fields: {
-            tenantId: { stringValue: resolvedTenantId },
-            name: { stringValue: resolvedName },
-            roomInfo: { stringValue: resolvedRoom },
-            message: `【系統通知：繳費確認】\n已成功通過 PayDollar 繳清租金 HK$${exactAmount.toLocaleString()}。單據與欠款已自動核銷。`,
-            author: { stringValue: '系統自動化' },
-            type: { stringValue: 'official_notice' },
-            status: { stringValue: 'Resolved' },
-            createdAt: { stringValue: nowIso },
-            isExistingTenant: { booleanValue: true }
-          }
-        })
+      const crmRef = adminDb.collection('inquiries').doc(`CRM-${Date.now()}`);
+      batch.set(crmRef, {
+        tenantId: resolvedTenantId,
+        name: resolvedName,
+        roomInfo: resolvedRoom,
+        message: `【系統通知：繳費確認】\n已成功通過 PayDollar 繳清租金 HK$${exactAmount.toLocaleString()}。單據與欠款已自動核銷。`,
+        author: '系統自動化',
+        type: 'official_notice',
+        status: 'Resolved',
+        createdAt: nowIso,
+        isExistingTenant: true
       });
     }
 
-    // ★ 關鍵：回傳明確的版本標記與寫入狀態，便於客戶端調試
+    // ★ 一起提交 Firestore 所有修改
+    await batch.commit();
+
     return NextResponse.json({ 
       success: true, 
-      api_version: "2026-v4",
+      api_version: "2026-v5-admin",
       amount: exactAmount, 
       clearedBills: targetBillIds.length,
       debugWriteTargets: {
-        "jiayu-pm-system_finances": finRes1.ok,
-        "jiayu-pm-system_finance_records": finRes2.ok
+        "jiayu-pm-system_finances": true,
+        "jiayu-pm-system_finance_records": true
       }
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
-    console.error('[Verify API Error]:', error);
+    console.error('[Verify API V5 Error]:', error);
     return NextResponse.json({ success: false, error: error.message }, { status: 500, headers: corsHeaders });
   }
 }
