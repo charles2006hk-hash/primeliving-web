@@ -1,13 +1,14 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { 
   CreditCard, User, Phone, MapPin, DollarSign, FileText, 
   CheckCircle2, AlertCircle, Loader2, Send, Building2, IdCard
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
-export default function SalesQuickPayPage() {
+// 1. 將原有邏輯拆分為核心業務組件
+function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -207,7 +208,7 @@ export default function SalesQuickPayPage() {
             </div>
           </div>
 
-          {/* 4. 證件號碼 (可選填部分，方便後端智能關聯) */}
+          {/* 4. 證件號碼 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>證件號碼 / HKID (選填)</span>
@@ -283,5 +284,20 @@ export default function SalesQuickPayPage() {
 
       </div>
     </div>
+  );
+}
+
+// 2. 預設導出頁面：使用 Suspense 封裝主組件，通過 Vercel 建置檢驗
+export default function SalesQuickPayPage() {
+  return (
+    <Suspense 
+      fallback={
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+          <Loader2 size={36} className="animate-spin text-blue-500" />
+        </div>
+      }
+    >
+      <SalesQuickPayContent />
+    </Suspense>
   );
 }
