@@ -2,10 +2,12 @@
 
 import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
-  CreditCard, User, Phone, DollarSign, CheckCircle2, 
+  CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
   Loader2, IdCard, Home, Lock, Building2
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
+import { collection, onSnapshot, doc, query } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface Room {
   id: string;
@@ -18,12 +20,19 @@ interface Room {
 interface Property {
   id: string;
   name: string;
+  status?: string;
 }
 
+/**
+ * 1. 核心業務 UI 組件 (被 Suspense 封裝，相容 Vercel CSR Bailout 防呆)
+ */
 function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+
+  // 狀態控制：嚴格區分 成功 / 失敗 / 未授權
   const [isSuccess, setIsSuccess] = useState(false);
+  const [isFailed, setIsFailed] = useState(false);
   const [successOrderRef, setSuccessOrderRef] = useState('');
 
   // 權限授權狀態
@@ -31,14 +40,14 @@ function SalesQuickPayContent() {
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // CRM 資料狀態
+  // CRM 資料池
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [crmStaffList, setCrmStaffList] = useState<string[]>(['公司行政 (Office)']);
   const [savedStaffList, setSavedStaffList] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(true);
 
-  // 表單資料
+  // 現場收款表單資料
   const [formData, setFormData] = useState({
     passcode: '',
     propertyId: '',
@@ -53,7 +62,7 @@ function SalesQuickPayContent() {
     salesPerson: ''
   });
 
-  // A. 讀取本地通行碼與經手人歷史
+  // A. 初始化：載入本地通行碼快取與經手人歷史
   useEffect(() => {
     const savedPin = localStorage.getItem('SALES_PAY_TOKEN');
     if (savedPin) {
@@ -66,38 +75,56 @@ function SalesQuickPayContent() {
     }
   }, []);
 
-  // B. 透過 Vercel 後端代理 API 拉取數據（專為國內免翻牆優化）
+  // B. 即時監聽 CRM 數據池 (過濾掉名稱有 test/測試 的假樓盤)
   useEffect(() => {
-    let isMounted = true;
-    const fetchFormData = async () => {
-      try {
-        const res = await fetch('/api/sales/form-data');
-        const json = await res.json();
-        if (json.success && isMounted) {
-          setCrmStaffList(json.data.staffList || ['公司行政 (Office)']);
-          setProperties(json.data.properties || []);
-          setRooms(json.data.rooms || []);
-          if (!formData.salesPerson && json.data.staffList?.length > 0) {
-            setFormData(prev => ({ ...prev, salesPerson: json.data.staffList[0] }));
+    if (!db) return;
+
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'general'), (snap) => {
+      if (snap.exists()) {
+        const data = snap.data();
+        let list: string[] = ['公司行政 (Office)'];
+        if (data.shareholders) {
+          if (Array.isArray(data.shareholders)) {
+            list = [...data.shareholders, '公司行政 (Office)'];
+          } else if (typeof data.shareholders === 'string') {
+            list = [...data.shareholders.split(',').map((s: string) => s.trim()).filter(Boolean), '公司行政 (Office)'];
           }
         }
-      } catch (err) {
-        console.error('資料初始化失敗:', err);
-      } finally {
-        if (isMounted) setDbLoading(false);
+        setCrmStaffList(list);
+        if (!formData.salesPerson && list.length > 0) {
+          setFormData(prev => ({ ...prev, salesPerson: list[0] }));
+        }
       }
-    };
+    });
 
-    fetchFormData();
-    return () => { isMounted = false; };
+    const unsubProps = onSnapshot(collection(db, 'properties'), (snap) => {
+      const validProps = snap.docs
+        .map(d => ({ id: d.id, ...d.data() } as Property))
+        .filter(p => {
+          const name = (p.name || '').toLowerCase();
+          return !name.includes('test') && !name.includes('測試') && p.status !== '停用';
+        });
+      setProperties(validProps);
+    });
+
+    const unsubRooms = onSnapshot(query(collection(db, 'rooms')), (snap) => {
+      setRooms(snap.docs.map(d => ({ id: d.id, ...d.data() } as Room)));
+      setDbLoading(false);
+    });
+
+    return () => {
+      unsubSettings();
+      unsubProps();
+      unsubRooms();
+    };
   }, []);
 
-  // 經手人員合併清單 (CRM名單 + 本地輸入記憶)
+  // 經手人員合併清單 (CRM人員 + 本地輸入記憶，去除重複)
   const combinedStaffList = useMemo(() => {
     return Array.from(new Set([...crmStaffList, ...savedStaffList]));
   }, [crmStaffList, savedStaffList]);
 
-  // 依物業過濾房間並將「🟢 未出租」置頂
+  // 依據物業過濾，並將未出租 (Vacant) 優先排序置頂
   const filteredSortedRooms = useMemo(() => {
     if (!formData.propertyId) return [];
     return rooms
@@ -114,7 +141,6 @@ function SalesQuickPayContent() {
       });
   }, [rooms, formData.propertyId]);
 
-  // 切換大樓物業
   const handlePropertyChange = (propId: string) => {
     const prop = properties.find(p => p.id === propId);
     setFormData(prev => ({
@@ -126,7 +152,6 @@ function SalesQuickPayContent() {
     }));
   };
 
-  // 選擇房間自動帶入基礎租金建議
   const handleRoomChange = (roomId: string) => {
     const selectedRoom = rooms.find(r => r.id === roomId);
     if (selectedRoom) {
@@ -141,11 +166,19 @@ function SalesQuickPayContent() {
     }
   };
 
+  // ★ 嚴格攔截 PayDollar 轉跳 URL，將成功與失敗分流
   useEffect(() => {
     const success = searchParams?.get('success');
+    const failed = searchParams?.get('failed');
     const orderRef = searchParams?.get('orderRef');
-    if (success === 'true' && orderRef) {
+
+    if (failed === 'true') {
+      setIsFailed(true);
+      setIsSuccess(false);
+      setSuccessOrderRef(orderRef || '交易取消/受限');
+    } else if (success === 'true' && orderRef) {
       setIsSuccess(true);
+      setIsFailed(false);
       setSuccessOrderRef(orderRef);
     }
   }, [searchParams]);
@@ -175,6 +208,7 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
+  // 提交下單表單
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
@@ -193,6 +227,7 @@ function SalesQuickPayContent() {
 
       const data = await response.json();
       
+      // 若收到 401 代表環境變數密碼已被改動，清除授權讓業務重新輸入
       if (response.status === 401) {
         handleLockOut();
         throw new Error(data.error || '授權已過期，請輸入最新的公司銷售授權碼');
@@ -202,6 +237,7 @@ function SalesQuickPayContent() {
         throw new Error(data.error || '無法連接金流系統');
       }
 
+      // 動態掛載 PayDollar 表單並送出至安全閘道
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
@@ -225,7 +261,9 @@ function SalesQuickPayContent() {
     }
   };
 
-  // A. 未授權鎖定視圖
+  // ==========================================
+  // 渲染視圖 A：未登入授權面板
+  // ==========================================
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
@@ -270,7 +308,41 @@ function SalesQuickPayContent() {
     );
   }
 
-  // B. 成功收款視圖
+  // ==========================================
+  // 渲染視圖 B：付款失敗 / 網關受限 (嚴格報錯阻斷)
+  // ==========================================
+  if (isFailed) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
+        <div className="bg-slate-800 border border-red-500/30 max-w-md w-full rounded-3xl p-8 text-center shadow-2xl space-y-6">
+          <div className="w-20 h-20 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-500/30">
+            <AlertCircle size={40} />
+          </div>
+          <div>
+            <h2 className="text-2xl font-black text-white">交易失敗或被取消</h2>
+            <p className="text-sm text-slate-400 mt-2">
+              PayDollar 網關拒絕交易或刷卡人手動取消。
+              <br />
+              <span className="text-red-400 font-bold">⚠️ 此款項【未成立】，未計入大系統帳目！</span>
+            </p>
+            <div className="mt-4 p-3 bg-slate-900 rounded-xl font-mono text-xs text-red-400 border border-slate-700">
+              單據參考號: {successOrderRef}
+            </div>
+          </div>
+          <button
+            onClick={() => window.location.href = '/sales-pay'}
+            className="w-full py-4 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-2xl transition shadow-lg"
+          >
+            返回重新嘗試收款
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // 渲染視圖 C：付款成功完結
+  // ==========================================
   if (isSuccess) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -281,7 +353,7 @@ function SalesQuickPayContent() {
           <div>
             <h2 className="text-2xl font-black text-white">現場收款成功！</h2>
             <p className="text-sm text-slate-400 mt-2">
-              款項已記錄至大系統【現場待認領隊列】，財務報表已自動入帳。
+              款項已安全入帳至大系統【現場待認領隊列】，公司財務中心可即時查閱對平。
             </p>
             <div className="mt-4 p-3 bg-slate-900 rounded-xl font-mono text-xs text-emerald-400 border border-slate-700">
               訂單編號: {successOrderRef}
@@ -298,7 +370,9 @@ function SalesQuickPayContent() {
     );
   }
 
-  // C. 主表單 (雙層選擇 + 國內友善)
+  // ==========================================
+  // 渲染視圖 D：銷售快支付表單 (雙層過濾 + 智能推薦)
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 py-10 px-4 font-sans flex justify-center">
       <div className="max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl">
@@ -327,9 +401,9 @@ function SalesQuickPayContent() {
 
         <form onSubmit={handleSubmit} className="space-y-5">
           
-          {/* 1. 經辦人 (自由鍵入 + 智能記憶聯想) */}
+          {/* 1. 經辦銷售員 (整合 CRM 員工名單與記憶聯想) */}
           <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1">收款經辦銷售員 (自由輸入或選擇) *</label>
+            <label className="block text-xs font-bold text-slate-400 mb-1">收款經辦銷售員 (可自行輸入或挑選) *</label>
             <input
               type="text"
               required
@@ -344,7 +418,7 @@ function SalesQuickPayContent() {
             </datalist>
           </div>
 
-          {/* 2. 主樓盤/物業 */}
+          {/* 2. 第一層：先挑選主大樓/物業 (自動排除 test 假盤) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>所屬大樓 / 盤源物業 *</span>
@@ -368,7 +442,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 3. 房間單位 (🟢 未出租置頂) */}
+          {/* 3. 第二層：意向單位 (由大樓篩選 + 🟢未出租強制置頂) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">
               意向/承租單位 (🟢 未出租優先置頂) *
@@ -397,7 +471,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 4. 姓名與電話 */}
+          {/* 4. 姓名與聯絡電話 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">客戶/租客全名 *</label>
@@ -433,7 +507,7 @@ function SalesQuickPayContent() {
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>證件號碼 / HKID (選填)</span>
-              <span className="text-[10px] text-slate-500">供大系統自動配對索引</span>
+              <span className="text-[10px] text-slate-500">供大系統自動認領配對</span>
             </label>
             <div className="relative">
               <IdCard className="absolute left-3 top-3.5 text-slate-500" size={16} />
@@ -507,6 +581,9 @@ function SalesQuickPayContent() {
   );
 }
 
+/**
+ * 2. 預設導出頁面模組：通過 <Suspense> 包裝，解決 Next.js 13+ App Router SSR 建置警告
+ */
 export default function SalesQuickPayPage() {
   return (
     <Suspense 
