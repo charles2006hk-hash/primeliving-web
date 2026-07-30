@@ -9,35 +9,42 @@ const corsHeaders = {
 };
 
 /**
- * 財務精度控制：轉 Cents，防止浮點數誤差
+ * 財務會計精確運算：轉 Cents (仙) 整數運算，杜絕 JS 浮點數精度誤差
  */
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
 /**
  * PayDollar 官方 SHA-1 簽章演算法
- * 格式嚴格為: merchantId|orderRef|currCode|amount|payType|secureHashSecret
+ * 格式：merchantId|orderRef|currCode|amount|payType|secureHashSecret
  */
 function generatePayDollarSecureHash(
   merchantId: string,
   orderRef: string,
   currCode: string,
-  amount: number,
+  amount: string, // 強制字串傳入 (例如 "13600.00")
   payType: string,
   secureHashSecret: string
 ): string {
-  // 強制轉字串並移除可能存在的空白
   const str = [
     String(merchantId).trim(),
     String(orderRef).trim(),
     String(currCode).trim(),
-    Number(amount).toFixed(2),
+    amount,
     String(payType).trim(),
     String(secureHashSecret).trim()
   ].join('|');
 
   return crypto.createHash('sha1').update(str).digest('hex');
 }
+
+/**
+ * 移除特殊符號與中文，轉為 PayDollar 最安全的純英文數字格式
+ * 防範 Sandbox JSP 頁面因 ISO-8859-1 編碼崩潰
+ */
+const toSafeAscii = (str: string): string => {
+  return (str || '').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 40);
+};
 
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
@@ -47,15 +54,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      passcode,
-      region,
-      roomName,
-      tenantName,
-      idNumber,
-      phone,
-      amount,
-      remarks,
-      salesPerson
+      passcode,        // 現場解鎖通行金鑰
+      region,          // 物業屋苑
+      roomName,        // 單位編號
+      tenantName,      // 租客全名
+      idNumber,        // 證件號碼 (CRM 事後認領配對)
+      phone,           // 聯絡電話
+      amount,          // 收款金額
+      remarks,         // 備註
+      salesPerson      // 經辦銷售員
     } = body;
 
     // 1. PIN 密碼授權校驗
@@ -67,7 +74,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. 財務欄位驗證
+    // 2. 財務欄位嚴格校驗
     const paidAmountCents = toCents(amount);
     if (paidAmountCents <= 0 || !tenantName || !phone) {
       return NextResponse.json(
@@ -76,15 +83,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // ★ 核心修復 1：精簡訂單號 (不超過 20 字元，格式：S年月日-6位隨機)
-    const shortDate = new Date().toISOString().slice(2, 10).replace(/-/g, '');
-    const randCode = Math.floor(100000 + Math.random() * 900000);
-    const orderRef = `S${shortDate}-${randCode}`;
+    // ★ 關鍵對齊 1：使用跟租客端完全對齊的短訂單編號格式 (長度控制在 20 字元內)
+    const orderRef = `SQP-${Date.now().toString().slice(-8)}-${Math.floor(100 + Math.random() * 900)}`;
     
     const nowIso = new Date().toISOString();
-    const cleanAmount = fromCents(paidAmountCents);
+    const cleanAmountNum = fromCents(paidAmountCents);
+    const cleanAmountStr = cleanAmountNum.toFixed(2); // 固定兩位小數 (例如 "3000.00")
 
-    // 3. 寫入大系統 CRM 預收款隊列 (未付款 Pending)
+    // 3. 寫入大系統 CRM 現場收款預收對帳隊列
     const quickOrderData = {
       orderRef,
       region: region || '香港',
@@ -93,12 +99,12 @@ export async function POST(request: Request) {
       tenantName: tenantName.trim(),
       idNumber: (idNumber || '').trim().toUpperCase(),
       phone: phone.trim(),
-      amount: cleanAmount,
+      amount: cleanAmountNum,
       remarks: remarks || '現場收款',
       salesPerson: salesPerson || '內部專員',
       status: 'Pending',
       paymentStatus: 'Unpaid',
-      pairingStatus: 'Unassigned',
+      pairingStatus: 'Unassigned', // CRM 待認領標記
       gateway: 'PayDollar',
       createdAt: nowIso,
       updatedAt: nowIso
@@ -110,26 +116,22 @@ export async function POST(request: Request) {
       ...quickOrderData,
       type: 'income',
       category: '現場預收款',
-      title: `[現場收款] ${quickOrderData.tenantName} - ${quickOrderData.roomInfo} ($${cleanAmount.toLocaleString()})`
+      title: `[現場收款] ${quickOrderData.tenantName} - ${quickOrderData.roomInfo} ($${cleanAmountNum.toLocaleString()})`
     });
     await batch.commit();
 
-    // ★ 核心修復 2：PayDollar 參數嚴格檢查 (使用測試環境通用安全預設值 fallback)
+    // 4. PayDollar 參數嚴格鏡像對齊租客端
     const merchantId = process.env.PAYDOLLAR_MERCHANT_ID || '88888888';
     const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET || 'YOUR_SECRET_KEY';
-    const currCode = '344'; // 香港元 HKD
-    const payType = 'N';    // 普通刷卡
-
-    // 若未正確設定環境變數，直接提早報錯，不在 JSP 頁面卡死
-    if (merchantId === '88888888' || secureHashSecret === 'YOUR_SECRET_KEY') {
-      console.warn('[警告] 尚未於 Vercel 設定真實 PAYDOLLAR_MERCHANT_ID 與 PAYDOLLAR_SECURE_HASH_SECRET');
-    }
+    const currCode = '344'; // 344 = 香港元 HKD
+    const payType = 'N';    // N = Normal Sale
+    const lang = 'C';       // C = 繁體中文
 
     const secureHash = generatePayDollarSecureHash(
       merchantId,
       orderRef,
       currCode,
-      cleanAmount,
+      cleanAmountStr,
       payType,
       secureHashSecret
     );
@@ -137,13 +139,13 @@ export async function POST(request: Request) {
     const origin = new URL(request.url).origin;
     const cleanReturnUrl = `${origin}/sales-pay`;
 
-    // ★ 核心修復 3：remark 移除可能搞死 JSP 舊編碼的特殊符號
-    const safeRemark = `RMK-${quickOrderData.roomInfo.replace(/[^a-zA-Z0-9]/g, '')}-${quickOrderData.tenantName.replace(/[^a-zA-Z0-9]/g, '')}`.slice(0, 50);
+    // ★ 關鍵對齊 2：備註絕對不送中文和特殊符號，改為標準 ASCII，防範 Sandbox JSP 解碼異常
+    const safeRemark = `SALES ${toSafeAscii(quickOrderData.roomName)} ${toSafeAscii(quickOrderData.tenantName)}`.trim();
 
     const paymentPayload = {
       endpoint: process.env.PAYDOLLAR_PAYMENT_URL || 'https://test.paydollar.com/b2cDemo/eng/payment/payForm.jsp',
       merchantId,
-      amount: cleanAmount.toFixed(2), // 強制 2 位小數字串
+      amount: cleanAmountStr,
       orderRef,
       currCode,
       mpsMode: 'N',
@@ -151,10 +153,10 @@ export async function POST(request: Request) {
       failUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
       cancelUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
       payType,
-      lang: 'C',
+      lang,
       payMethod: 'ALL',
       secureHash,
-      remark: safeRemark
+      remark: safeRemark || 'QUICK-PAY'
     };
 
     return NextResponse.json({
