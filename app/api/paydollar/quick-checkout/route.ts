@@ -16,13 +16,12 @@ const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
 /**
  * PayDollar 官方 SHA-1 簽章演算法
- * 格式：merchantId|orderRef|currCode|amount|payType|secureHashSecret
  */
 function generatePayDollarSecureHash(
   merchantId: string,
   orderRef: string,
   currCode: string,
-  amount: string, // 強制固定兩位小數字串傳入 (例如 "1030.00")
+  amount: string,
   payType: string,
   secureHashSecret: string
 ): string {
@@ -40,7 +39,6 @@ function generatePayDollarSecureHash(
 
 /**
  * 移除中文與特殊字元，轉為 PayDollar 最安全的純 ASCII 格式
- * 避免舊版 Sandbox JSP 頁面因 ISO-8859-1 解碼異常
  */
 const toSafeAscii = (str: string): string => {
   return (str || '').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 40);
@@ -54,15 +52,15 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const {
-      passcode,        // 內部通行密碼
-      region,          // 物業大廈
-      roomName,        // 房間單位
-      tenantName,      // 租客全名
-      idNumber,        // 證件號碼 (CRM 對帳)
-      phone,           // 聯絡電話
-      amount,          // ★ 客戶輸入之本金金額 (Subtotal)
-      remarks,         // 備註用途
-      salesPerson      // 經辦人
+      passcode,
+      region,
+      roomName,
+      tenantName,
+      idNumber,
+      phone,
+      amount,
+      remarks,
+      salesPerson
     } = body;
 
     // 1. PIN 密碼授權校驗
@@ -74,7 +72,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. ★ 財務仙數運算：計算本金、3% 手續費與刷卡總金額
+    // 2. 財務仙數運算：計算本金、3% 手續費與加總金額
     const subtotalCents = toCents(amount);
     if (subtotalCents <= 0 || !tenantName || !phone) {
       return NextResponse.json(
@@ -83,21 +81,20 @@ export async function POST(request: Request) {
       );
     }
 
-    // 手續費率 = 3%
     const surchargeCents = Math.round(subtotalCents * 0.03);
     const totalAmountCents = subtotalCents + surchargeCents;
 
     const subtotalNum = fromCents(subtotalCents);
     const surchargeNum = fromCents(surchargeCents);
     const totalAmountNum = fromCents(totalAmountCents);
-    const cleanAmountStr = totalAmountNum.toFixed(2); // 傳給 PayDollar 須為固定兩位小數字串
+    const cleanAmountStr = totalAmountNum.toFixed(2);
 
-    // 3. 產生與租客端對齊的短單號結構
+    // 3. 產生不會和線上合約單衝突的唯一短單號結構
     const orderRef = `SQP-${Date.now().toString().slice(-8)}-${Math.floor(100 + Math.random() * 900)}`;
     const nowIso = new Date().toISOString();
-    const dateStr = nowIso.slice(0, 10); // YYYY-MM-DD
+    const dateStr = nowIso.slice(0, 10);
 
-    // 4. 建立現場收帳單據隊列 (記錄完整的本金與手續費明細)
+    // 4. 寫入現場收帳單據隊列
     const quickOrderData = {
       orderRef,
       region: region || '香港',
@@ -106,14 +103,14 @@ export async function POST(request: Request) {
       tenantName: tenantName.trim(),
       idNumber: (idNumber || '').trim().toUpperCase(),
       phone: phone.trim(),
-      subtotal: subtotalNum,            // ★ 本金
-      surcharge: surchargeNum,          // ★ 3% 手續費
-      amount: totalAmountNum,           // ★ 總收款額 (包含手續費)
+      subtotal: subtotalNum,
+      surcharge: surchargeNum,
+      amount: totalAmountNum,
       remarks: remarks || '現場收款',
       salesPerson: salesPerson || '內部專員',
       status: 'Pending',
       paymentStatus: 'Unpaid',
-      pairingStatus: 'Unassigned',      // CRM 未認領標識
+      pairingStatus: 'Unassigned',
       gateway: 'PayDollar',
       paymentMethodDetail: '等待網關授權...',
       date: dateStr,
@@ -125,7 +122,6 @@ export async function POST(request: Request) {
     const batch = adminDb.batch();
     batch.set(adminDb.collection('quick_orders').doc(orderRef), quickOrderData);
     
-    // 寫入財務中心主表，副標題加上手續費備註
     batch.set(adminDb.collection('transactions').doc(orderRef), {
       ...quickOrderData,
       type: 'income',
@@ -138,27 +134,37 @@ export async function POST(request: Request) {
     });
     await batch.commit();
 
-    // 5.PayDollar 參數配置與安全 SHA-1 加密
-    const merchantId = process.env.PAYDOLLAR_MERCHANT_ID || '88888888';
-    const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET || 'YOUR_SECRET_KEY';
-    const currCode = '344'; // 344 = 香港元 HKD
-    const payType = 'N';    // N = Normal Sale
+    // 5. PayDollar 生產環境參數配置
+    const merchantId = process.env.PAYDOLLAR_MERCHANT_ID;
+    const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET;
+    const endpoint = process.env.PAYDOLLAR_PAYMENT_URL || 'https://www.paydollar.com/b2c2/eng/payment/payForm.jsp';
+
+    if (!merchantId || !secureHashSecret) {
+      console.error('[Sales Quick-Checkout Error]: 遺漏 PAYDOLLAR_MERCHANT_ID 或 PAYDOLLAR_SECURE_HASH_SECRET');
+      return NextResponse.json(
+        { success: false, error: '系統正式環境金鑰未正確設定' },
+        { status: 500, headers: corsHeaders }
+      );
+    }
+
+    const currCode = '344'; // HKD
+    const payType = 'N';    // Normal Sale
 
     const secureHash = generatePayDollarSecureHash(
       merchantId,
       orderRef,
       currCode,
-      cleanAmountStr, // ★ 傳入加計 3% 後的總金額
+      cleanAmountStr,
       payType,
       secureHashSecret
     );
 
     const origin = new URL(request.url).origin;
     const cleanReturnUrl = `${origin}/sales-pay`;
-    const safeRemark = `SALES ${toSafeAscii(quickOrderData.roomName)} ${toSafeAscii(quickOrderData.tenantName)}`.trim();
+    const safeRemark = `SALES ${toSafeAscii(quickOrderData.roomName)}`.trim();
 
     const paymentPayload = {
-      endpoint: process.env.PAYDOLLAR_PAYMENT_URL || 'https://test.paydollar.com/b2cDemo/eng/payment/payForm.jsp',
+      endpoint,
       merchantId,
       amount: cleanAmountStr,
       orderRef,
