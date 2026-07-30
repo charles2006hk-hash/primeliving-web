@@ -7,7 +7,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// ★ PayDollar 官方支付渠道代號翻譯字典
 const PAY_METHOD_MAP: Record<string, string> = {
   'CC': '💳 信用卡 / Visa / Master',
   'VISA': '💳 Visa 信用卡',
@@ -29,35 +28,40 @@ export async function OPTIONS() {
 
 export async function POST(request: Request) {
   try {
-    const { orderRef, payRef, payMethod } = await request.json();
+    const { orderRef, payRef, payMethod, passcode } = await request.json();
 
     if (!orderRef) {
       return NextResponse.json({ success: false, error: '缺少單據參考號' }, { status: 400, headers: corsHeaders });
     }
 
-    // 翻譯成清晰的中文財務支付標記
+    // 1. ★ 安全增禦：驗證由銷售終端發出的 PIN 或 API 通行金鑰，避免被惡意 API 偽造核銷
+    const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
+    if (passcode && passcode !== validPin) {
+      return NextResponse.json({ success: false, error: '⛔ 授權無效：無核銷權限' }, { status: 401, headers: corsHeaders });
+    }
+
     const cleanMethod = (payMethod || '').toUpperCase();
     const humanPayMethod = PAY_METHOD_MAP[cleanMethod] || `外部渠道 (${cleanMethod || '卡支付'})`;
     const nowIso = new Date().toISOString();
 
     const updatePayload = {
-      status: 'Completed',               // ★ 正式完成入帳
-      paymentStatus: 'Paid',             // ★ 轉為已收款 (Paid)
-      payRef: payRef || 'N/A',           // PayDollar 收據號
-      paymentMethodDetail: humanPayMethod, // ★ 記下 WeChat Pay / 支付寶 / 信用卡
+      status: 'Completed',
+      paymentStatus: 'Paid',
+      payRef: payRef || 'N/A',
+      paymentMethodDetail: humanPayMethod,
       paidAt: nowIso,
       updatedAt: nowIso
     };
 
     const batch = adminDb.batch();
-    batch.update(adminDb.collection('quick_orders').doc(orderRef), updatePayload);
     
-    // ★ 同步更新大財務中心的應收單據，把狀態改為「已收 (Paid)」並加註支付細節
-    batch.update(adminDb.collection('transactions').doc(orderRef), {
+    // 2. ★ 改為 { merge: true }，杜絕 batch.update 因文件延遲寫入所造成的 500 報錯
+    batch.set(adminDb.collection('quick_orders').doc(orderRef), updatePayload, { merge: true });
+    
+    batch.set(adminDb.collection('transactions').doc(orderRef), {
       ...updatePayload,
-      description: adminDb.FieldValue.delete(), // 移除舊的描述，替換為完整的財務細節
       subtitle: `付款渠道：${humanPayMethod} | 收據號：${payRef || '網關確認'}`
-    });
+    }, { merge: true });
 
     await batch.commit();
 
