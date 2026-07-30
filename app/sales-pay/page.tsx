@@ -7,6 +7,9 @@ import {
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 
+// ==========================================
+// 型態定義
+// ==========================================
 interface Room {
   id: string;
   propertyId: string;
@@ -21,28 +24,33 @@ interface Property {
   status?: string;
 }
 
+/**
+ * 1. 核心業務 UI 組件 
+ * (被 Suspense 封裝，相容 Next.js App Router 與 Vercel CSR Bailout 限制)
+ */
 function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
 
-  // 狀態判定
+  // 交易回調狀態：嚴格區分 成功 / 失敗 / 未授權
   const [isSuccess, setIsSuccess] = useState(false);
   const [isFailed, setIsFailed] = useState(false);
   const [successOrderRef, setSuccessOrderRef] = useState('');
+  const [paidDetail, setPaidDetail] = useState('核實支付渠道中...');
 
   // 授權金鑰狀態
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // CRM 數據狀態
+  // CRM 數據狀態 (經由 BFF 代理 API 載入，不直連 Firebase Web SDK)
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [crmStaffList, setCrmStaffList] = useState<string[]>(['公司行政 (Office)']);
   const [savedStaffList, setSavedStaffList] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(true);
 
-  // 現場表單數據
+  // 現場填表欄位
   const [formData, setFormData] = useState({
     passcode: '',
     propertyId: '',
@@ -57,7 +65,9 @@ function SalesQuickPayContent() {
     salesPerson: ''
   });
 
-  // A. 讀取本地通行密碼快取與經手人員輸入歷史
+  // ==========================================
+  // A. 初始化：讀取本地儲存的內部通行碼與經手人歷史
+  // ==========================================
   useEffect(() => {
     const savedPin = localStorage.getItem('SALES_PAY_TOKEN');
     if (savedPin) {
@@ -66,14 +76,20 @@ function SalesQuickPayContent() {
     }
     const localStaff = localStorage.getItem('SALES_STAFF_HISTORY');
     if (localStaff) {
-      try { setSavedStaffList(JSON.parse(localStaff)); } catch (e) {}
+      try {
+        setSavedStaffList(JSON.parse(localStaff));
+      } catch (e) {
+        // 解析異常則重置
+      }
     }
   }, []);
 
-  // B. 透過後端 BFF 代理獲取 CRM 資料（徹底不再直連 Firebase Web SDK）
+  // ==========================================
+  // B. BFF 代理載入 CRM 數據 (完全免除 Firebase Permission-Denied)
+  // ==========================================
   useEffect(() => {
     let isMounted = true;
-    const loadBffData = async () => {
+    const fetchFormData = async () => {
       try {
         const res = await fetch('/api/sales/form-data');
         const json = await res.json();
@@ -86,22 +102,24 @@ function SalesQuickPayContent() {
           }
         }
       } catch (err) {
-        console.error('無法取得盤源數據庫：', err);
+        console.error('[初始化失敗] 無法連接盤源數據代理:', err);
       } finally {
         if (isMounted) setDbLoading(false);
       }
     };
 
-    loadBffData();
-    return () => { isMounted = false; };
+    fetchFormData();
+    return () => {
+      isMounted = false;
+    };
   }, []);
 
-  // 智能聯想：CRM人名 + 歷史自訂輸入
+  // 合併 CRM 名單與本地記憶，形成智能推薦選項
   const combinedStaffList = useMemo(() => {
     return Array.from(new Set([...crmStaffList, ...savedStaffList]));
   }, [crmStaffList, savedStaffList]);
 
-  // 物業房間二次過濾，並把 🟢 未出租 單位放置頂部
+  // 依物業過濾房間：🟢未出租(Vacant) > 🟠維修中(Maintenance) > ⚪已出租(Occupied)
   const filteredSortedRooms = useMemo(() => {
     if (!formData.propertyId) return [];
     return rooms
@@ -143,23 +161,44 @@ function SalesQuickPayContent() {
     }
   };
 
-  // 監聽 PayDollar 返回狀態
+  // ==========================================
+  // C. PayDollar 支付閘道跳轉 URL 參數監聽與覈銷
+  // ==========================================
   useEffect(() => {
     const success = searchParams?.get('success');
     const failed = searchParams?.get('failed');
     const orderRef = searchParams?.get('orderRef');
+    const payRef = searchParams?.get('PayRef') || searchParams?.get('payRef');
+    const payMethod = searchParams?.get('PayMethod') || searchParams?.get('payMethod') || 'CC';
 
     if (failed === 'true') {
       setIsFailed(true);
       setIsSuccess(false);
-      setSuccessOrderRef(orderRef || '交易取消/授權受限');
+      setSuccessOrderRef(orderRef || '交易取消/網關受限');
     } else if (success === 'true' && orderRef) {
       setIsSuccess(true);
       setIsFailed(false);
       setSuccessOrderRef(orderRef);
+
+      // 非同步調用後端，把 WeChat Pay / Alipay / 信用卡細節更新回財務單據
+      fetch('/api/paydollar/quick-verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderRef, payRef, payMethod })
+      })
+        .then(res => res.json())
+        .then(data => {
+          if (data.success) {
+            setPaidDetail(data.detail || '線上收款確認');
+          }
+        })
+        .catch(() => setPaidDetail('已收款 (付款渠道待同步)'));
     }
   }, [searchParams]);
 
+  // ==========================================
+  // D. 授權與快取操作
+  // ==========================================
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pinInput.trim()) return setAuthError('請輸入授權通行密碼');
@@ -185,7 +224,9 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
-  // 送出付款單據
+  // ==========================================
+  // E. 提交下單表單
+  // ==========================================
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
@@ -203,7 +244,8 @@ function SalesQuickPayContent() {
       });
 
       const data = await response.json();
-      
+
+      // 若後端拋回 401 授權過期，自動清除本地快取
       if (response.status === 401) {
         handleLockOut();
         throw new Error(data.error || '授權已過期，請輸入最新的公司銷售授權碼');
@@ -213,6 +255,7 @@ function SalesQuickPayContent() {
         throw new Error(data.error || '無法連接金流系統');
       }
 
+      // 動態建立隱藏 Form 轉跳往 PayDollar 安全閘道
       const { paymentPayload } = data;
       const form = document.createElement('form');
       form.method = 'POST';
@@ -236,7 +279,9 @@ function SalesQuickPayContent() {
     }
   };
 
-  // A. 鎖定：未授權輸入 PIN
+  // ==========================================
+  // 視圖 A：未登入授權面板
+  // ==========================================
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
@@ -258,7 +303,10 @@ function SalesQuickPayContent() {
                 required
                 placeholder="輸入通行金鑰 (PIN Code)"
                 value={pinInput}
-                onChange={e => { setPinInput(e.target.value); setAuthError(''); }}
+                onChange={e => {
+                  setPinInput(e.target.value);
+                  setAuthError('');
+                }}
                 className="w-full px-4 py-3.5 bg-slate-950 border border-slate-700 rounded-xl text-center text-lg font-mono font-bold tracking-widest text-white outline-none focus:border-blue-500 transition"
               />
               {authError && (
@@ -272,7 +320,7 @@ function SalesQuickPayContent() {
               解鎖並保持登入
             </button>
           </form>
-          
+
           <p className="text-[10px] text-slate-600 text-center">
             認證授權過期時間：30 天 | 僅限內部專員使用
           </p>
@@ -281,7 +329,9 @@ function SalesQuickPayContent() {
     );
   }
 
-  // B. 失敗：交易受限或手動取消 (不入帳隊列)
+  // ==========================================
+  // 視圖 B：付款失敗 / 網關拒絕
+  // ==========================================
   if (isFailed) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -301,7 +351,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
           <button
-            onClick={() => window.location.href = '/sales-pay'}
+            onClick={() => (window.location.href = '/sales-pay')}
             className="w-full py-4 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-2xl transition shadow-lg"
           >
             返回重新嘗試收款
@@ -311,7 +361,9 @@ function SalesQuickPayContent() {
     );
   }
 
-  // C. 成功：進入大系統隊列
+  // ==========================================
+  // 視圖 C：付款成功完結
+  // ==========================================
   if (isSuccess) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -324,12 +376,13 @@ function SalesQuickPayContent() {
             <p className="text-sm text-slate-400 mt-2">
               款項已安全入帳至大系統【現場待認領隊列】，公司財務中心可即時查閱對平。
             </p>
-            <div className="mt-4 p-3 bg-slate-900 rounded-xl font-mono text-xs text-emerald-400 border border-slate-700">
-              訂單編號: {successOrderRef}
+            <div className="mt-4 p-3 bg-slate-900 rounded-xl font-mono text-xs text-emerald-400 border border-slate-700 space-y-1">
+              <div>訂單編號: {successOrderRef}</div>
+              <div className="text-amber-400 font-bold">付款渠道: {paidDetail}</div>
             </div>
           </div>
           <button
-            onClick={() => window.location.href = '/sales-pay'}
+            onClick={() => (window.location.href = '/sales-pay')}
             className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-2xl transition shadow-lg"
           >
             返回下一筆收款
@@ -339,11 +392,13 @@ function SalesQuickPayContent() {
     );
   }
 
-  // D. 主體表單
+  // ==========================================
+  // 視圖 D：主體表單 (雙層過濾 + 智能推薦)
+  // ==========================================
   return (
     <div className="min-h-screen bg-slate-900 text-slate-100 py-10 px-4 font-sans flex justify-center">
       <div className="max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl">
-        
+        {/* 頂部標題 */}
         <div className="flex items-center justify-between border-b border-slate-700 pb-5 mb-6">
           <div>
             <span className="text-[10px] font-black tracking-widest text-orange-400 uppercase bg-orange-500/10 px-2.5 py-1 rounded-full border border-orange-500/20">
@@ -367,10 +422,11 @@ function SalesQuickPayContent() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          
-          {/* 1. 經辦銷售員 (整合人名自動聯想與自由手寫) */}
+          {/* 1. 經辦銷售員 (支持自由鍵入與歷史推薦) */}
           <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1">收款經辦銷售員 (自由鍵入或選取) *</label>
+            <label className="block text-xs font-bold text-slate-400 mb-1">
+              收款經辦銷售員 (自由鍵入或選取) *
+            </label>
             <input
               type="text"
               required
@@ -381,15 +437,21 @@ function SalesQuickPayContent() {
               className="w-full bg-slate-900 border border-slate-700 rounded-xl p-3 text-sm font-bold text-slate-200 outline-none focus:border-blue-500"
             />
             <datalist id="staff-suggestions">
-              {combinedStaffList.map(name => <option key={name} value={name} />)}
+              {combinedStaffList.map(name => (
+                <option key={name} value={name} />
+              ))}
             </datalist>
           </div>
 
-          {/* 2. 第一層：所屬大廈/樓盤 (已過濾 Test / 假樓盤) */}
+          {/* 2. 第一步：先挑選主大樓/物業 (已過濾 Test / 假樓盤) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>所屬大樓 / 盤源物業 *</span>
-              {dbLoading && <span className="text-blue-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> 載入中...</span>}
+              {dbLoading && (
+                <span className="text-blue-400 flex items-center gap-1">
+                  <Loader2 size={12} className="animate-spin" /> 載入中...
+                </span>
+              )}
             </label>
             <div className="relative">
               <Building2 className="absolute left-3 top-3.5 text-slate-500" size={18} />
@@ -399,7 +461,9 @@ function SalesQuickPayContent() {
                 onChange={e => handlePropertyChange(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-sm font-bold text-slate-200 outline-none focus:border-blue-500"
               >
-                <option value="" disabled>-- 步驟 1：請選擇主盤源大廈 --</option>
+                <option value="" disabled>
+                  -- 步驟 1：請選擇主盤源大廈 --
+                </option>
                 {properties.map(prop => (
                   <option key={prop.id} value={prop.id} className="font-bold py-1">
                     {prop.name}
@@ -409,7 +473,7 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 3. 第二層：意向單位 (由大廈二次過濾 + 🟢未出租強制排序至頂部) */}
+          {/* 3. 第二步：意向單位 (由大廈二次過濾 + 🟢未出租強制排序至頂部) */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">
               意向/承租單位 (🟢 未出租優先置頂) *
@@ -423,11 +487,16 @@ function SalesQuickPayContent() {
                 onChange={e => handleRoomChange(e.target.value)}
                 className="w-full pl-10 pr-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-sm font-bold text-slate-200 outline-none focus:border-blue-500 disabled:opacity-40"
               >
-                <option value="" disabled>-- 步驟 2：請先選上方大樓以篩選房間 --</option>
+                <option value="" disabled>
+                  -- 步驟 2：請先選上方大樓以篩選房間 --
+                </option>
                 {filteredSortedRooms.map(room => {
-                  const statusLabel = 
-                    room.status === 'Vacant' ? '🟢 未出租' : 
-                    room.status === 'Maintenance' ? '🟠 維修中' : '⚪ 已出租';
+                  const statusLabel =
+                    room.status === 'Vacant'
+                      ? '🟢 未出租'
+                      : room.status === 'Maintenance'
+                      ? '🟠 維修中'
+                      : '⚪ 已出租';
                   return (
                     <option key={room.id} value={room.id} className="font-bold py-1">
                       {statusLabel} | {room.name}
@@ -441,7 +510,9 @@ function SalesQuickPayContent() {
           {/* 4. 租客全名與電話 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">客戶/租客全名 *</label>
+              <label className="block text-xs font-bold text-slate-400 mb-1">
+                客戶/租客全名 *
+              </label>
               <div className="relative">
                 <User className="absolute left-3 top-3.5 text-slate-500" size={16} />
                 <input
@@ -455,7 +526,9 @@ function SalesQuickPayContent() {
               </div>
             </div>
             <div>
-              <label className="block text-xs font-bold text-slate-400 mb-1">聯絡電話 *</label>
+              <label className="block text-xs font-bold text-slate-400 mb-1">
+                聯絡電話 *
+              </label>
               <div className="relative">
                 <Phone className="absolute left-3 top-3.5 text-slate-500" size={16} />
                 <input
@@ -490,11 +563,14 @@ function SalesQuickPayContent() {
 
           {/* 6. 收款全額 */}
           <div>
-            <label className="block text-xs font-bold text-emerald-400 mb-1">收款金額 (HKD) *</label>
+            <label className="block text-xs font-bold text-emerald-400 mb-1">
+              收款金額 (HKD) *
+            </label>
             <div className="relative">
               <DollarSign className="absolute left-3 top-3.5 text-emerald-500" size={20} />
               <input
                 type="number"
+                step="0.01"
                 required
                 placeholder="0.00"
                 value={formData.amount}
@@ -506,7 +582,9 @@ function SalesQuickPayContent() {
 
           {/* 7. 款項用途 */}
           <div>
-            <label className="block text-xs font-bold text-slate-400 mb-1">款項用途 / 備註 *</label>
+            <label className="block text-xs font-bold text-slate-400 mb-1">
+              款項用途 / 備註 *
+            </label>
             <input
               type="text"
               required
@@ -517,6 +595,7 @@ function SalesQuickPayContent() {
             />
           </div>
 
+          {/* 提交按鈕 */}
           <div className="pt-4">
             <button
               type="submit"
@@ -536,21 +615,23 @@ function SalesQuickPayContent() {
               )}
             </button>
           </div>
-
         </form>
 
         <p className="text-center text-[11px] text-slate-500 mt-6">
           付款完成後，款項將由 PayDollar 安全驗證並列入大系統【現場暫收對帳隊列】
         </p>
-
       </div>
     </div>
   );
 }
 
+/**
+ * 2. 預設導出頁面模組：
+ * 通過 <Suspense> 包裝，解決 Next.js App Router 下 CSR Bailout 警告
+ */
 export default function SalesQuickPayPage() {
   return (
-    <Suspense 
+    <Suspense
       fallback={
         <div className="min-h-screen bg-slate-900 flex items-center justify-center">
           <Loader2 size={36} className="animate-spin text-blue-500" />
