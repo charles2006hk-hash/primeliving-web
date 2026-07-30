@@ -7,7 +7,9 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// 財務精確計算 (仙 Cents) 防範浮點數誤差
+// ============================================================================
+// 1. 財務會計工具與字符修復模組
+// ============================================================================
 const toCents = (num: number | string): number => Math.round((Number(num) || 0) * 100);
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
@@ -18,10 +20,40 @@ const toSafeDateStr = (val: any): string => {
   return new Date().toISOString().split('T')[0];
 };
 
+// ★ PayDollar 官方支付渠道代號翻譯字典
+const PAY_METHOD_MAP: Record<string, string> = {
+  'CC': '💳 信用卡 / Visa / Master',
+  'VISA': '💳 Visa 信用卡',
+  'MASTER': '💳 MasterCard 信用卡',
+  'ALIPAY': '📱 支付寶 (Alipay)',
+  'ALIPAYHK': '📱 支付寶香港 (AlipayHK)',
+  'WECHAT': '💬 微信支付 (WeChat Pay)',
+  'WECHATHK': '💬 微信支付香港 (WeChat HK)',
+  'FPS': '⚡ 轉數快 (FPS)',
+  'UNIONPAY': '🏦 銀聯卡 (UnionPay)',
+  'PAYPAL': '🅿️ PayPal',
+  'APPLEPAY': '🍎 Apple Pay',
+  'GOOGLEPAY': '🇬 Google Pay'
+};
+
+// 修復 PayDollar DataFeed ISO-8859-1 / Hex 傳遞時的繁體中文亂碼
+const fixChineseEncoding = (str: string | undefined): string => {
+  if (!str) return '';
+  try {
+    if (/%[0-9A-F]{2}/i.test(str)) return decodeURIComponent(str);
+    return Buffer.from(str, 'binary').toString('utf8');
+  } catch {
+    return str;
+  }
+};
+
 export async function OPTIONS() {
   return new NextResponse(null, { status: 200, headers: corsHeaders });
 }
 
+// ============================================================================
+// 2. POST 主處理核心：統一核銷入帳引擎
+// ============================================================================
 export async function POST(request: Request) {
   try {
     const body = await request.json();
@@ -31,16 +63,19 @@ export async function POST(request: Request) {
       tenantName, 
       fallbackAmount, 
       amount, 
-      billIds 
+      billIds,
+      payRef,           // PayDollar 官方交易流水號
+      payMethod,        // 支付渠道代碼 (e.g., CC, ALIPAYHK, WECHATHK)
+      paymentMethodDetail
     } = body;
 
     let finalTenantId = tenantId;
-    let finalTenantName = tenantName;
+    let finalTenantName = fixChineseEncoding(tenantName);
     let finalAmount = fallbackAmount || amount || 0;
     let finalBillIds = Array.isArray(billIds) ? billIds : [];
 
-    // ★ 核心修復：若前端頁面尚未載入完畢（導致金額為 0），自動回查 Firestore transactions 預存文件
-    if (orderRef && (!finalAmount || finalBillIds.length === 0)) {
+    // ★ 核心修復 1：自動反查 Firestore `transactions` 補齊缺失的訂單數據
+    if (orderRef && (!finalAmount || finalBillIds.length === 0 || !finalTenantName)) {
       const savedTransDoc = await adminDb.collection('transactions').doc(orderRef).get();
       if (savedTransDoc.exists) {
         const transData = savedTransDoc.data();
@@ -65,19 +100,29 @@ export async function POST(request: Request) {
     const batch = adminDb.batch();
 
     const safeOrderRef = orderRef || `ORD-${Date.now()}`;
-    const safeTenantName = finalTenantName || '租客';
+    const safeTenantName = finalTenantName || '租客 / 現場客戶';
 
-    // 1. 同步更新 [transactions] 與 [finances] 會計報表
-    const transactionData = {
+    // 翻譯正確的支付工具展示字串
+    const rawPayMethod = (payMethod || '').toUpperCase();
+    const humanPayMethod = paymentMethodDetail || PAY_METHOD_MAP[rawPayMethod] || `線上支付 (${rawPayMethod || 'PayDollar'})`;
+    const safePayRef = payRef || '網關確認';
+
+    // ========================================================================
+    // A. 寫入總會計報表與應收表單 [transactions] & [finances]
+    // ========================================================================
+    const transactionData: Record<string, any> = {
       orderRef: safeOrderRef,
       tenantId: finalTenantId || '',
       tenantName: safeTenantName,
-      title: `租金繳納 - ${safeTenantName} ($${fromCents(paidAmountCents).toLocaleString()})`,
+      title: `租金收款 - ${safeTenantName} ($${fromCents(paidAmountCents).toLocaleString()})`,
       amount: fromCents(paidAmountCents),
-      type: 'income',             // 標記為 income
+      type: 'income',
       category: '租金收款',
       paymentMethod: 'PayDollar',
+      paymentMethodDetail: humanPayMethod,  // ★ 紀錄真實的 WeChat/Alipay/信用卡
+      payRef: safePayRef,
       status: 'completed',
+      paymentStatus: 'Paid',
       dueDate: todayStr,
       completedDate: todayStr,
       updatedAt: nowIso
@@ -89,12 +134,27 @@ export async function POST(request: Request) {
     batch.set(transRef, transactionData, { merge: true });
     batch.set(financeRef, transactionData, { merge: true });
 
+    // ========================================================================
+    // B. 若為銷售現場快速收款 [quick_orders]，自動同步轉為已收且不影響租客結算
+    // ========================================================================
+    if (safeOrderRef.startsWith('SQP-') || safeOrderRef.startsWith('SALES-')) {
+      const quickOrderRef = adminDb.collection('quick_orders').doc(safeOrderRef);
+      batch.set(quickOrderRef, {
+        status: 'Completed',
+        paymentStatus: 'Paid',
+        paymentMethodDetail: humanPayMethod,
+        payRef: safePayRef,
+        paidAt: nowIso,
+        updatedAt: nowIso
+      }, { merge: true });
+    }
+
+    // ========================================================================
+    // C. 租客單據自動核銷與欠款抵扣引擎 (對帳平帳)
+    // ========================================================================
     let clearedDocIds: string[] = [];
 
-    // 2. 自動執行單據與欠款核銷引擎
     if (finalTenantId || finalBillIds.length > 0) {
-      
-      // 若無 tenantId，從第一個單據反查
       if (!finalTenantId && finalBillIds.length > 0) {
         const sampleDoc = await adminDb.collection('documents').doc(finalBillIds[0]).get();
         if (sampleDoc.exists) {
@@ -115,7 +175,7 @@ export async function POST(request: Request) {
 
         const targetDocsToClear: any[] = [];
 
-        // 【策略 A】：依據指定 billIds 進行核銷
+        // 策略 1：指定帳單直接核銷
         if (finalBillIds.length > 0) {
           allTenantDocs.forEach(item => {
             if (finalBillIds.includes(item.id)) {
@@ -124,7 +184,7 @@ export async function POST(request: Request) {
           });
         }
 
-        // 【策略 B】：FIFO 到期日舊至新自動抵扣
+        // 策略 2：FIFO (最久未付帳單優先抵扣)
         if (targetDocsToClear.length === 0) {
           const unpaidDocs = allTenantDocs.filter(item => {
             const pStatus = item.data.paymentStatus;
@@ -147,18 +207,19 @@ export async function POST(request: Request) {
           }
         }
 
-        // 3. 更新目標單據為 Paid / Completed
+        // 更新帳單為 Paid
         targetDocsToClear.forEach(item => {
           batch.update(item.ref, {
             paymentStatus: 'Paid',
             status: 'Completed',
+            paidMethodDetail: humanPayMethod,
             paidAt: nowIso,
             updatedAt: nowIso
           });
           clearedDocIds.push(item.id);
         });
 
-        // 4. 重新結算租客 [tenants] 剩餘 amountDue
+        // 結算該名租客剩餘金額 amountDue
         const remainingUnpaidDocs = allTenantDocs.filter(item => {
           const isTargetCleared = targetDocsToClear.some(tc => tc.id === item.id);
           const isAlreadyPaid = item.data.paymentStatus === 'Paid' || item.data.status === 'Completed';
@@ -186,9 +247,10 @@ export async function POST(request: Request) {
       success: true,
       orderRef: safeOrderRef,
       tenantId: finalTenantId,
+      payMethod: humanPayMethod,
       clearedBillCount: clearedDocIds.length,
       clearedDocIds,
-      message: `自動核銷成功！已完成 ${clearedDocIds.length} 張單據平帳並更新租客欠款。`
+      message: `自動核銷成功！(${humanPayMethod}) 已完成 ${clearedDocIds.length} 張單據平帳。`
     }, { status: 200, headers: corsHeaders });
 
   } catch (error: any) {
