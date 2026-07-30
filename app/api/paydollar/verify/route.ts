@@ -20,7 +20,6 @@ const toSafeDateStr = (val: any): string => {
   return new Date().toISOString().split('T')[0];
 };
 
-// ★ PayDollar 官方支付渠道代號翻譯字典
 const PAY_METHOD_MAP: Record<string, string> = {
   'CC': '💳 信用卡 / Visa / Master',
   'VISA': '💳 Visa 信用卡',
@@ -36,7 +35,6 @@ const PAY_METHOD_MAP: Record<string, string> = {
   'GOOGLEPAY': '🇬 Google Pay'
 };
 
-// 修復 PayDollar DataFeed ISO-8859-1 / Hex 傳遞時的繁體中文亂碼
 const fixChineseEncoding = (str: string | undefined): string => {
   if (!str) return '';
   try {
@@ -64,8 +62,8 @@ export async function POST(request: Request) {
       fallbackAmount, 
       amount, 
       billIds,
-      payRef,           // PayDollar 官方交易流水號
-      payMethod,        // 支付渠道代碼 (e.g., CC, ALIPAYHK, WECHATHK)
+      payRef,
+      payMethod,
       paymentMethodDetail
     } = body;
 
@@ -74,11 +72,19 @@ export async function POST(request: Request) {
     let finalAmount = fallbackAmount || amount || 0;
     let finalBillIds = Array.isArray(billIds) ? billIds : [];
 
-    // ★ 核心修復 1：自動反查 Firestore `transactions` 補齊缺失的訂單數據
+    // 1. 自動反查 Firestore `transactions` 補齊缺失的訂單數據
     if (orderRef && (!finalAmount || finalBillIds.length === 0 || !finalTenantName)) {
       const savedTransDoc = await adminDb.collection('transactions').doc(orderRef).get();
       if (savedTransDoc.exists) {
         const transData = savedTransDoc.data();
+        // ★ 重複入帳防呆：若此筆交易早已經是 Completed / Paid 狀態，直接返回成功，避免重新扣減應收款導致負數
+        if (transData?.paymentStatus === 'Paid' || transData?.status === 'Completed') {
+          return NextResponse.json({
+            success: true,
+            orderRef,
+            message: '單據此前已成功平帳，忽略重複扣減。'
+          }, { status: 200, headers: corsHeaders });
+        }
         if (!finalAmount) finalAmount = transData?.amount || 0;
         if (finalBillIds.length === 0) finalBillIds = transData?.billIds || [];
         if (!finalTenantId) finalTenantId = transData?.tenantId || '';
@@ -87,7 +93,6 @@ export async function POST(request: Request) {
     }
 
     const paidAmountCents = toCents(finalAmount);
-    
     if (paidAmountCents <= 0 && finalBillIds.length === 0) {
       return NextResponse.json(
         { success: false, error: '缺少有效的交易金額或帳單 ID' },
@@ -102,14 +107,11 @@ export async function POST(request: Request) {
     const safeOrderRef = orderRef || `ORD-${Date.now()}`;
     const safeTenantName = finalTenantName || '租客 / 現場客戶';
 
-    // 翻譯正確的支付工具展示字串
     const rawPayMethod = (payMethod || '').toUpperCase();
     const humanPayMethod = paymentMethodDetail || PAY_METHOD_MAP[rawPayMethod] || `線上支付 (${rawPayMethod || 'PayDollar'})`;
     const safePayRef = payRef || '網關確認';
 
-    // ========================================================================
     // A. 寫入總會計報表與應收表單 [transactions] & [finances]
-    // ========================================================================
     const transactionData: Record<string, any> = {
       orderRef: safeOrderRef,
       tenantId: finalTenantId || '',
@@ -119,9 +121,9 @@ export async function POST(request: Request) {
       type: 'income',
       category: '租金收款',
       paymentMethod: 'PayDollar',
-      paymentMethodDetail: humanPayMethod,  // ★ 紀錄真實的 WeChat/Alipay/信用卡
+      paymentMethodDetail: humanPayMethod,
       payRef: safePayRef,
-      status: 'completed',
+      status: 'Completed',
       paymentStatus: 'Paid',
       dueDate: todayStr,
       completedDate: todayStr,
@@ -134,9 +136,7 @@ export async function POST(request: Request) {
     batch.set(transRef, transactionData, { merge: true });
     batch.set(financeRef, transactionData, { merge: true });
 
-    // ========================================================================
-    // B. 若為銷售現場快速收款 [quick_orders]，自動同步轉為已收且不影響租客結算
-    // ========================================================================
+    // B. 現場快速收款 [quick_orders] 對齊
     if (safeOrderRef.startsWith('SQP-') || safeOrderRef.startsWith('SALES-')) {
       const quickOrderRef = adminDb.collection('quick_orders').doc(safeOrderRef);
       batch.set(quickOrderRef, {
@@ -149,9 +149,7 @@ export async function POST(request: Request) {
       }, { merge: true });
     }
 
-    // ========================================================================
     // C. 租客單據自動核銷與欠款抵扣引擎 (對帳平帳)
-    // ========================================================================
     let clearedDocIds: string[] = [];
 
     if (finalTenantId || finalBillIds.length > 0) {
