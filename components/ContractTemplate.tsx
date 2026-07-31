@@ -31,13 +31,9 @@ interface ContractTemplateProps {
   isSigningMode?: boolean;
   onSignComplete?: (signatureBase64: string) => Promise<void>;
   isSigningLoading?: boolean;
-  // ★ 新增：公司印章控制與自訂路徑
   showStamp?: boolean;
   stampUrl?: string;
 }
-
-// 財務精確運算防護
-const safeAdd = (a: number, b: number) => Math.round((a + b) * 100) / 100;
 
 // 香港傳統公司原子章藍墨水濾鏡
 const BLUE_STAMP_FILTER = 'invert(24%) sepia(98%) saturate(1834%) hue-rotate(202deg) brightness(94%) contrast(101%)';
@@ -122,14 +118,25 @@ export default function ContractTemplate({
   const isImageSignature = data.tenantSignature?.startsWith('data:image');
 
   return (
-    <div className="w-[794px] min-h-[1123px] bg-white px-[60px] py-[48px] text-slate-900 font-sans relative shadow-lg origin-top mx-auto select-none">
+    <div className="w-[794px] min-h-[1123px] bg-white px-[60px] py-[48px] text-slate-900 font-sans relative shadow-lg origin-top mx-auto select-none" style={{ boxSizing: 'border-box' }}>
       
-      {/* --- Header：官方雙語抬頭 --- */}
-      <div className="flex flex-col items-center border-b-[3px] border-slate-900 pb-4 mb-6">
-        <h1 className="text-xl font-bold tracking-widest text-slate-800">香港佳寓物業管理有限公司</h1>
-        <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">PRIME LIVING PROPERTY (HK) MANAGEMENT LIMITED</p>
-        <h2 className="text-2xl font-black tracking-widest text-slate-900 mt-3">TENANCY AGREEMENT</h2>
-        <p className="text-sm font-bold tracking-[0.5em] text-slate-600">租 賃 合 約 (Licence Agreement)</p>
+      {/* =========================================================================
+          ★ 修正：公司官方 Letterhead 抬頭 (與收據/帳單 100% 視覺統一)
+          ========================================================================= */}
+      <div className="flex flex-col items-center border-b-[3px] border-slate-800 pb-4 mb-6">
+        <img 
+          src="/PrimelivingLetterhead.jpg" 
+          alt="Prime Living Letterhead" 
+          className="h-16 object-contain mb-2" 
+          onError={(e) => { 
+            e.currentTarget.style.display = 'none'; 
+          }}
+        />
+        <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">
+          地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com
+        </div>
+        <h2 className="text-2xl font-black tracking-widest text-slate-900 mt-4">TENANCY AGREEMENT</h2>
+        <p className="text-sm font-bold tracking-[0.5em] text-slate-600 mt-0.5">租 賃 合 約 (Licence Agreement)</p>
       </div>
 
       {/* --- 雙方基本資料 --- */}
@@ -212,7 +219,7 @@ export default function ContractTemplate({
       </div>
 
       {/* =========================================================================
-          ★ 修正：公司簽章與租客簽名展示區 (只渲染唯一印章圖片並使用藍墨濾鏡)
+          公司簽章與租客簽名展示區 (支持外部藍色原子印與觸控手簽同步)
           ========================================================================= */}
       <div className="grid grid-cols-2 gap-12 pt-6 border-t-2 border-slate-800 text-center relative">
         
@@ -260,7 +267,7 @@ export default function ContractTemplate({
         </div>
       </div>
 
-      {/* --- HTML5 Touch Canvas 手寫板 (簽署模式顯示) --- */}
+      {/* --- HTML5 Touch Canvas 手寫板 (手機下手簽模式專用) --- */}
       {isSigningMode && (
         <div className="mt-8 pt-6 border-t-2 border-dashed border-slate-300 bg-slate-50 p-4 rounded-xl">
           <div className="flex justify-between items-center mb-2">
