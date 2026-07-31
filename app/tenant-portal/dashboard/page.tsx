@@ -12,6 +12,8 @@ import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query,
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
+// ★ 1. 引入與大系統相同的合約模板
+import ContractTemplate, { ContractData } from '@/components/ContractTemplate';
 
 // 財務精確計算 (單位：分 Cents) - 避免 JS 浮點數誤差
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
@@ -113,6 +115,7 @@ function DashboardContent() {
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
         isContractSigned: data.isContractSigned || !!data.signature, 
         signature: data.signature || '', 
+        signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
         roomId: data.roomId || '', 
         roomName: data.roomName || data.roomId || '', 
@@ -148,7 +151,7 @@ function DashboardContent() {
     return () => { unsubTenant(); unsubDocs(); unsubInq(); };
   }, [router]);
 
-  // ★ 自動預選：當監聽到帳單資料時，將未來 30 天內即將到期的帳單自動納入預設勾選
+  // ★ 自動預選：未來 30 天內到期單據
   useEffect(() => {
     if (tenantDocs.length > 0) {
       const today = new Date();
@@ -176,7 +179,6 @@ function DashboardContent() {
         const dueDate = new Date(dueDateStr);
         dueDate.setHours(0, 0, 0, 0);
 
-        // 如果到期日落在「明天～30天內」，自動勾選
         if (dueDate > today && dueDate <= thirtyDaysLater) {
           autoSelectIds.push(item.id);
         }
@@ -186,7 +188,6 @@ function DashboardContent() {
     }
   }, [tenantDocs]);
 
-  // ★ 核心業務邏輯：帳單統計與 30 天內提早繳費運算引擎
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -195,7 +196,6 @@ function DashboardContent() {
     thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
     thirtyDaysLater.setHours(23, 59, 59, 999);
 
-    // 寬鬆抓取所有未核銷帳單（排除已完成與審核中）
     const pendingDocs = tenantDocs.filter(d => {
       const isPaid = d.status === 'Completed' || d.status === 'Paid' || d.paymentStatus === 'Paid';
       const isReview = d.paymentStatus === 'Under Review';
@@ -234,10 +234,7 @@ function DashboardContent() {
 
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    // 1. 本期應繳項目（逾期或今天到期）
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
-    
-    // 2. 未來 30 天內即將到期項目（可選提早預繳，預設已全選）
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
     const mandatoryCents = mandatoryItems.reduce((sum, b) => sum + b.amountCents, 0);
@@ -271,52 +268,51 @@ function DashboardContent() {
   useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   const verifyPayDollarPayment = async (orderRef: string) => {
-  setIsVerifying(true);
-  try {
-    const payingBillIds = [
-      ...billingSummary.mandatoryItems.map(b => b.id),
-      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
-    ];
+    setIsVerifying(true);
+    try {
+      const payingBillIds = [
+        ...billingSummary.mandatoryItems.map(b => b.id),
+        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
+      ];
 
-    const exactPayingTotal = [
-      ...billingSummary.mandatoryItems,
-      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
-    ].reduce((sum, b) => sum + b.amount, 0);
+      const exactPayingTotal = [
+        ...billingSummary.mandatoryItems,
+        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
+      ].reduce((sum, b) => sum + b.amount, 0);
 
-    // ★ 傳遞 orderRef；若前端金額為 0，傳送 undefined 觸發後端 Firestore 自動回查
-    const response = await fetch('/api/paydollar/verify', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ 
-        orderRef,
-        tenantId: tenantData?.id,
-        tenantName: tenantData?.name,
-        roomInfo: tenantData?.roomInfo,
-        fallbackAmount: exactPayingTotal > 0 ? exactPayingTotal : undefined,
-        billIds: payingBillIds.length > 0 ? payingBillIds : undefined
-      }),
-    });
+      const response = await fetch('/api/paydollar/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          orderRef,
+          tenantId: tenantData?.id,
+          tenantName: tenantData?.name,
+          roomInfo: tenantData?.roomInfo,
+          fallbackAmount: exactPayingTotal > 0 ? exactPayingTotal : undefined,
+          billIds: payingBillIds.length > 0 ? payingBillIds : undefined
+        }),
+      });
 
-    const data = await response.json();
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || '無法完成核銷手續');
+      const data = await response.json();
+      if (!response.ok || !data.success) {
+        throw new Error(data.error || '無法完成核銷手續');
+      }
+
+      setSelectedOptionalBillIds([]);
+
+      if (typeof window !== 'undefined') {
+        window.history.replaceState(null, '', '/tenant-portal/dashboard');
+      }
+
+      alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
+    } catch (error: any) {
+      console.error("[Verification Error]:", error);
+      alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
+      router.replace('/tenant-portal/dashboard');
+    } finally {
+      setIsVerifying(false);
     }
-
-    setSelectedOptionalBillIds([]);
-
-    if (typeof window !== 'undefined') {
-      window.history.replaceState(null, '', '/tenant-portal/dashboard');
-    }
-
-    alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
-  } catch (error: any) {
-    console.error("[Verification Error]:", error);
-    alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
-    router.replace('/tenant-portal/dashboard');
-  } finally {
-    setIsVerifying(false);
-  }
-};
+  };
 
   useEffect(() => { 
     const orderRef = searchParams?.get('orderRef'); 
@@ -444,17 +440,6 @@ function DashboardContent() {
     }
   };
 
-  const handleSignLease = async () => {
-    if (!signature.trim()) return alert("請輸入您的法定全名作為電子簽名！");
-    if (!latestLease) return alert("找不到合約檔案！");
-    setIsSigning(true);
-    try {
-      await updateDoc(doc(db, 'tenants', tenantData.id), { signature: signature, signedAt: serverTimestamp(), isContractSigned: true, status: 'Active' });
-      await updateDoc(doc(db, 'documents', latestLease.id), { 'formData.tenantSignature': signature, 'formData.signedAt': new Date().toISOString() });
-      alert("✅ 電子合約簽署成功，具有完整法律效力。");
-    } catch (error) { alert("簽署失敗"); } finally { setIsSigning(false); }
-  };
-
   const handleDownloadPDF = async () => {
     if (!contractRef.current) return;
     const htmlToImage = (window as any).htmlToImage;
@@ -529,8 +514,74 @@ function DashboardContent() {
     return fullAddr.replace(new RegExp(`^${shortName}\\s*`, 'i'), '').trim();
   };
 
+  // ★ 2. 將單據渲染分流：若是 Lease (租約)，交由 ContractTemplate；其它財務單據維持既有排版
   const renderA4Document = (docData: any, isSigningMode = false) => {
     if (!docData) return null;
+
+    // ★ 條件分支：如果為租賃合約，直接使用同一份 ContractTemplate
+    if (docData.type === 'Lease') {
+      const fd = docData.formData || {};
+      const rent = Number(fd.monthlyRent) || 0;
+      const dep = Number(fd.deposit) || 0;
+
+      return (
+        <div ref={isSigningMode ? contractRef : undefined} className="w-[794px] bg-white text-slate-900 font-sans relative shadow-lg origin-top mx-auto">
+          <ContractTemplate
+            data={{
+              tenantName: fd.tenantName || tenantData.name || '未填寫租客',
+              tenantPhone: fd.tenantPhone || tenantData.phone || '未提供',
+              tenantIdNumber: fd.tenantIdNumber || tenantData.identityNumber || '未提供',
+              propertyAddress: fd.propertyAddress || tenantData.propertyName || '',
+              roomName: fd.roomName || tenantData.roomName || '',
+              leaseStart: fd.leaseStart || tenantData.leaseStart || '',
+              leaseEnd: fd.leaseEnd || tenantData.leaseEnd || '',
+              monthlyRent: rent,
+              securityDeposit: dep,
+              paymentSchedule: fd.paymentSchedule,
+              tenantSignature: fd.tenantSignature || tenantData.signature,
+              signedAt: fd.signedAt || tenantData.signedAt
+            }}
+            isSigningMode={isSigningMode && !tenantData.isContractSigned}
+            isSigningLoading={isSigning}
+            showStamp={true}
+            onSignComplete={async (signatureBase64) => {
+              setIsSigning(true);
+              try {
+                const todayStr = new Date().toISOString().split('T')[0];
+                
+                // 更新 tenant 表 (保存 Base64 PNG 手寫圖)
+                await updateDoc(doc(db, 'tenants', tenantData.id), {
+                  signature: signatureBase64,
+                  signedAt: todayStr,
+                  isContractSigned: true,
+                  status: 'Active',
+                  updatedAt: serverTimestamp()
+                });
+
+                // 更新 document 單據狀態
+                if (latestLease?.id) {
+                  await updateDoc(doc(db, 'documents', latestLease.id), {
+                    'formData.tenantSignature': signatureBase64,
+                    'formData.signedAt': todayStr,
+                    status: 'Signed',
+                    updatedAt: serverTimestamp()
+                  });
+                }
+
+                alert("✅ 合約手寫簽署成功！此法定簽名筆跡已同步至您的專屬後台。");
+              } catch (error) {
+                console.error('[Sign Error]:', error);
+                alert("❌ 簽署失敗，請檢查網路狀態或稍後再試。");
+              } finally {
+                setIsSigning(false);
+              }
+            }}
+          />
+        </div>
+      );
+    }
+
+    // --- 以下維持收據 (Receipt)、對數單 (Statement) 與 退租單 (Termination) 的商業排版 ---
     const fd = docData.formData || {};
     const items = docData.items || [];
     const baseRent = Number(fd.monthlyRent) || 0;
@@ -545,7 +596,6 @@ function DashboardContent() {
 
     return (
       <div 
-        ref={isSigningMode ? contractRef : undefined} 
         className="w-[794px] h-[1123px] bg-white px-[75px] py-[56px] text-slate-900 font-sans relative shadow-lg origin-top mx-auto"
         style={{ boxSizing: 'border-box' }}
       >
@@ -555,8 +605,8 @@ function DashboardContent() {
         </div>
         
         <div className="text-right mb-6">
-          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Lease' ? 'TENANCY AGREEMENT' : docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
-          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Lease' ? '租 賃 合 約' : docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
+          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
+          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
           <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
         </div>
         
@@ -590,22 +640,6 @@ function DashboardContent() {
             </tbody>
           </table>
         </div>
-
-        {docData.type === 'Lease' && (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Financial Terms (財務條款)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300 table-fixed">
-              <tbody>
-                <tr>
-                  <td className="border border-slate-300 p-3 font-bold w-1/4">Monthly Rent<br/><span className="text-[10px] text-slate-500 font-normal">每月租金</span></td>
-                  <td className="border border-slate-300 p-3 font-mono font-bold text-lg w-1/4 break-words">{formatCurrencyStr(baseRent)}</td>
-                  <td className="border border-slate-300 p-3 font-bold w-1/4">Security Deposit<br/><span className="text-[10px] text-slate-500 font-normal">押金</span></td>
-                  <td className="border border-slate-300 p-3 font-mono font-bold w-1/4 break-words">{formatCurrencyStr(deposit)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        )}
 
         {docData.type === 'Statement' ? (
           <div className="mb-6">
@@ -644,13 +678,6 @@ function DashboardContent() {
         ) : null}
 
         {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
-        
-        {docData.type === 'Lease' && (
-          <div className="mb-8 text-[10px] text-justify text-slate-600 space-y-2 border-t border-slate-300 pt-4">
-            <p>1. The Tenant agrees to pay the rent in advance on the 1st day of each calendar month.<br/>租客同意於每月1號預繳該月租金。</p>
-            <p>2. The Security Deposit shall be refunded to the Tenant without interest within 14 days after termination.<br/>於合約終止後14天內，在扣除任何損壞賠償或欠款後，押金將無息退還予租客。</p>
-          </div>
-        )}
 
         <div className="absolute bottom-[60px] left-[75px] right-[75px] grid grid-cols-2 gap-16">
            <div className="border-t border-slate-800 text-center relative pt-2">
@@ -664,7 +691,7 @@ function DashboardContent() {
            </div>
 
            <div className="border-t border-slate-800 text-center relative pt-2">
-             {activeTenantSignature && docData.type === 'Lease' && (
+             {activeTenantSignature && (
                <div className="absolute bottom-[100%] left-0 w-full text-center z-20 print:opacity-100 opacity-80 mb-[-12px] pointer-events-none">
                  <p className="text-[40px] text-slate-800 leading-none whitespace-nowrap" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>
                    {activeTenantSignature}
@@ -1041,6 +1068,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* ★ 2. 核心修正：將合約瀏覽 modal 切換成同一份 ContractTemplate */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full sm:max-w-[1000px] rounded-t-[2.5rem] sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -1052,7 +1080,7 @@ function DashboardContent() {
             <div className="flex-1 overflow-y-auto flex flex-col md:flex-row">
               <div className="flex-1 bg-slate-200 flex justify-center py-8 overflow-y-auto custom-scrollbar relative">
                 {latestLease ? (
-                  <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-[1123px] w-[794px]">
+                  <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-max pb-12">
                      {renderA4Document(latestLease, true)}
                   </div>
                 ) : (
@@ -1075,17 +1103,18 @@ function DashboardContent() {
                     </div>
                   ) : (
                     <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-black text-slate-800 mb-2 flex items-center"><FileSignature size={16} className="mr-1.5 text-purple-600"/> 請輸入您的法定全名作為電子簽名：</label>
-                        <input type="text" placeholder="e.g. Chan Tai Man" value={signature} onChange={(e) => setSignature(e.target.value)} className="w-full p-4 border-2 border-slate-200 rounded-xl text-2xl outline-none focus:border-purple-500 transition-colors text-center" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }} />
+                      <div className="bg-purple-50 p-4 rounded-xl border border-purple-100">
+                        <p className="text-xs font-black text-purple-900 mb-1 flex items-center">
+                          <FileSignature size={16} className="mr-1.5 text-purple-600"/> 手寫觸控電子簽名
+                        </p>
+                        <p className="text-[11px] text-purple-700 leading-normal">
+                          請於左側（手機可滑動）合約底部的簽署面板完成親筆簽署。
+                        </p>
                       </div>
                       <label className="flex items-start gap-3 cursor-pointer p-3 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors">
                         <input type="checkbox" className="mt-1 w-4 h-4 accent-purple-600 cursor-pointer" required/>
-                        <span className="text-[10px] text-slate-600 leading-relaxed font-bold">本人確認上述簽名由本人親自輸入，並同意以電子方式簽署此文件。</span>
+                        <span className="text-[10px] text-slate-600 leading-relaxed font-bold">本人確認並同意以此親筆筆跡進行電子形式簽署，具有香港法律完整約束力。</span>
                       </label>
-                      <button onClick={handleSignLease} disabled={isSigning || !signature} className="w-full py-4 bg-purple-600 text-white rounded-xl font-black text-sm flex items-center justify-center gap-2 hover:bg-purple-700 shadow-md disabled:opacity-50 disabled:cursor-not-allowed">
-                        {isSigning ? <><Loader2 size={18} className="animate-spin"/> 處理中...</> : '確認並以電子簽署'}
-                      </button>
                     </div>
                   )}
                 </div>
