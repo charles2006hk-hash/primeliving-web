@@ -6,12 +6,14 @@ const toCents = (num: number | string): number => Math.round((Number(num) || 0) 
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
 const PAY_METHOD_MAP: Record<string, string> = {
-  'CC': '💳 信用卡 (Visa/Master)',
+  'CC': '💳 信用卡 / Visa / Master',
   'VISA': '💳 Visa 信用卡',
   'MASTER': '💳 MasterCard 信用卡',
   'ALIPAY': '📱 支付寶 (Alipay)',
+  'ALIPAYONL': '📱 支付寶線上 (Alipay)', // ★ 擴充補漏
   'ALIPAYHK': '📱 支付寶香港 (AlipayHK)',
   'WECHAT': '💬 微信支付 (WeChat Pay)',
+  'WECHATONL': '💬 微信支付 (WeChat Pay)', // ★ 擴充補漏 (對應截圖)
   'WECHATHK': '💬 微信支付香港 (WeChat HK)',
   'FPS': '⚡ 轉數快 (FPS)',
   'UNIONPAY': '🏦 銀聯卡 (UnionPay)',
