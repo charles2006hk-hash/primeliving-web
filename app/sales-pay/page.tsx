@@ -3,7 +3,8 @@
 import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
-  Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check
+  Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check,
+  Download, Share // ★ 新增下載與分享圖示
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 // ★ 引入 Firebase 實時監聽工具
@@ -34,10 +35,11 @@ function SalesQuickPayContent() {
   const [successOrderRef, setSuccessOrderRef] = useState('');
   const [paidDetail, setPaidDetail] = useState('核實支付渠道中...');
   
-  // ★ 新增：QR Code 與付款連結狀態
+  // ★ QR Code 與付款連結狀態
   const [payUrl, setPayUrl] = useState('');
   const [pendingOrderRef, setPendingOrderRef] = useState('');
   const [copied, setCopied] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // 授權金鑰狀態
   const [isAuthorized, setIsAuthorized] = useState(false);
@@ -198,25 +200,23 @@ function SalesQuickPayContent() {
     }
   }, [searchParams]);
 
-  // ★ D. Firebase 實時監聽魔法：租客掃碼付款後，自動切換至成功畫面
+  // D. Firebase 實時監聽魔法：租客掃碼付款後，自動切換至成功畫面
   useEffect(() => {
     if (!pendingOrderRef || !db) return;
 
-    // 監聽 quick_orders 集合中的這筆訂單
     const unsub = onSnapshot(doc(db, 'quick_orders', pendingOrderRef), (snapshot) => {
       if (snapshot.exists()) {
         const data = snapshot.data();
-        // 當 Webhook 將狀態改為 Paid 時，自動觸發成功畫面
         if (data.paymentStatus === 'Paid') {
           setIsSuccess(true);
           setSuccessOrderRef(pendingOrderRef);
           setPaidDetail(data.paymentMethodDetail || '線上支付');
-          setPayUrl(''); // 關閉 QR 畫面
+          setPayUrl(''); 
         }
       }
     });
 
-    return () => unsub(); // 清除監聽器
+    return () => unsub(); 
   }, [pendingOrderRef]);
 
   const handleUnlock = (e: React.FormEvent) => {
@@ -244,7 +244,6 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
-  // 提交開單表單並生成 QR Code
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
@@ -274,7 +273,6 @@ function SalesQuickPayContent() {
 
       const { paymentPayload, orderRef } = data;
       
-      // ★ 將 PayDollar 參數組裝成 GET URL (不再強制跳轉瀏覽器)
       const params = new URLSearchParams();
       Object.entries(paymentPayload).forEach(([key, value]) => {
         if (key !== 'endpoint' && value !== undefined && value !== null) {
@@ -284,7 +282,6 @@ function SalesQuickPayContent() {
       
       const gatewayUrl = `${paymentPayload.endpoint}?${params.toString()}`;
       
-      // 顯示 QR Code 畫面並開始監聽資料庫
       setPayUrl(gatewayUrl);
       setPendingOrderRef(orderRef);
 
@@ -295,6 +292,9 @@ function SalesQuickPayContent() {
     }
   };
 
+  // ==========================================
+  // ★ 新增：分享與下載 QR Code 邏輯
+  // ==========================================
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(payUrl);
@@ -302,6 +302,44 @@ function SalesQuickPayContent() {
       setTimeout(() => setCopied(false), 2000);
     } catch (err) {
       alert("複製失敗，請手動全選連結複製");
+    }
+  };
+
+  const handleNativeShare = async () => {
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: `Prime Living 租金付款單`,
+          text: `您的專屬繳費連結，應付金額 HKD $${pricingSummary.total} (支援微信/支付寶/信用卡)：\n`,
+          url: payUrl,
+        });
+      } catch (err) {
+        console.log('分享取消或發生錯誤', err);
+      }
+    } else {
+      handleCopyLink(); // 若不支援原生分享 (如電腦端) 則降級為複製連結
+    }
+  };
+
+  const handleDownloadQr = async () => {
+    setIsDownloading(true);
+    try {
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&margin=20&data=${encodeURIComponent(payUrl)}`;
+      const response = await fetch(qrUrl);
+      const blob = await response.blob();
+      const blobUrl = window.URL.createObjectURL(blob);
+      
+      const a = document.createElement('a');
+      a.style.display = 'none';
+      a.href = blobUrl;
+      a.download = `PrimeLiving_Payment_${pendingOrderRef}.png`;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(blobUrl);
+    } catch (err) {
+      alert("下載失敗，請嘗試直接長按上方二維碼並選擇「儲存圖片」");
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -401,12 +439,12 @@ function SalesQuickPayContent() {
     );
   }
 
-  // ★ 視圖 E：待付款 QR Code 畫面
+  // 視圖 E：待付款 QR Code 畫面 (加入下載與分享功能)
   if (payUrl) {
     const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(payUrl)}`;
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 font-sans">
-        <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-8 shadow-2xl space-y-6 relative overflow-hidden">
+        <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 relative overflow-hidden">
           {/* 掃描掃描雷達動畫 */}
           <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-[scan_2s_ease-in-out_infinite]" />
 
@@ -426,26 +464,39 @@ function SalesQuickPayContent() {
             <p className="text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
 
-          <div className="space-y-3 pt-4 border-t border-slate-700">
-            <div className="flex items-center gap-2">
-              <button 
-                onClick={handleCopyLink} 
-                className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition"
-              >
-                {copied ? <Check size={18} className="text-emerald-400"/> : <Copy size={18} />}
-                {copied ? '已複製連結' : '複製連結傳送 (WhatsApp)'}
-              </button>
-            </div>
-            
+          {/* ★ 操作按鈕群組：分享、下載、拷貝 */}
+          <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-700">
             <button 
-              onClick={() => { setPayUrl(''); setPendingOrderRef(''); }}
-              className="w-full py-3 bg-transparent hover:bg-slate-700/50 text-slate-400 font-bold rounded-xl text-sm transition"
+              onClick={handleNativeShare} 
+              className="py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
             >
-              取消並返回表單
+              <Share size={16} /> 發送至微信/WA
+            </button>
+            <button 
+              onClick={handleDownloadQr} 
+              disabled={isDownloading}
+              className="py-3 bg-slate-700 hover:bg-slate-600 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition disabled:opacity-50"
+            >
+              {isDownloading ? <Loader2 size={16} className="animate-spin" /> : <Download size={16} />}
+              下載二維碼
+            </button>
+            <button 
+              onClick={handleCopyLink} 
+              className="col-span-2 py-3 bg-slate-700/50 hover:bg-slate-600/50 text-slate-300 font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition border border-slate-600"
+            >
+              {copied ? <Check size={16} className="text-emerald-400"/> : <Copy size={16} />}
+              {copied ? '已複製專屬付款網址' : '複製純文字付款網址'}
             </button>
           </div>
+          
+          <button 
+            onClick={() => { setPayUrl(''); setPendingOrderRef(''); }}
+            className="w-full pt-2 text-slate-500 hover:text-slate-300 font-bold text-xs transition underline underline-offset-4"
+          >
+            取消並返回表單
+          </button>
 
-          <p className="text-center text-xs text-slate-500 font-bold animate-pulse flex items-center justify-center gap-1.5 mt-4">
+          <p className="text-center text-xs text-slate-500 font-bold animate-pulse flex items-center justify-center gap-1.5 mt-2">
             <Loader2 size={14} className="animate-spin" />
             正在等待租客付款，完成後將自動跳轉...
           </p>
