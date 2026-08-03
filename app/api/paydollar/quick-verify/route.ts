@@ -34,7 +34,6 @@ export async function POST(request: Request) {
       return NextResponse.json({ success: false, error: '缺少單據參考號' }, { status: 400, headers: corsHeaders });
     }
 
-    // 1. ★ 安全增禦：驗證由銷售終端發出的 PIN 或 API 通行金鑰，避免被惡意 API 偽造核銷
     const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
     if (passcode && passcode !== validPin) {
       return NextResponse.json({ success: false, error: '⛔ 授權無效：無核銷權限' }, { status: 401, headers: corsHeaders });
@@ -44,24 +43,33 @@ export async function POST(request: Request) {
     const humanPayMethod = PAY_METHOD_MAP[cleanMethod] || `外部渠道 (${cleanMethod || '卡支付'})`;
     const nowIso = new Date().toISOString();
 
-    const updatePayload = {
+    // ★ 核心修復：動態建立 Payload，如果前端沒拿到 payRef，絕對不要設為 'N/A' 去覆寫 Webhook 的數據！
+    const updatePayload: any = {
       status: 'Completed',
       paymentStatus: 'Paid',
-      payRef: payRef || 'N/A',
-      paymentMethodDetail: humanPayMethod,
       paidAt: nowIso,
       updatedAt: nowIso
     };
 
+    // 只有在前端明確有拿到值時，才寫入 (保留 Webhook 寫的真實紀錄)
+    if (payRef && payRef !== 'N/A') {
+      updatePayload.payRef = payRef;
+    }
+    if (payMethod) {
+      updatePayload.paymentMethodDetail = humanPayMethod;
+    }
+
     const batch = adminDb.batch();
     
-    // 2. ★ 改為 { merge: true }，杜絕 batch.update 因文件延遲寫入所造成的 500 報錯
     batch.set(adminDb.collection('quick_orders').doc(orderRef), updatePayload, { merge: true });
     
-    batch.set(adminDb.collection('transactions').doc(orderRef), {
-      ...updatePayload,
-      subtitle: `付款渠道：${humanPayMethod} | 收據號：${payRef || '網關確認'}`
-    }, { merge: true });
+    // 財務總帳也套用相同邏輯
+    const txPayload = { ...updatePayload };
+    if (payRef && payRef !== 'N/A') {
+      txPayload.subtitle = `付款渠道：${humanPayMethod} | 收據號：${payRef}`;
+    }
+    
+    batch.set(adminDb.collection('transactions').doc(orderRef), txPayload, { merge: true });
 
     await batch.commit();
 
