@@ -3,9 +3,12 @@
 import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
-  Loader2, IdCard, Home, Lock, Building2, Calculator
+  Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
+// ★ 引入 Firebase 實時監聽工具
+import { doc, onSnapshot } from 'firebase/firestore';
+import { db } from '@/lib/firebase';
 
 interface Room {
   id: string;
@@ -25,11 +28,16 @@ function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
 
-  // 交易回調狀態
+  // 交易回調與 QR Code 狀態
   const [isSuccess, setIsSuccess] = useState(false);
   const [isFailed, setIsFailed] = useState(false);
   const [successOrderRef, setSuccessOrderRef] = useState('');
   const [paidDetail, setPaidDetail] = useState('核實支付渠道中...');
+  
+  // ★ 新增：QR Code 與付款連結狀態
+  const [payUrl, setPayUrl] = useState('');
+  const [pendingOrderRef, setPendingOrderRef] = useState('');
+  const [copied, setCopied] = useState(false);
 
   // 授權金鑰狀態
   const [isAuthorized, setIsAuthorized] = useState(false);
@@ -111,7 +119,7 @@ function SalesQuickPayContent() {
 
     fetchFormData();
     return () => { isMounted = false; };
-  }, []);
+  }, [formData.salesPerson]);
 
   const combinedStaffList = useMemo(() => {
     return Array.from(new Set([...crmStaffList, ...savedStaffList]));
@@ -158,7 +166,7 @@ function SalesQuickPayContent() {
     }
   };
 
-  // C. 監聽 URL PayDollar 成功 / 失敗轉跳
+  // C. 監聽 URL PayDollar 傳統成功轉跳 (保留兼容性)
   useEffect(() => {
     const success = searchParams?.get('success');
     const failed = searchParams?.get('failed');
@@ -190,6 +198,27 @@ function SalesQuickPayContent() {
     }
   }, [searchParams]);
 
+  // ★ D. Firebase 實時監聽魔法：租客掃碼付款後，自動切換至成功畫面
+  useEffect(() => {
+    if (!pendingOrderRef || !db) return;
+
+    // 監聽 quick_orders 集合中的這筆訂單
+    const unsub = onSnapshot(doc(db, 'quick_orders', pendingOrderRef), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        // 當 Webhook 將狀態改為 Paid 時，自動觸發成功畫面
+        if (data.paymentStatus === 'Paid') {
+          setIsSuccess(true);
+          setSuccessOrderRef(pendingOrderRef);
+          setPaidDetail(data.paymentMethodDetail || '線上支付');
+          setPayUrl(''); // 關閉 QR 畫面
+        }
+      }
+    });
+
+    return () => unsub(); // 清除監聽器
+  }, [pendingOrderRef]);
+
   const handleUnlock = (e: React.FormEvent) => {
     e.preventDefault();
     if (!pinInput.trim()) return setAuthError('請輸入授權通行密碼');
@@ -215,7 +244,7 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
-  // 提交開單表單
+  // 提交開單表單並生成 QR Code
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
@@ -243,26 +272,36 @@ function SalesQuickPayContent() {
         throw new Error(data.error || '無法連接金流系統');
       }
 
-      const { paymentPayload } = data;
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = paymentPayload.endpoint;
-
+      const { paymentPayload, orderRef } = data;
+      
+      // ★ 將 PayDollar 參數組裝成 GET URL (不再強制跳轉瀏覽器)
+      const params = new URLSearchParams();
       Object.entries(paymentPayload).forEach(([key, value]) => {
         if (key !== 'endpoint' && value !== undefined && value !== null) {
-          const input = document.createElement('input');
-          input.type = 'hidden';
-          input.name = key;
-          input.value = String(value);
-          form.appendChild(input);
+          params.append(key, String(value));
         }
       });
+      
+      const gatewayUrl = `${paymentPayload.endpoint}?${params.toString()}`;
+      
+      // 顯示 QR Code 畫面並開始監聽資料庫
+      setPayUrl(gatewayUrl);
+      setPendingOrderRef(orderRef);
 
-      document.body.appendChild(form);
-      form.submit();
     } catch (error: any) {
       alert(`⚠️ 建立收款單失敗: ${error.message}`);
+    } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCopyLink = async () => {
+    try {
+      await navigator.clipboard.writeText(payUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      alert("複製失敗，請手動全選連結複製");
     }
   };
 
@@ -358,6 +397,68 @@ function SalesQuickPayContent() {
             返回下一筆收款
           </button>
         </div>
+      </div>
+    );
+  }
+
+  // ★ 視圖 E：待付款 QR Code 畫面
+  if (payUrl) {
+    const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(payUrl)}`;
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 font-sans">
+        <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-8 shadow-2xl space-y-6 relative overflow-hidden">
+          {/* 掃描掃描雷達動畫 */}
+          <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-[scan_2s_ease-in-out_infinite]" />
+
+          <div className="text-center">
+            <h2 className="text-xl font-black text-white flex items-center justify-center gap-2">
+              <QrCode className="text-blue-400" size={24} /> 請租客掃碼付款
+            </h2>
+            <p className="text-xs text-slate-400 mt-1">單號：{pendingOrderRef}</p>
+          </div>
+
+          <div className="bg-white p-4 rounded-2xl mx-auto w-fit shadow-inner">
+            <img src={qrCodeImageUrl} alt="Payment QR Code" className="w-48 h-48 sm:w-56 sm:h-56" />
+          </div>
+
+          <div className="text-center space-y-1">
+            <p className="text-slate-400 text-sm">應繳總額</p>
+            <p className="text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
+          </div>
+
+          <div className="space-y-3 pt-4 border-t border-slate-700">
+            <div className="flex items-center gap-2">
+              <button 
+                onClick={handleCopyLink} 
+                className="flex-1 py-3 bg-slate-700 hover:bg-slate-600 text-slate-200 font-bold rounded-xl text-sm flex items-center justify-center gap-2 transition"
+              >
+                {copied ? <Check size={18} className="text-emerald-400"/> : <Copy size={18} />}
+                {copied ? '已複製連結' : '複製連結傳送 (WhatsApp)'}
+              </button>
+            </div>
+            
+            <button 
+              onClick={() => { setPayUrl(''); setPendingOrderRef(''); }}
+              className="w-full py-3 bg-transparent hover:bg-slate-700/50 text-slate-400 font-bold rounded-xl text-sm transition"
+            >
+              取消並返回表單
+            </button>
+          </div>
+
+          <p className="text-center text-xs text-slate-500 font-bold animate-pulse flex items-center justify-center gap-1.5 mt-4">
+            <Loader2 size={14} className="animate-spin" />
+            正在等待租客付款，完成後將自動跳轉...
+          </p>
+        </div>
+
+        {/* 掃描動畫 CSS 定義 */}
+        <style dangerouslySetInnerHTML={{__html: `
+          @keyframes scan {
+            0% { transform: translateY(-100%); opacity: 0; }
+            50% { opacity: 1; }
+            100% { transform: translateY(600px); opacity: 0; }
+          }
+        `}} />
       </div>
     );
   }
@@ -568,12 +669,12 @@ function SalesQuickPayContent() {
               {loading ? (
                 <>
                   <Loader2 size={20} className="animate-spin" />
-                  正在產生付款訂單...
+                  產生收款 QR Code...
                 </>
               ) : (
                 <>
-                  <CreditCard size={20} />
-                  立即前往線上刷卡收款 (${pricingSummary.total})
+                  <QrCode size={20} />
+                  產生收款二維碼 (${pricingSummary.total})
                 </>
               )}
             </button>
@@ -581,7 +682,7 @@ function SalesQuickPayContent() {
         </form>
 
         <p className="text-center text-[11px] text-slate-500 mt-6">
-          付款完成後，款項將由 PayDollar 安全驗證並列入大系統【現場暫收對帳隊列】
+          將產生專屬連結與 QR Code 供租客掃描，系統會自動在背景確認款項入帳。
         </p>
       </div>
     </div>
