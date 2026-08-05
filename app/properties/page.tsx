@@ -121,7 +121,7 @@ export default async function PropertiesPage({
   catch (e) { decodedSearch = rawSearchQuery?.toLowerCase().trim() || ''; }
   
   // 以空格或括號分割關鍵字
-  const searchKeywords = decodedSearch.split(/[\s+,-()]+/).filter(k => k.length > 0); 
+  const searchKeywords = decodedSearch.split(/[\s+,()\-]+/).filter(k => k.length > 0); 
 
   // ★ 升級版：加權積分過濾引擎 (Weighted Scoring Engine)
   const scoredRooms = allRooms.map(room => {
