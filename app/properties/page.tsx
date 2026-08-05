@@ -29,10 +29,15 @@ interface PropertyRoom {
 }
 
 async function getPublishedRooms(): Promise<PropertyRoom[]> {
+  let internalRooms: PropertyRoom[] = [];
+  let competitorRooms: PropertyRoom[] = [];
+
+  // ==========================================
+  // 1. 獲取內部盤源 (獨立 try-catch)
+  // ==========================================
   try {
     if (!db) return [];
     
-    // 1. 獲取內部盤源
     const propSnap = await getDocs(collection(db, 'properties'));
     const propMap: Record<string, string> = {};
     propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
@@ -41,17 +46,20 @@ async function getPublishedRooms(): Promise<PropertyRoom[]> {
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
     
-    const internalRooms = roomSnap.docs.map(doc => {
+    internalRooms = roomSnap.docs.map(doc => {
       const data = doc.data();
       let primaryImage = null;
+      
       if (data.images && data.images.length > 0) {
          const firstAssigned = mediaDocs.find(m => m.id === data.images[0]);
          if (firstAssigned) primaryImage = firstAssigned.url;
       }
+      
       if (!primaryImage) {
          const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
          primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
       }
+      
       return {
         id: doc.id,
         ...data,
@@ -60,35 +68,42 @@ async function getPublishedRooms(): Promise<PropertyRoom[]> {
         isCompetitor: false
       } as PropertyRoom;
     });
+  } catch (error) {
+    console.error("Fetch internal rooms error:", error);
+  }
 
-    // ★ 新增：2. 獲取行家盤源 (competitor_listings)
+  // ==========================================
+  // 2. 獲取行家盤源 (獨立 try-catch，防止阻斷)
+  // ==========================================
+  try {
     const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
-    const competitorRooms = competitorSnap.docs.map(doc => {
+    competitorRooms = competitorSnap.docs.map(doc => {
       const data = doc.data();
       return {
         id: doc.id,
-        name: data.name || data.title || '優質合作盤源', // 適配行家盤欄位
+        name: data.name || data.title || '優質合作盤源', 
         propertyId: 'competitor_pool', 
-        baseRent: data.price || 0, // 映射價格欄位
+        baseRent: data.price || 0, 
         status: data.status || 'Available',
         webStatus: data.webStatus || 'published',
         propertyName: data.district || data.estateName || '合作屋苑',
         primaryImage: data.imageUrl || null,
         features: data.features || [],
-        isCompetitor: true // 標記為外部盤源
+        isCompetitor: true 
       } as PropertyRoom;
     });
-
-    // 合併並過濾 (只保留上架或滿租的盤源)
-    const allRooms = [...internalRooms, ...competitorRooms];
-    return allRooms.filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
-
   } catch (error) {
-    console.error("Fetch rooms error:", error);
-    return [];
+    // 預期內錯誤：若 Collection 不存在或權限未開，只會印出警告，不會影響內部盤源
+    console.warn("Fetch competitor rooms bypassed (likely missing Security Rules or empty collection).", error);
   }
-}
 
+  // ==========================================
+  // 3. 合併並過濾
+  // ==========================================
+  const allRooms = [...internalRooms, ...competitorRooms];
+  
+  return allRooms.filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
+}
 export default async function PropertiesPage({ searchParams }: { searchParams: Promise<{ uni?: string; type?: string }> }) {
   const { uni, type } = await searchParams;
   const allRooms = await getPublishedRooms();
