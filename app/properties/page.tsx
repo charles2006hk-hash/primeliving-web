@@ -6,15 +6,16 @@ import {
 } from 'lucide-react';
 import Link from 'next/link';
 
+// 圖片反向代理處理
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
-// ★ 新增：依照屋苑名稱自動匹配預設封面圖 (避免行家盤無圖時的白板現象)
+// 屋苑預設公版封面圖匹配邏輯
 const getEstateCover = (estateName?: string) => {
-  if (!estateName) return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800'; // 預設圖
+  if (!estateName) return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800'; 
   if (estateName.includes('名城')) return 'https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=800';
   if (estateName.includes('柏傲莊')) return 'https://images.unsplash.com/photo-1628592102751-ba83b035e07c?auto=format&fit=crop&q=80&w=800';
   if (estateName.includes('海濱南岸')) return 'https://images.unsplash.com/photo-1555541492-f04620603099?auto=format&fit=crop&q=80&w=800';
@@ -22,7 +23,7 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
-// ★ 新增 isCompetitor 屬性以區分盤源來源
+// 盤源資料結構介面
 interface PropertyRoom {
   id: string;
   name: string;
@@ -33,18 +34,20 @@ interface PropertyRoom {
   equipment?: string[];
   features?: string[];
   propertyName?: string;
+  estateName?: string; 
   primaryImage?: string;
   images?: string[]; 
   isCompetitor?: boolean; 
+  createdAt?: any; 
+  score?: number; // 搜尋匹配度得分
 }
 
+// 獲取所有已發佈的內部盤與行家盤
 async function getPublishedRooms(): Promise<PropertyRoom[]> {
   let internalRooms: PropertyRoom[] = [];
   let competitorRooms: PropertyRoom[] = [];
 
-  // ==========================================
-  // 1. 獲取內部盤源 (獨立 try-catch)
-  // ==========================================
+  // 1. 內部盤源 (包含關聯屬性與圖片)
   try {
     if (!db) return [];
     
@@ -75,16 +78,15 @@ async function getPublishedRooms(): Promise<PropertyRoom[]> {
         ...data,
         propertyName: propMap[data.propertyId] || '精選盤源',
         primaryImage: primaryImage,
-        isCompetitor: false
+        isCompetitor: false,
+        createdAt: data.createdAt || { seconds: Date.now() / 1000 }
       } as PropertyRoom;
     });
   } catch (error) {
     console.error("Fetch internal rooms error:", error);
   }
 
-  // ==========================================
-  // 2. 獲取行家盤源 (獨立 try-catch，防止阻斷)
-  // ==========================================
+  // 2. 行家盤源 (獨立 try-catch，避免錯誤阻斷)
   try {
     const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
     competitorRooms = competitorSnap.docs.map(doc => {
@@ -97,21 +99,19 @@ async function getPublishedRooms(): Promise<PropertyRoom[]> {
         status: data.status || 'Available',
         webStatus: data.webStatus || 'published',
         propertyName: data.district || data.estateName || '合作屋苑',
+        estateName: data.estateName || '',
         primaryImage: data.imageUrl || null,
         features: data.features || [],
-        isCompetitor: true 
+        isCompetitor: true,
+        createdAt: data.createdAt || data.updatedAt || { seconds: Date.now() / 1000 }
       } as PropertyRoom;
     });
   } catch (error) {
-    // 預期內錯誤：若 Collection 不存在或權限未開，只會印出警告，不會影響內部盤源
-    console.warn("Fetch competitor rooms bypassed (likely missing Security Rules or empty collection).", error);
+    console.warn("Fetch competitor rooms bypassed.", error);
   }
 
-  // ==========================================
-  // 3. 合併並過濾
-  // ==========================================
+  // 合併並過濾出上架狀態的盤源
   const allRooms = [...internalRooms, ...competitorRooms];
-  
   return allRooms.filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
 }
 
@@ -119,34 +119,85 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
   const { uni, type } = await searchParams;
   const allRooms = await getPublishedRooms();
 
-  const filteredRooms = allRooms.filter(room => {
-    let matchesUni = true;
-    let matchesType = true;
+  // ★ URL 解碼：安全處理中文搜尋條件 (如 '%E5%90%8D%E5%9F%8E' 轉回 '名城')
+  let decodedUni = '';
+  try {
+    decodedUni = uni ? decodeURIComponent(uni).toLowerCase().trim() : '';
+  } catch (e) {
+    decodedUni = uni?.toLowerCase().trim() || '';
+  }
+  
+  // 建立模糊搜尋關鍵字陣列
+  const searchKeywords = decodedUni.split(/[\s+,-]+/).filter(Boolean); 
 
-    if (uni) {
-      // ★ 擴大搜索範圍：將名稱、屋苑名、特徵陣列全部串接起來進行比對
-      const searchTarget = [
-        room.name, 
-        room.propertyName, 
-        ...(room.features || [])
-      ].join(' ').toLowerCase();
-      
-      matchesUni = searchTarget.includes(uni.toLowerCase());
-    }
+  // ★ 智慧計分過濾系統 (Scoring Algorithm)
+  const scoredRooms = allRooms.map(room => {
+    let score = 0;
     
+    // 建立比對特徵字串 (包含名稱、屋苑名、所有標籤)
+    const targetText = [
+      room.name,
+      room.propertyName,
+      room.estateName,
+      ...(room.features || [])
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    // 1. 房型過濾 (硬限制，不符直接淘汰)
+    let matchesType = true;
     if (type) {
       if (type === 'ensuite') matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
       else if (type === 'single') matchesType = !room.features?.includes('套廁');
     }
-    
-    return matchesUni && matchesType;
+    if (!matchesType) return { ...room, score: -1 }; 
+
+    // 2. 搜尋條件計分
+    if (searchKeywords.length > 0) {
+      let hasMatch = false;
+      searchKeywords.forEach(kw => {
+        if (targetText.includes(kw)) {
+          score += 10; // 部分命中(如區域相同) 加 10 分
+          hasMatch = true;
+        }
+      });
+
+      // 精準命中樓盤名稱 (如「名城」) 大幅加分，確保指定樓盤排最前面
+      const exactMatchTarget = (room.propertyName + ' ' + (room.estateName || '')).toLowerCase();
+      if (exactMatchTarget.includes(decodedUni)) {
+        score += 50;
+      }
+
+      if (!hasMatch) score = -1; // 完全不相干的盤源剔除
+    } else {
+      score = 1; // 無搜尋字眼時全顯示
+    }
+
+    return { ...room, score };
+  }).filter(room => (room.score ?? 0) >= 0);
+
+  // ★ 四層級聯排序 (Cascade Sort)
+  scoredRooms.sort((a, b) => {
+    // 1. 匹配度分數優先 (高分 > 低分)
+    if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0);
+
+    // 2. 空置狀態優先 (Available > Occupied)
+    const aIsSoldOut = a.webStatus === 'draft' || a.status === 'Occupied';
+    const bIsSoldOut = b.webStatus === 'draft' || b.status === 'Occupied';
+    if (aIsSoldOut !== bIsSoldOut) return aIsSoldOut ? 1 : -1;
+
+    // 3. 官方直營優先 (Internal > Competitor)
+    if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1;
+
+    // 4. 舊庫存優先 (建立時間最早的優先展示)
+    const timeA = a.createdAt?.seconds || 0;
+    const timeB = b.createdAt?.seconds || 0;
+    return timeA - timeB; 
   });
 
-  // 排序：內部盤源優先，然後才顯示行家盤
-  filteredRooms.sort((a, b) => (a.isCompetitor === b.isCompetitor ? 0 : a.isCompetitor ? 1 : -1));
+  const filteredRooms = scoredRooms;
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
+      {/* 標題區塊 */}
       <div className="max-w-7xl mx-auto px-4 pt-10 pb-6">
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
@@ -154,15 +205,17 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                <Sparkles size={12}/> 官方直營 & 精選合作
             </div>
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
-              {uni ? `搜尋結果: ${uni.toUpperCase()}` : '尋找您在香港的理想家'}
+              {decodedUni ? `搜尋結果: ${decodedUni.toUpperCase()}` : '尋找您在香港的理想家'}
             </h1>
             <p className="text-slate-500 text-sm mt-2 font-medium">
-               找到 <span className="text-orange-600 font-bold">{filteredRooms.length}</span> 個符合條件的優質房間
+               找到 <span className="text-orange-600 font-bold">{filteredRooms.length}</span> 個優質房間 
+               {decodedUni && ' (已為您優先推薦精準盤源與同區特選)'}
             </p>
           </div>
         </div>
       </div>
 
+      {/* 列表渲染 */}
       <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 mt-4">
         {filteredRooms.length === 0 ? (
           <div className="col-span-full py-24 text-center bg-white rounded-3xl border border-dashed border-slate-300 shadow-sm">
@@ -172,13 +225,14 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
         ) : (
           filteredRooms.map((room) => {
             const isSoldOut = room.webStatus === 'draft' || room.status === 'Occupied';
-            // ★ 行家盤 (isCompetitor) 會被導向 /competitor/[id]，官方盤導向 /properties/[id]
+            
+            // 行家盤與直營盤的路由分流
             const hrefUrl = isSoldOut ? '#' : (room.isCompetitor ? `/competitor/${room.id}` : `/properties/${room.id}`);
 
-            // ★ 圖片回退邏輯：自定義圖片 > 屋苑公版封面圖 > 預設圖標
+            // 圖片 Fallback 邏輯
             const finalImage = room.primaryImage 
               ? getProxiedUrl(room.primaryImage) 
-              : (room.isCompetitor ? getEstateCover(room.propertyName) : null);
+              : (room.isCompetitor ? getEstateCover(room.propertyName || room.estateName) : null);
 
             return (
               <Link 
@@ -188,6 +242,7 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                   room.isCompetitor ? 'border-purple-100 hover:border-purple-300' : 'border-slate-100 hover:border-orange-200'
                 } ${isSoldOut ? 'cursor-default' : 'hover:shadow-xl hover:-translate-y-1'}`}
               >
+                {/* 滿租遮罩層 */}
                 {isSoldOut && (
                   <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
                     <div className="bg-slate-800/90 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
@@ -196,6 +251,7 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                   </div>
                 )}
 
+                {/* 卡片封面 */}
                 <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
                   {finalImage ? (
                     <img src={finalImage} alt={room.name} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
@@ -205,12 +261,12 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                     </div>
                   )}
                   
-                  {/* 左上角：地區標籤 */}
+                  {/* 左上角標籤 */}
                   <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20 z-10">
-                     <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.propertyName}
+                     <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.estateName || room.propertyName}
                   </div>
 
-                  {/* ★ 右上角：HK港灣之家標籤 */}
+                  {/* 行家盤專屬標記 */}
                   {room.isCompetitor && (
                     <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10">
                        <Building2 size={12}/> HK港灣之家
@@ -218,6 +274,7 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                   )}
                 </div>
                 
+                {/* 卡片內容 */}
                 <div className="p-6 flex flex-col flex-1 relative z-10">
                   <div className="flex justify-between items-start mb-3">
                     <h3 className={`text-xl font-black truncate pr-2 mb-1 ${isSoldOut ? 'text-slate-400' : 'text-slate-800'}`}>
