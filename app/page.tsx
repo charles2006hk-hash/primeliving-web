@@ -80,16 +80,15 @@ export default function HomePage(): React.JSX.Element {
     fetchAllData();
   }, []);
 
-  // ★ 嚴格化事件型別 (React.MouseEvent<HTMLButtonElement>)，並改用 Next Router
+  // ★ 將完整區域名稱丟入搜尋引擎
   const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, areaName: string) => {
     e.preventDefault();
     setLoadingArea(areaName);
     
     setTimeout(() => {
       setLoadingArea(null);
-      const searchKeyword = areaName.split(' ')[0] || '';
-      // ★ 改用 Next.js 原生 Client-side 路由，避免刷新與報錯
-      router.push(`/properties?search=${encodeURIComponent(searchKeyword)}`);
+      // 直接傳遞完整名稱，新版計分引擎會自動提取關鍵字
+      router.push(`/properties?search=${encodeURIComponent(areaName)}`);
     }, 400);
   };
 
