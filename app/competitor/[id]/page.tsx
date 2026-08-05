@@ -1,35 +1,37 @@
 import React from 'react';
 import { doc, getDoc } from 'firebase/firestore';
-import { db } from '@/lib/firebase'; // 確保路徑正確
+import { db } from '@/lib/firebase'; 
 import { MapPin, BedDouble, Building2, ChevronLeft } from 'lucide-react';
 import Link from 'next/link';
 
-// 屋苑通用封面圖映射表 (解決問題 1：批量管理圖片)
 const getEstateCover = (estateName?: string) => {
   if (!estateName) return null;
   if (estateName.includes('名城')) return 'https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=1200';
   if (estateName.includes('柏傲莊')) return 'https://images.unsplash.com/photo-1628592102751-ba83b035e07c?auto=format&fit=crop&q=80&w=1200';
   if (estateName.includes('海濱南岸')) return 'https://images.unsplash.com/photo-1555541492-f04620603099?auto=format&fit=crop&q=80&w=1200';
   if (estateName.includes('康城')) return 'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=1200';
-  return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=1200'; // 預設圖
+  return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=1200'; 
 };
 
-export default async function CompetitorPropertyPage({ params }: { params: { id: string } }) {
-  const resolvedParams = await params; // Next.js 15+ 建議處理方式
-  const docRef = doc(db, 'competitor_listings', resolvedParams.id);
+export default async function CompetitorPropertyPage({ params }: { params: Promise<{ id: string }> }) {
+  const resolvedParams = await params; 
+  
+  // ★ 核心修復：將 URL 中的亂碼解碼回中文，確保能正確匹配 Firestore Document ID
+  const decodedId = decodeURIComponent(resolvedParams.id);
+  const docRef = doc(db, 'competitor_listings', decodedId);
   const docSnap = await getDoc(docRef);
 
   if (!docSnap.exists()) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-slate-50">
-        <h1 className="text-2xl font-black text-slate-800">找不到該盤源</h1>
-        <Link href="/properties" className="text-orange-600 mt-4 hover:underline">返回列表</Link>
+        <h1 className="text-2xl font-black text-slate-800 mb-2">找不到該盤源</h1>
+        <p className="text-slate-500 mb-6">您尋找的房源可能已下架或網址錯誤 ({decodedId})</p>
+        <Link href="/properties" className="px-6 py-2 bg-orange-600 text-white rounded-full font-bold hover:bg-orange-700 transition">返回列表</Link>
       </div>
     );
   }
 
   const room = docSnap.data();
-  // 如果該盤源沒有獨立設定 imageUrl，就套用屋苑通用封面
   const coverImage = room.imageUrl || getEstateCover(room.estateName);
 
   return (
@@ -69,7 +71,7 @@ export default async function CompetitorPropertyPage({ params }: { params: { id:
             </div>
 
             <div className="prose prose-slate max-w-none">
-              <p className="font-medium leading-relaxed">
+              <p className="font-medium leading-relaxed whitespace-pre-wrap">
                 {room.description || '這是一個優質的合作盤源，提供舒適的居住環境。點擊右側聯絡我們了解更多詳情。'}
               </p>
             </div>
