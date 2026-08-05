@@ -124,13 +124,21 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
     let matchesType = true;
 
     if (uni) {
-      const searchTarget = (room.name + room.propertyName).toLowerCase();
+      // ★ 擴大搜索範圍：將名稱、屋苑名、特徵陣列全部串接起來進行比對
+      const searchTarget = [
+        room.name, 
+        room.propertyName, 
+        ...(room.features || [])
+      ].join(' ').toLowerCase();
+      
       matchesUni = searchTarget.includes(uni.toLowerCase());
     }
+    
     if (type) {
       if (type === 'ensuite') matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
       else if (type === 'single') matchesType = !room.features?.includes('套廁');
     }
+    
     return matchesUni && matchesType;
   });
 
