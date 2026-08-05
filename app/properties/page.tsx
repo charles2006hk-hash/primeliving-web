@@ -1,19 +1,18 @@
 import React from 'react';
-import { collection, getDocs, query, where } from 'firebase/firestore';
+import { collection, getDocs } from 'firebase/firestore';
 import { db } from '../../lib/firebase'; 
 import { 
-  MapPin, BedDouble, Wind, ShieldCheck, 
-  ChevronRight, Search, Filter, Home, Heart, Sparkles 
+  MapPin, BedDouble, Search, Home, Sparkles, Building2
 } from 'lucide-react';
 import Link from 'next/link';
 
-// ★ 反向代理 URL 轉換器
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
+// ★ 新增 isCompetitor 屬性以區分盤源來源
 interface PropertyRoom {
   id: string;
   name: string;
@@ -26,55 +25,71 @@ interface PropertyRoom {
   propertyName?: string;
   primaryImage?: string;
   images?: string[]; 
+  isCompetitor?: boolean; 
 }
 
-async function getPublishedRooms() {
+async function getPublishedRooms(): Promise<PropertyRoom[]> {
   try {
     if (!db) return [];
+    
+    // 1. 獲取內部盤源
     const propSnap = await getDocs(collection(db, 'properties'));
     const propMap: Record<string, string> = {};
     propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
 
-    // ★ 修改 1：拿掉 where 過濾條件，改為抓取所有房間，後續在記憶體中精確篩選
     const roomSnap = await getDocs(collection(db, 'rooms'));
-
     const mediaSnap = await getDocs(collection(db, 'media_library'));
     const mediaDocs = mediaSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
     
-    return roomSnap.docs.map(doc => {
+    const internalRooms = roomSnap.docs.map(doc => {
       const data = doc.data();
       let primaryImage = null;
-
       if (data.images && data.images.length > 0) {
          const firstAssigned = mediaDocs.find(m => m.id === data.images[0]);
          if (firstAssigned) primaryImage = firstAssigned.url;
       }
-
       if (!primaryImage) {
          const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
          primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
       }
-
       return {
         id: doc.id,
         ...data,
         propertyName: propMap[data.propertyId] || '精選盤源',
-        primaryImage: primaryImage
+        primaryImage: primaryImage,
+        isCompetitor: false
       } as PropertyRoom;
-    })
-    // ★ 修改 2：只保留「已上架(published)」或「已出租(Occupied)」的房間
-    // 這樣可以避免把正在裝修、且從未打算公開的隱藏房間暴露出來
-    .filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
+    });
+
+    // ★ 新增：2. 獲取行家盤源 (competitor_listings)
+    const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
+    const competitorRooms = competitorSnap.docs.map(doc => {
+      const data = doc.data();
+      return {
+        id: doc.id,
+        name: data.name || data.title || '優質合作盤源', // 適配行家盤欄位
+        propertyId: 'competitor_pool', 
+        baseRent: data.price || 0, // 映射價格欄位
+        status: data.status || 'Available',
+        webStatus: data.webStatus || 'published',
+        propertyName: data.district || data.estateName || '合作屋苑',
+        primaryImage: data.imageUrl || null,
+        features: data.features || [],
+        isCompetitor: true // 標記為外部盤源
+      } as PropertyRoom;
+    });
+
+    // 合併並過濾 (只保留上架或滿租的盤源)
+    const allRooms = [...internalRooms, ...competitorRooms];
+    return allRooms.filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
+
   } catch (error) {
+    console.error("Fetch rooms error:", error);
     return [];
   }
 }
 
-export default async function PropertiesPage({
-  searchParams,
-}: {
-  searchParams: Promise<{ uni?: string; type?: string }>;
-}) {
+export default async function PropertiesPage({ searchParams }: { searchParams: Promise<{ uni?: string; type?: string }> }) {
   const { uni, type } = await searchParams;
   const allRooms = await getPublishedRooms();
 
@@ -86,17 +101,15 @@ export default async function PropertiesPage({
       const searchTarget = (room.name + room.propertyName).toLowerCase();
       matchesUni = searchTarget.includes(uni.toLowerCase());
     }
-
     if (type) {
-      if (type === 'ensuite') {
-        matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
-      } else if (type === 'single') {
-        matchesType = !room.features?.includes('套廁');
-      }
+      if (type === 'ensuite') matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
+      else if (type === 'single') matchesType = !room.features?.includes('套廁');
     }
-
     return matchesUni && matchesType;
   });
+
+  // 排序：內部盤源優先，然後才顯示行家盤
+  filteredRooms.sort((a, b) => (a.isCompetitor === b.isCompetitor ? 0 : a.isCompetitor ? 1 : -1));
 
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
@@ -104,7 +117,7 @@ export default async function PropertiesPage({
         <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
           <div>
             <div className="inline-flex items-center gap-1.5 px-2 py-1 rounded-full bg-orange-100 text-orange-600 text-[10px] font-bold mb-3 uppercase tracking-wider border border-orange-200 shadow-sm">
-               <Sparkles size={12}/> 官方直營 · 精選房源
+               <Sparkles size={12}/> 官方直營 & 精選合作
             </div>
             <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight">
               {uni ? `搜尋結果: ${uni.toUpperCase()}` : '尋找您在香港的理想家'}
@@ -121,24 +134,20 @@ export default async function PropertiesPage({
           <div className="col-span-full py-24 text-center bg-white rounded-3xl border border-dashed border-slate-300 shadow-sm">
              <Search size={48} className="mx-auto text-slate-200 mb-4"/>
              <p className="text-slate-500 font-bold text-lg">找不到符合條件的房源</p>
-             <Link href="/properties" className="text-orange-600 text-sm mt-2 block hover:underline">查看全部房源</Link>
           </div>
         ) : (
           filteredRooms.map((room) => {
-            // ★ 修改 3：動態判斷是否滿租
             const isSoldOut = room.webStatus === 'draft' || room.status === 'Occupied';
-            // 若滿租，點擊後不會跳轉，停留在原頁面
-            const hrefUrl = isSoldOut ? '#' : `/properties/${room.id}`;
+            const hrefUrl = isSoldOut ? '#' : (room.isCompetitor ? `/competitor/${room.id}` : `/properties/${room.id}`);
 
             return (
               <Link 
                 href={hrefUrl} 
                 key={room.id} 
-                className={`group bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden transition-all duration-300 flex flex-col relative ${
-                  isSoldOut ? 'cursor-default' : 'hover:shadow-xl hover:border-orange-200 hover:-translate-y-1'
-                }`}
+                className={`group bg-white rounded-3xl shadow-sm border overflow-hidden transition-all duration-300 flex flex-col relative ${
+                  room.isCompetitor ? 'border-purple-100 hover:border-purple-300' : 'border-slate-100 hover:border-orange-200'
+                } ${isSoldOut ? 'cursor-default' : 'hover:shadow-xl hover:-translate-y-1'}`}
               >
-                {/* ★ 修改 4：滿租遮罩層 */}
                 {isSoldOut && (
                   <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
                     <div className="bg-slate-800/90 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
@@ -149,22 +158,24 @@ export default async function PropertiesPage({
 
                 <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
                   {room.primaryImage ? (
-                    <img 
-                      src={getProxiedUrl(room.primaryImage)} 
-                      alt={room.name} 
-                      className={`w-full h-full object-cover transition-transform duration-700 ${
-                        isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'
-                      }`} 
-                    />
+                    <img src={getProxiedUrl(room.primaryImage)} alt={room.name} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
                       <Home size={32} className="mb-2 opacity-50"/>
-                      <span className="uppercase tracking-widest text-[10px] font-bold opacity-50">Prime Living</span>
                     </div>
                   )}
+                  
+                  {/* 左上角：地區標籤 */}
                   <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20 z-10">
-                     <MapPin size={12} className={`text-orange-500 ${isSoldOut ? 'grayscale' : ''}`}/> {room.propertyName}
+                     <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.propertyName}
                   </div>
+
+                  {/* ★ 新增：右上角：行家盤專屬標籤 */}
+                  {room.isCompetitor && (
+                    <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10">
+                       <Building2 size={12}/> 合作盤源
+                    </div>
+                  )}
                 </div>
                 
                 <div className="p-6 flex flex-col flex-1 relative z-10">
@@ -173,7 +184,7 @@ export default async function PropertiesPage({
                       {room.name}
                     </h3>
                     <div className="text-right shrink-0">
-                      <span className={`font-black text-2xl ${isSoldOut ? 'text-slate-400' : 'text-orange-600'}`}>
+                      <span className={`font-black text-2xl ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
                         ${(room.baseRent || 0).toLocaleString()}
                       </span>
                     </div>
@@ -185,13 +196,10 @@ export default async function PropertiesPage({
                          <BedDouble size={14}/> 拎包入住
                        </span>
                      </div>
-                     
                      <span className={`px-4 py-2 rounded-lg transition-colors ${
-                       isSoldOut 
-                        ? 'bg-slate-200 text-slate-400' 
-                        : 'bg-slate-900 text-white group-hover:bg-orange-600'
+                       isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-opacity-90'
                      }`}>
-                       {isSoldOut ? '已全數租出' : '立即查看'}
+                       {isSoldOut ? '已租出' : '立即查看'}
                      </span>
                   </div>
                 </div>
