@@ -12,6 +12,16 @@ const getProxiedUrl = (url?: string | null) => {
   return `/api/image?url=${encodeURIComponent(url)}`;
 };
 
+// ★ 新增：依照屋苑名稱自動匹配預設封面圖 (避免行家盤無圖時的白板現象)
+const getEstateCover = (estateName?: string) => {
+  if (!estateName) return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800'; // 預設圖
+  if (estateName.includes('名城')) return 'https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('柏傲莊')) return 'https://images.unsplash.com/photo-1628592102751-ba83b035e07c?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('海濱南岸')) return 'https://images.unsplash.com/photo-1555541492-f04620603099?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('康城')) return 'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=800';
+  return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
+};
+
 // ★ 新增 isCompetitor 屬性以區分盤源來源
 interface PropertyRoom {
   id: string;
@@ -104,6 +114,7 @@ async function getPublishedRooms(): Promise<PropertyRoom[]> {
   
   return allRooms.filter(r => r.webStatus === 'published' || r.status === 'Occupied'); 
 }
+
 export default async function PropertiesPage({ searchParams }: { searchParams: Promise<{ uni?: string; type?: string }> }) {
   const { uni, type } = await searchParams;
   const allRooms = await getPublishedRooms();
@@ -153,7 +164,13 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
         ) : (
           filteredRooms.map((room) => {
             const isSoldOut = room.webStatus === 'draft' || room.status === 'Occupied';
+            // ★ 行家盤 (isCompetitor) 會被導向 /competitor/[id]，官方盤導向 /properties/[id]
             const hrefUrl = isSoldOut ? '#' : (room.isCompetitor ? `/competitor/${room.id}` : `/properties/${room.id}`);
+
+            // ★ 圖片回退邏輯：自定義圖片 > 屋苑公版封面圖 > 預設圖標
+            const finalImage = room.primaryImage 
+              ? getProxiedUrl(room.primaryImage) 
+              : (room.isCompetitor ? getEstateCover(room.propertyName) : null);
 
             return (
               <Link 
@@ -172,8 +189,8 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                 )}
 
                 <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
-                  {room.primaryImage ? (
-                    <img src={getProxiedUrl(room.primaryImage)} alt={room.name} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
+                  {finalImage ? (
+                    <img src={finalImage} alt={room.name} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
                   ) : (
                     <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
                       <Home size={32} className="mb-2 opacity-50"/>
@@ -185,10 +202,10 @@ export default async function PropertiesPage({ searchParams }: { searchParams: P
                      <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.propertyName}
                   </div>
 
-                  {/* ★ 新增：右上角：行家盤專屬標籤 */}
+                  {/* ★ 右上角：HK港灣之家標籤 */}
                   {room.isCompetitor && (
                     <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10">
-                       <Building2 size={12}/> 合作盤源
+                       <Building2 size={12}/> HK港灣之家
                     </div>
                   )}
                 </div>
