@@ -32,13 +32,14 @@ export default function RootLayout({
       lang="zh-HK"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col relative">
+      {/* ★ 強制加上 bg-orange-50/bg-white 避免深色模式底色外洩產生黑邊 */}
+      <body className="min-h-full flex flex-col relative bg-orange-50 text-slate-900">
         <Navbar />
         
-        {/* ★ 加大 padding-top，為毛玻璃導航列預留足夠的呼吸空間 */}
-        <main className="flex-grow pt-20 md:pt-24">
+        {/* 為毛玻璃導航列預留的呼吸空間，現在底色會是溫和的橘白色 */}
+        <div className="flex-grow pt-20 md:pt-24 flex flex-col">
           {children}
-        </main>
+        </div>
         
         <Footer />
         <RecentBookingsToast />
