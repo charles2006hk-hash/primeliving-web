@@ -30,16 +30,16 @@ export default function RootLayout({
   return (
     <html
       lang="zh-HK"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
+      // ★ 強制加入 light class，徹底封殺深色模式黑底
+      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased light`}
     >
-      {/* ★ 強制加上 bg-orange-50/bg-white 避免深色模式底色外洩產生黑邊 */}
-      <body className="min-h-full flex flex-col relative bg-orange-50 text-slate-900">
+      <body className="min-h-full flex flex-col relative bg-slate-50 text-slate-900">
         <Navbar />
         
-        {/* 為毛玻璃導航列預留的呼吸空間，現在底色會是溫和的橘白色 */}
-        <div className="flex-grow pt-20 md:pt-24 flex flex-col">
+        {/* ★ 移除了 pt-20 md:pt-24，讓畫面背景直接頂到最上方，完美融入毛玻璃導航列 */}
+        <main className="flex-grow flex flex-col">
           {children}
-        </div>
+        </main>
         
         <Footer />
         <RecentBookingsToast />
