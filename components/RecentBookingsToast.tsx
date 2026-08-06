@@ -3,12 +3,13 @@
 import React, { useState, useEffect } from 'react';
 import { Sparkles, CheckCircle2, MapPin, X } from 'lucide-react';
 
-// 模擬真實的近期入住數據 (後續可串接 Firebase)
+// 模擬真實的近期入住數據
 const RECENT_BOOKINGS = [
   { name: '陳同學', area: '大圍 名城', identity: '香港中文大學', time: '剛剛' },
   { name: '李同學', area: '紅磡 海濱南岸', identity: '香港理工大學', time: '10分鐘前' },
   { name: '王同學', area: '大圍 柏傲莊', identity: '香港城市大學', time: '半小時前' },
   { name: '張同學', area: '將軍澳 康城', identity: '香港科技大學', time: '1小時前' },
+  { name: '劉先生', area: '沙田市中心', identity: '香港科學園', time: '剛剛' },
 ];
 
 export default function RecentBookingsToast() {
@@ -19,28 +20,37 @@ export default function RecentBookingsToast() {
   useEffect(() => {
     if (isDismissed) return;
 
-    // 初次載入延遲 3 秒後彈出第一個
-    const initialTimer = setTimeout(() => setIsVisible(true), 3000);
+    let showTimer: NodeJS.Timeout;
+    let hideTimer: NodeJS.Timeout;
 
-    // 設定輪播循環：每 10 秒換下一個 (顯示 5 秒，隱藏 5 秒)
-    const cycleInterval = setInterval(() => {
-      setIsVisible(false); // 先隱藏
-      
-      setTimeout(() => {
-        setCurrentIndex((prev) => (prev + 1) % RECENT_BOOKINGS.length);
-        setIsVisible(true); // 換人後再顯示
-      }, 1000); // 等待淡出動畫完成
+    const triggerToast = () => {
+      // 隨機挑選下一筆資料 (確保不會連續抽到同一筆)
+      setCurrentIndex((prev) => {
+        let nextIdx = Math.floor(Math.random() * RECENT_BOOKINGS.length);
+        if (nextIdx === prev) nextIdx = (nextIdx + 1) % RECENT_BOOKINGS.length;
+        return nextIdx;
+      });
 
-      // 顯示 5 秒後自動隱藏
-      setTimeout(() => {
+      setIsVisible(true);
+
+      // 顯示 6 秒後隱藏
+      hideTimer = setTimeout(() => {
         setIsVisible(false);
-      }, 6000); 
 
-    }, 10000);
+        // 隱藏後，隨機等待 15 ~ 40 秒再次觸發 (模擬真實隨機頻率)
+        const nextDelay = Math.floor(Math.random() * 25000) + 15000;
+        showTimer = setTimeout(triggerToast, nextDelay);
+      }, 6000);
+    };
 
+    // 頁面載入後，隨機等待 8 ~ 15 秒才出現第一個
+    const initialDelay = Math.floor(Math.random() * 7000) + 8000;
+    showTimer = setTimeout(triggerToast, initialDelay);
+
+    // 清理計時器，避免記憶體洩漏
     return () => {
-      clearTimeout(initialTimer);
-      clearInterval(cycleInterval);
+      clearTimeout(showTimer);
+      clearTimeout(hideTimer);
     };
   }, [isDismissed]);
 
@@ -50,16 +60,17 @@ export default function RecentBookingsToast() {
 
   return (
     <div 
-      className={`fixed bottom-6 left-6 z-[100] transition-all duration-700 ease-in-out ${
-        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-10 opacity-0 pointer-events-none'
+      className={`fixed bottom-6 left-6 z-[100] transition-all duration-1000 ease-out ${
+        isVisible ? 'translate-y-0 opacity-100' : 'translate-y-12 opacity-0 pointer-events-none'
       }`}
     >
       <div className="bg-white/90 backdrop-blur-xl border border-white/50 p-4 rounded-2xl shadow-2xl shadow-orange-500/10 flex items-start gap-4 max-w-sm relative group pr-10">
         
-        {/* 關閉按鈕 */}
+        {/* 關閉按鈕：點擊後徹底不再顯示 */}
         <button 
-          onClick={() => setIsVisible(false)}
+          onClick={() => setIsDismissed(true)}
           className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="關閉通知"
         >
           <X size={14} />
         </button>
