@@ -5,7 +5,7 @@ import "./globals.css";
 // ★ 引入統一組件
 import Navbar from "@/components/Navbar"; 
 import Footer from "@/components/Footer";
-import RecentBookingsToast from "@/components/RecentBookingsToast"; // ★ 引入動態浮動通知
+import RecentBookingsToast from "@/components/RecentBookingsToast"; 
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -33,18 +33,14 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col relative">
-        {/* ★ 統一導航欄 */}
         <Navbar />
         
-        {/* 主要內容區 */}
-        <main className="flex-grow pt-14 md:pt-16">
+        {/* ★ 加大 padding-top，為毛玻璃導航列預留足夠的呼吸空間 */}
+        <main className="flex-grow pt-20 md:pt-24">
           {children}
         </main>
         
-        {/* ★ 統一底部 */}
         <Footer />
-
-        {/* ★ 全域動態通知層 (Client Component 安全嵌入 Server Component) */}
         <RecentBookingsToast />
       </body>
     </html>
