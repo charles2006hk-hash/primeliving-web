@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
-// ★ 引入統一導航組件
+
+// ★ 引入統一組件
 import Navbar from "@/components/Navbar"; 
 import Footer from "@/components/Footer";
+import RecentBookingsToast from "@/components/RecentBookingsToast"; // ★ 引入動態浮動通知
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -30,7 +32,7 @@ export default function RootLayout({
       lang="zh-HK"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body className="min-h-full flex flex-col relative">
         {/* ★ 統一導航欄 */}
         <Navbar />
         
@@ -38,7 +40,12 @@ export default function RootLayout({
         <main className="flex-grow pt-14 md:pt-16">
           {children}
         </main>
+        
+        {/* ★ 統一底部 */}
         <Footer />
+
+        {/* ★ 全域動態通知層 (Client Component 安全嵌入 Server Component) */}
+        <RecentBookingsToast />
       </body>
     </html>
   );
