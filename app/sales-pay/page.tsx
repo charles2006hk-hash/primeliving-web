@@ -4,10 +4,9 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
   Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check,
-  Download, Share // ★ 新增下載與分享圖示
+  Download, Share, RefreshCw, MessageCircle // ★ 新增 UI 圖示
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
-// ★ 引入 Firebase 實時監聽工具
 import { doc, onSnapshot } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
@@ -25,9 +24,16 @@ interface Property {
   status?: string;
 }
 
+// ★ 輔助函數：生成帶時間戳的唯一訂單號 (防重複機制)[cite: 10]
+const generateUniqueOrderRef = (baseId: string) => {
+  const timestamp = new Date().getTime().toString().slice(-6);
+  return `${baseId}-R${timestamp}`;
+};
+
 function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
+  const [isRegenerating, setIsRegenerating] = useState(false); // ★ 新增重新生成狀態
 
   // 交易回調與 QR Code 狀態
   const [isSuccess, setIsSuccess] = useState(false);
@@ -63,18 +69,15 @@ function SalesQuickPayContent() {
     tenantName: '',
     idNumber: '',
     phone: '',
-    amount: '', // 本金 (Subtotal)
+    amount: '', 
     remarks: '首期租金 / 預約訂金',
     salesPerson: ''
   });
 
-  // ==========================================
-  // ★ 財務仙數運算：動態計算 3% 手續費與加總金額
-  // ==========================================
   const pricingSummary = useMemo(() => {
     const rawVal = parseFloat(formData.amount) || 0;
     const subtotalCents = Math.round(rawVal * 100);
-    const surchargeCents = Math.round(subtotalCents * 0.03); // 3% 平台刷卡手續費
+    const surchargeCents = Math.round(subtotalCents * 0.03); 
     const totalCents = subtotalCents + surchargeCents;
 
     return {
@@ -84,7 +87,6 @@ function SalesQuickPayContent() {
     };
   }, [formData.amount]);
 
-  // A. 讀取本地通行碼與經手人歷史
   useEffect(() => {
     const savedPin = localStorage.getItem('SALES_PAY_TOKEN');
     if (savedPin) {
@@ -97,7 +99,6 @@ function SalesQuickPayContent() {
     }
   }, []);
 
-  // B. 透過 BFF API 載入樓盤資訊
   useEffect(() => {
     let isMounted = true;
     const fetchFormData = async () => {
@@ -168,7 +169,6 @@ function SalesQuickPayContent() {
     }
   };
 
-  // C. 監聽 URL PayDollar 傳統成功轉跳 (保留兼容性)
   useEffect(() => {
     const success = searchParams?.get('success');
     const failed = searchParams?.get('failed');
@@ -200,7 +200,6 @@ function SalesQuickPayContent() {
     }
   }, [searchParams]);
 
-  // D. Firebase 實時監聽魔法：租客掃碼付款後，自動切換至成功畫面
   useEffect(() => {
     if (!pendingOrderRef || !db) return;
 
@@ -244,20 +243,26 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
-      return alert('請完整填寫客戶姓名、電話、選擇單位及正確金額！');
-    }
-
-    saveStaffHistory(formData.salesPerson);
-    setLoading(true);
-
+  // ★ 核心方法：發送 API 請求生成付款連結
+  const createPaymentRequest = async (isRefresh = false) => {
     try {
+      if (isRefresh) setIsRegenerating(true);
+      else setLoading(true);
+
+      // 動態產生單號 (解決防重複機制)[cite: 10]
+      const phoneSuffix = formData.phone ? formData.phone.slice(-4) : '0000';
+      const baseOrderRef = `SQP-${phoneSuffix}-${formData.roomId}`;
+      const uniqueOrderRef = generateUniqueOrderRef(baseOrderRef);
+
+      const requestData = {
+        ...formData,
+        orderRef: uniqueOrderRef // 強制覆蓋為隨機單號
+      };
+
       const response = await fetch('/api/paydollar/quick-checkout', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData)
+        body: JSON.stringify(requestData)
       });
 
       const data = await response.json();
@@ -288,13 +293,20 @@ function SalesQuickPayContent() {
     } catch (error: any) {
       alert(`⚠️ 建立收款單失敗: ${error.message}`);
     } finally {
-      setLoading(false);
+      if (isRefresh) setIsRegenerating(false);
+      else setLoading(false);
     }
   };
 
-  // ==========================================
-  // ★ 新增：分享與下載 QR Code 邏輯
-  // ==========================================
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.tenantName || !formData.phone || !formData.amount || !formData.roomId) {
+      return alert('請完整填寫客戶姓名、電話、選擇單位及正確金額！');
+    }
+    saveStaffHistory(formData.salesPerson);
+    await createPaymentRequest(false);
+  };
+
   const handleCopyLink = async () => {
     try {
       await navigator.clipboard.writeText(payUrl);
@@ -317,7 +329,7 @@ function SalesQuickPayContent() {
         console.log('分享取消或發生錯誤', err);
       }
     } else {
-      handleCopyLink(); // 若不支援原生分享 (如電腦端) 則降級為複製連結
+      handleCopyLink(); 
     }
   };
 
@@ -343,7 +355,6 @@ function SalesQuickPayContent() {
     }
   };
 
-  // 視圖 A：授權登入卡
   if (!isAuthorized) {
     return (
       <div className="min-h-screen bg-slate-950 flex items-center justify-center p-6 font-sans">
@@ -380,7 +391,6 @@ function SalesQuickPayContent() {
     );
   }
 
-  // 視圖 B：付款失敗 / 網關取消
   if (isFailed) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -410,7 +420,6 @@ function SalesQuickPayContent() {
     );
   }
 
-  // 視圖 C：付款成功完結
   if (isSuccess) {
     return (
       <div className="min-h-screen bg-slate-900 flex items-center justify-center p-6 font-sans">
@@ -439,13 +448,12 @@ function SalesQuickPayContent() {
     );
   }
 
-  // 視圖 E：待付款 QR Code 畫面 (加入下載與分享功能)
+  // ★ 修改後的 待付款 QR Code 畫面
   if (payUrl) {
     const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(payUrl)}`;
     return (
       <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6 font-sans">
         <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-6 md:p-8 shadow-2xl space-y-6 relative overflow-hidden">
-          {/* 掃描掃描雷達動畫 */}
           <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-[scan_2s_ease-in-out_infinite]" />
 
           <div className="text-center">
@@ -458,13 +466,37 @@ function SalesQuickPayContent() {
           <div className="bg-white p-4 rounded-2xl mx-auto w-fit shadow-inner">
             <img src={qrCodeImageUrl} alt="Payment QR Code" className="w-48 h-48 sm:w-56 sm:h-56" />
           </div>
+          
+          {/* ★ 新增：重新生成按鈕與提示 */}
+          <div className="space-y-1.5 text-center">
+            <button 
+              onClick={() => createPaymentRequest(true)}
+              disabled={isRegenerating}
+              className="text-xs text-blue-400 hover:text-blue-300 font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 mx-auto bg-blue-900/30 px-3 py-1.5 rounded-lg"
+            >
+              <RefreshCw size={14} className={isRegenerating ? "animate-spin" : ""} />
+              {isRegenerating ? '重新生成中...' : 'QR Code 掃描失效？點此重新產生'}
+            </button>
+          </div>
 
           <div className="text-center space-y-1">
             <p className="text-slate-400 text-sm">應繳總額</p>
             <p className="text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
+          
+          {/* ★ 新增：微信專屬提示區塊 */}
+          <div className="bg-emerald-900/40 border border-emerald-500/30 p-3 rounded-xl">
+             <div className="flex items-start gap-2.5">
+                <MessageCircle size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                <div>
+                   <p className="text-xs font-bold text-emerald-300 mb-1">使用 WeChat Pay 微信支付注意事項</p>
+                   <p className="text-[10px] text-slate-300 leading-relaxed">
+                     <span className="text-red-400 font-bold">請勿</span>使用手機相機或 Safari 掃描。請將此 QR Code 截圖，打開 <strong className="text-white">微信 App 的「掃一掃」</strong> 選擇相簿掃描，方可成功喚起微信支付。
+                   </p>
+                </div>
+             </div>
+          </div>
 
-          {/* ★ 操作按鈕群組：分享、下載、拷貝 */}
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-700">
             <button 
               onClick={handleNativeShare} 
@@ -502,7 +534,6 @@ function SalesQuickPayContent() {
           </p>
         </div>
 
-        {/* 掃描動畫 CSS 定義 */}
         <style dangerouslySetInnerHTML={{__html: `
           @keyframes scan {
             0% { transform: translateY(-100%); opacity: 0; }
