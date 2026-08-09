@@ -15,7 +15,8 @@ const toCents = (num: number | string): number => Math.round((Number(num) || 0) 
 const fromCents = (cents: number): number => Number((cents / 100).toFixed(2));
 
 /**
- * PayDollar 官方 SHA-1 簽章演算法
+ * PayDollar 官方 SHA-1 簽章演算法[cite: 15]
+ * 嚴格依照 merchantId|orderRef|currCode|amount|payType|secureHashSecret 順序[cite: 11]
  */
 function generatePayDollarSecureHash(
   merchantId: string,
@@ -38,7 +39,7 @@ function generatePayDollarSecureHash(
 }
 
 /**
- * 移除中文與特殊字元，轉為 PayDollar 最安全的純 ASCII 格式
+ * 移除中文與特殊字元，轉為 PayDollar 最安全的純 ASCII 格式[cite: 15]
  */
 const toSafeAscii = (str: string): string => {
   return (str || '').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 40);
@@ -60,10 +61,12 @@ export async function POST(request: Request) {
       phone,
       amount,
       remarks,
-      salesPerson
+      salesPerson,
+      payMethod, // ★ 新增：接收前端指定的支付渠道
+      orderRef: clientOrderRef // ★ 新增：接收前端傳來的防重複單號 (帶 -R 後綴)
     } = body;
 
-    // 1. PIN 密碼授權校驗
+    // 1. PIN 密碼授權校驗[cite: 15]
     const validPin = process.env.SALES_QUICK_PAY_PIN || 'PL202688';
     if (!passcode || passcode !== validPin) {
       return NextResponse.json(
@@ -72,7 +75,7 @@ export async function POST(request: Request) {
       );
     }
 
-    // 2. 財務仙數運算：計算本金、3% 手續費與加總金額
+    // 2. 財務仙數運算：計算本金、3% 手續費與加總金額[cite: 15]
     const subtotalCents = toCents(amount);
     if (subtotalCents <= 0 || !tenantName || !phone) {
       return NextResponse.json(
@@ -89,14 +92,15 @@ export async function POST(request: Request) {
     const totalAmountNum = fromCents(totalAmountCents);
     const cleanAmountStr = totalAmountNum.toFixed(2);
 
-    // 3. 產生不會和線上合約單衝突的唯一短單號結構
-    const orderRef = `SQP-${Date.now().toString().slice(-8)}-${Math.floor(100 + Math.random() * 900)}`;
+    // 3. 處理防重複單號機制
+    // 如果前端有傳 orderRef (例如重新產生 QR Code 時帶有 -R123456)，就優先使用它；否則產生新單號
+    const finalOrderRef = clientOrderRef || `SQP-${Date.now().toString().slice(-8)}-${Math.floor(100 + Math.random() * 900)}`;
     const nowIso = new Date().toISOString();
     const dateStr = nowIso.slice(0, 10);
 
-    // 4. 寫入現場收帳單據隊列
+    // 4. 寫入現場收帳單據隊列[cite: 15]
     const quickOrderData = {
-      orderRef,
+      orderRef: finalOrderRef,
       region: region || '香港',
       roomName: roomName || '未指定單位',
       roomInfo: `${region || ''} - ${roomName || ''}`.trim(),
@@ -120,9 +124,9 @@ export async function POST(request: Request) {
     };
 
     const batch = adminDb.batch();
-    batch.set(adminDb.collection('quick_orders').doc(orderRef), quickOrderData);
+    batch.set(adminDb.collection('quick_orders').doc(finalOrderRef), quickOrderData);
     
-    batch.set(adminDb.collection('transactions').doc(orderRef), {
+    batch.set(adminDb.collection('transactions').doc(finalOrderRef), {
       ...quickOrderData,
       type: 'income',
       category: '現場預收款',
@@ -134,7 +138,7 @@ export async function POST(request: Request) {
     });
     await batch.commit();
 
-    // 5. PayDollar 生產環境參數配置
+    // 5. PayDollar 生產環境參數配置[cite: 15]
     const merchantId = process.env.PAYDOLLAR_MERCHANT_ID;
     const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET;
     const endpoint = process.env.PAYDOLLAR_PAYMENT_URL || 'https://www.paydollar.com/b2c2/eng/payment/payForm.jsp';
@@ -148,11 +152,11 @@ export async function POST(request: Request) {
     }
 
     const currCode = '344'; // HKD
-    const payType = 'N';    // Normal Sale
+    const payType = 'N';    // Normal Sale[cite: 8, 12]
 
     const secureHash = generatePayDollarSecureHash(
       merchantId,
-      orderRef,
+      finalOrderRef,
       currCode,
       cleanAmountStr,
       payType,
@@ -163,26 +167,38 @@ export async function POST(request: Request) {
     const cleanReturnUrl = `${origin}/sales-pay`;
     const safeRemark = `SALES ${toSafeAscii(quickOrderData.roomName)}`.trim();
 
-    const paymentPayload = {
+    // ★ 核心修復：正確映射 PayDollar 支付渠道參數[cite: 8, 12]
+    let targetPMethod = '';
+    if (payMethod === 'WECHAT') targetPMethod = 'WECHATONL';
+    else if (payMethod === 'ALIPAY') targetPMethod = 'ALIPAY';
+    else if (payMethod === 'CC') targetPMethod = 'VISA'; 
+    // 若為 ALL 則留空，交給 PayDollar 智能收銀台處理
+
+    // ★ 構建 Payload，移除錯誤的 payMethod，改用正確的 pMethod[cite: 8, 12]
+    const paymentPayload: Record<string, string> = {
       endpoint,
       merchantId,
       amount: cleanAmountStr,
-      orderRef,
+      orderRef: finalOrderRef,
       currCode,
       mpsMode: 'N',
-      successUrl: `${cleanReturnUrl}?success=true&orderRef=${orderRef}`,
-      failUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
-      cancelUrl: `${cleanReturnUrl}?failed=true&orderRef=${orderRef}`,
+      successUrl: `${cleanReturnUrl}?success=true&orderRef=${finalOrderRef}`,
+      failUrl: `${cleanReturnUrl}?failed=true&orderRef=${finalOrderRef}`,
+      cancelUrl: `${cleanReturnUrl}?failed=true&orderRef=${finalOrderRef}`,
       payType,
       lang: 'C',
-      payMethod: 'ALL',
       secureHash,
       remark: safeRemark || 'QUICK-PAY'
     };
 
+    // 只有在明確指定時才帶入 pMethod，這會強制 PayDollar 直接跳轉該支付[cite: 8, 12]
+    if (targetPMethod) {
+      paymentPayload.pMethod = targetPMethod;
+    }
+
     return NextResponse.json({
       success: true,
-      orderRef,
+      orderRef: finalOrderRef,
       paymentPayload,
       summary: {
         subtotal: subtotalNum,
