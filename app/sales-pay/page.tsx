@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
   Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check,
-  Download, Share, RefreshCw, MessageCircle // ★ 新增 UI 圖示
+  Download, Share, RefreshCw, MessageCircle, Wallet // ★ 新增 Wallet 圖示
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -24,7 +24,7 @@ interface Property {
   status?: string;
 }
 
-// ★ 輔助函數：生成帶時間戳的唯一訂單號 (防重複機制)[cite: 10]
+// 輔助函數：生成帶時間戳的唯一訂單號 (防重複機制)
 const generateUniqueOrderRef = (baseId: string) => {
   const timestamp = new Date().getTime().toString().slice(-6);
   return `${baseId}-R${timestamp}`;
@@ -33,7 +33,7 @@ const generateUniqueOrderRef = (baseId: string) => {
 function SalesQuickPayContent() {
   const searchParams = useSearchParams();
   const [loading, setLoading] = useState(false);
-  const [isRegenerating, setIsRegenerating] = useState(false); // ★ 新增重新生成狀態
+  const [isRegenerating, setIsRegenerating] = useState(false);
 
   // 交易回調與 QR Code 狀態
   const [isSuccess, setIsSuccess] = useState(false);
@@ -41,7 +41,6 @@ function SalesQuickPayContent() {
   const [successOrderRef, setSuccessOrderRef] = useState('');
   const [paidDetail, setPaidDetail] = useState('核實支付渠道中...');
   
-  // ★ QR Code 與付款連結狀態
   const [payUrl, setPayUrl] = useState('');
   const [pendingOrderRef, setPendingOrderRef] = useState('');
   const [copied, setCopied] = useState(false);
@@ -52,7 +51,7 @@ function SalesQuickPayContent() {
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // CRM 資料池 (BFF 代理)
+  // CRM 資料池
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [crmStaffList, setCrmStaffList] = useState<string[]>(['公司行政 (Office)']);
@@ -71,7 +70,8 @@ function SalesQuickPayContent() {
     phone: '',
     amount: '', 
     remarks: '首期租金 / 預約訂金',
-    salesPerson: ''
+    salesPerson: '',
+    payMethod: 'ALL' // ★ 核心新增：預設為智能顯示所有渠道
   });
 
   const pricingSummary = useMemo(() => {
@@ -243,20 +243,18 @@ function SalesQuickPayContent() {
     localStorage.setItem('SALES_STAFF_HISTORY', JSON.stringify(nextList));
   };
 
-  // ★ 核心方法：發送 API 請求生成付款連結
   const createPaymentRequest = async (isRefresh = false) => {
     try {
       if (isRefresh) setIsRegenerating(true);
       else setLoading(true);
 
-      // 動態產生單號 (解決防重複機制)[cite: 10]
       const phoneSuffix = formData.phone ? formData.phone.slice(-4) : '0000';
       const baseOrderRef = `SQP-${phoneSuffix}-${formData.roomId}`;
       const uniqueOrderRef = generateUniqueOrderRef(baseOrderRef);
 
       const requestData = {
         ...formData,
-        orderRef: uniqueOrderRef // 強制覆蓋為隨機單號
+        orderRef: uniqueOrderRef 
       };
 
       const response = await fetch('/api/paydollar/quick-checkout', {
@@ -448,7 +446,6 @@ function SalesQuickPayContent() {
     );
   }
 
-  // ★ 修改後的 待付款 QR Code 畫面
   if (payUrl) {
     const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(payUrl)}`;
     return (
@@ -467,7 +464,6 @@ function SalesQuickPayContent() {
             <img src={qrCodeImageUrl} alt="Payment QR Code" className="w-48 h-48 sm:w-56 sm:h-56" />
           </div>
           
-          {/* ★ 新增：重新生成按鈕與提示 */}
           <div className="space-y-1.5 text-center">
             <button 
               onClick={() => createPaymentRequest(true)}
@@ -475,7 +471,7 @@ function SalesQuickPayContent() {
               className="text-xs text-blue-400 hover:text-blue-300 font-bold flex items-center justify-center gap-1.5 transition-colors disabled:opacity-50 mx-auto bg-blue-900/30 px-3 py-1.5 rounded-lg"
             >
               <RefreshCw size={14} className={isRegenerating ? "animate-spin" : ""} />
-              {isRegenerating ? '重新生成中...' : 'QR Code 掃描失效？點此重新產生'}
+              {isRegenerating ? '重新生成中...' : 'QR Code 掃描失效/報錯？點此重新產生'}
             </button>
           </div>
 
@@ -484,17 +480,26 @@ function SalesQuickPayContent() {
             <p className="text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
           
-          {/* ★ 新增：微信專屬提示區塊 */}
-          <div className="bg-emerald-900/40 border border-emerald-500/30 p-3 rounded-xl">
+          {/* 微信與付款提示區塊 */}
+          <div className="bg-slate-900/50 border border-slate-700 p-4 rounded-xl space-y-3">
              <div className="flex items-start gap-2.5">
-                <MessageCircle size={18} className="text-emerald-400 shrink-0 mt-0.5" />
+                <MessageCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" />
                 <div>
-                   <p className="text-xs font-bold text-emerald-300 mb-1">使用 WeChat Pay 微信支付注意事項</p>
-                   <p className="text-[10px] text-slate-300 leading-relaxed">
-                     <span className="text-red-400 font-bold">請勿</span>使用手機相機或 Safari 掃描。請將此 QR Code 截圖，打開 <strong className="text-white">微信 App 的「掃一掃」</strong> 選擇相簿掃描，方可成功喚起微信支付。
+                   <p className="text-xs font-bold text-emerald-400 mb-1">使用 WeChat Pay 微信支付必看</p>
+                   <p className="text-[10px] text-slate-400 leading-relaxed">
+                     <span className="text-red-400 font-bold">請勿</span>使用手機預設相機或 Safari 掃描。<br/>
+                     請將此 QR Code 截圖，打開 <strong className="text-white">微信 App 的「掃一掃」</strong>，從相簿選擇圖片掃描，即可成功喚起微信支付。
                    </p>
                 </div>
              </div>
+             
+             {formData.payMethod === 'WECHAT' && (
+                <div className="bg-red-500/10 border border-red-500/20 p-2 rounded-lg">
+                  <p className="text-[10px] text-red-400 font-bold text-center">
+                    ⚠️ 銷售員已強制鎖定為「微信支付」，若使用其他 APP 掃描將會報錯。
+                  </p>
+                </div>
+             )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-700">
@@ -574,8 +579,28 @@ function SalesQuickPayContent() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          {/* 1. 收款經辦人 */}
-          <div>
+          
+          {/* ★ 核心新增：指定支付渠道 */}
+          <div className="bg-slate-900/50 border border-slate-700 p-4 rounded-xl">
+            <label className="block text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
+              <Wallet size={16}/> 客戶希望使用的支付渠道
+            </label>
+            <select
+              value={formData.payMethod}
+              onChange={e => setFormData({ ...formData, payMethod: e.target.value })}
+              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm font-bold text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
+            >
+              <option value="ALL">🌟 智能收銀台 (自動顯示所有支援方式)</option>
+              <option value="WECHAT">🟢 微信支付 (WeChat Pay) - 強制喚起模式</option>
+              <option value="ALIPAY">🔵 支付寶 (Alipay)</option>
+              <option value="CC">💳 信用卡 (VISA / Master / UnionPay)</option>
+            </select>
+            <p className="text-[10px] text-slate-500 mt-2">
+              若客戶強烈要求使用微信，請務必選擇 <strong className="text-emerald-500">微信支付</strong>，系統將強制生成微信專用防屏蔽碼。
+            </p>
+          </div>
+
+          <div className="border-t border-slate-700 pt-5">
             <label className="block text-xs font-bold text-slate-400 mb-1">收款經辦銷售員 (自由鍵入或挑選) *</label>
             <input
               type="text"
@@ -591,7 +616,6 @@ function SalesQuickPayContent() {
             </datalist>
           </div>
 
-          {/* 2. 主樓盤大廈 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>所屬大樓 / 盤源物業 *</span>
@@ -613,7 +637,6 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 3. 意向單位 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">意向/承租單位 (🟢 未出租優先置頂) *</label>
             <div className="relative">
@@ -640,7 +663,6 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 4. 姓名與聯絡電話 */}
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-400 mb-1">客戶/租客全名 *</label>
@@ -672,7 +694,6 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 5. 證件號碼 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1 flex justify-between">
               <span>證件號碼 / HKID (選填)</span>
@@ -690,11 +711,10 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 6. ★ 應收本金金額 (Subtotal) */}
           <div>
-            <label className="block text-xs font-bold text-emerald-400 mb-1">應收本金金額 (HKD) *</label>
+            <label className="block text-xs font-bold text-blue-400 mb-1">應收本金金額 (HKD) *</label>
             <div className="relative">
-              <DollarSign className="absolute left-3 top-3.5 text-emerald-500" size={20} />
+              <DollarSign className="absolute left-3 top-3.5 text-blue-500" size={20} />
               <input
                 type="number"
                 step="0.01"
@@ -702,16 +722,15 @@ function SalesQuickPayContent() {
                 placeholder="0.00"
                 value={formData.amount}
                 onChange={e => setFormData({ ...formData, amount: e.target.value })}
-                className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-emerald-500/50 rounded-xl text-xl font-mono font-black text-emerald-400 outline-none focus:ring-2 focus:ring-emerald-500"
+                className="w-full pl-10 pr-4 py-3 bg-slate-950 border border-blue-500/50 rounded-xl text-xl font-mono font-black text-blue-400 outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
           </div>
 
-          {/* ★ 7. 即時 3% 平台手續費結算明細卡片 */}
           <div className="bg-slate-900 border border-slate-700/80 rounded-2xl p-4 space-y-2">
             <div className="flex items-center justify-between text-xs text-slate-400">
               <span className="flex items-center gap-1.5 font-bold">
-                <Calculator size={14} className="text-blue-400" />
+                <Calculator size={14} className="text-slate-500" />
                 款項本金 (Subtotal)
               </span>
               <span className="font-mono">${pricingSummary.subtotal}</span>
@@ -728,7 +747,6 @@ function SalesQuickPayContent() {
             </div>
           </div>
 
-          {/* 8. 用途說明 */}
           <div>
             <label className="block text-xs font-bold text-slate-400 mb-1">款項用途 / 備註 *</label>
             <input
@@ -741,12 +759,11 @@ function SalesQuickPayContent() {
             />
           </div>
 
-          {/* 提交按鈕 */}
           <div className="pt-4">
             <button
               type="submit"
               disabled={loading || dbLoading}
-              className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 transition shadow-xl shadow-blue-600/20 disabled:opacity-50"
+              className="w-full py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 transition shadow-xl shadow-blue-600/20 disabled:opacity-50 active:scale-95"
             >
               {loading ? (
                 <>
