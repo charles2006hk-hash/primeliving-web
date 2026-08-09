@@ -249,7 +249,11 @@ function SalesQuickPayContent() {
       else setLoading(true);
 
       const phoneSuffix = formData.phone ? formData.phone.slice(-4) : '0000';
-      const baseOrderRef = `SQP-${phoneSuffix}-${formData.roomId}`;
+      
+      // ★ 核心修正：將 roomId 截斷只取前 10 碼
+      // 組合後長度：SQP(3) + -(1) + 手機(4) + -(1) + 房號(10) + -R(2) + 時間戳(6) = 27 字元 (安全小於 35)
+      const safeRoomId = formData.roomId.substring(0, 10);
+      const baseOrderRef = `SQP-${phoneSuffix}-${safeRoomId}`;
       const uniqueOrderRef = generateUniqueOrderRef(baseOrderRef);
 
       const requestData = {
