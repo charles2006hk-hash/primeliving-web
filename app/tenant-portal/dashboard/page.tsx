@@ -410,7 +410,9 @@ function DashboardContent() {
           tenantName: tenantData.name,
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
           returnUrl: window.location.origin,
-          orderRef
+          orderRef,
+          // ★ 核心補漏：明確傳遞 payMethod，避免 PayDollar 防呆機制報錯
+          payMethod: 'ALL' 
         })
       });
 
@@ -423,8 +425,10 @@ function DashboardContent() {
       const form = document.createElement('form');
       form.method = 'POST';
       form.action = paymentPayload.endpoint;
+      
+      // ★ 核心補漏：將 pMethod 從表單中剔除，統一使用 payMethod 避免網關衝突
       Object.entries(paymentPayload).forEach(([key, value]) => {
-        if (key !== 'endpoint' && value !== undefined && value !== null) {
+        if (key !== 'endpoint' && key !== 'pMethod' && value !== undefined && value !== null) {
           const input = document.createElement('input');
           input.type = 'hidden';
           input.name = key;
