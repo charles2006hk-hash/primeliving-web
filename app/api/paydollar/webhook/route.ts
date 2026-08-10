@@ -10,10 +10,10 @@ const PAY_METHOD_MAP: Record<string, string> = {
   'VISA': '💳 Visa 信用卡',
   'MASTER': '💳 MasterCard 信用卡',
   'ALIPAY': '📱 支付寶 (Alipay)',
-  'ALIPAYONL': '📱 支付寶線上 (Alipay)', // ★ 擴充補漏
+  'ALIPAYONL': '📱 支付寶線上 (Alipay)',
   'ALIPAYHK': '📱 支付寶香港 (AlipayHK)',
   'WECHAT': '💬 微信支付 (WeChat Pay)',
-  'WECHATONL': '💬 微信支付 (WeChat Pay)', // ★ 擴充補漏 (對應截圖)
+  'WECHATONL': '💬 微信支付 (WeChat Pay)',
   'WECHATHK': '💬 微信支付香港 (WeChat HK)',
   'FPS': '⚡ 轉數快 (FPS)',
   'UNIONPAY': '🏦 銀聯卡 (UnionPay)',
@@ -35,8 +35,11 @@ const fixChineseEncoding = (str: string | undefined): string => {
 function verifyPayDollarHash(data: Record<string, string>, secret: string): boolean {
   const { src = '', prc = '', successcode = '', Ref = '', PayRef = '', Cur = '', Amt = '', payerAuth = '', secureHash = '' } = data;
   if (!secureHash) return false;
-  const buffer = [src, prc, successcode, Ref, PayRef, Cur, Amt, payerAuth, secret].join('-');
+  
+  // ★ 核心修復 1：PayDollar 官方規定必須使用 '|' 作為連接字元
+  const buffer = [src, prc, successcode, Ref, PayRef, Cur, Amt, payerAuth, secret].join('|');
   const generatedHash = crypto.createHash('sha1').update(buffer).digest('hex').toUpperCase();
+  
   return generatedHash === secureHash.toUpperCase();
 }
 
@@ -45,6 +48,7 @@ export async function POST(request: Request) {
     const contentType = request.headers.get('content-type') || '';
     let data: Record<string, string> = {};
 
+    // 處理 PayDollar 傳送 Payload 的格式
     if (contentType.includes('application/x-www-form-urlencoded')) {
       const formData = await request.formData();
       data = Object.fromEntries(formData.entries()) as Record<string, string>;
@@ -61,15 +65,18 @@ export async function POST(request: Request) {
     const payRef = data.PayRef || '';
     const payMethod = data.payMethod || 'CC';
 
+    // 測試單攔截
     if (ref === 'TestDatafeed' || ref === '12345678' || data.Ref === 'Test') {
       return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
 
     const secret = process.env.PAYDOLLAR_SECURE_HASH_SECRET || process.env.PAYDOLLAR_SECURE_SECRET;
     if (!secret || !verifyPayDollarHash(data, secret)) {
+      console.error(`[Datafeed Security]: Hash 驗證失敗 (Order: ${ref})`);
       return new NextResponse('Invalid Hash', { status: 400 });
     }
 
+    // 非成功付款，回傳 OK 讓網關停止重試
     if (successCode !== '0' && prc !== '0') {
       return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
@@ -78,7 +85,6 @@ export async function POST(request: Request) {
     const nowIso = new Date().toISOString();
     const todayStr = nowIso.split('T')[0];
 
-    // ★ 核心修復 1：翻譯詳細付款管道 (AlipayHK, WeChat Pay, Visa...)
     const rawPayMethod = payMethod.toUpperCase();
     const humanPayMethod = PAY_METHOD_MAP[rawPayMethod] || `線上支付 (${rawPayMethod || '卡支付'})`;
 
@@ -88,11 +94,19 @@ export async function POST(request: Request) {
     // 分流 A：現場快速收款 (SQP- / SALES-)
     // ========================================================================
     if (ref.startsWith('SQP-') || ref.startsWith('SALES-')) {
-      const quickDoc = await adminDb.collection('quick_orders').doc(ref).get();
+      const quickDocRef = adminDb.collection('quick_orders').doc(ref);
+      const transDocRef = adminDb.collection('transactions').doc(ref);
+      
+      const quickDoc = await quickDocRef.get();
+      
+      // ★ 核心修復 2：增加冪等性 (Idempotency) 防禦，如果已經付款成功，直接回傳 OK，不浪費 DB 寫入
+      if (quickDoc.exists && quickDoc.data()?.paymentStatus === 'Paid') {
+        return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
+      }
+
       let subtotalNum = fromCents(totalPaidCents);
       let surchargeNum = 0;
 
-      // ★ 核心修復 2：讀回原本開單時記錄的「房間應收本金(subtotal)」
       if (quickDoc.exists) {
         const qData = quickDoc.data();
         if (qData?.subtotal) {
@@ -104,16 +118,15 @@ export async function POST(request: Request) {
       const updatePayload = {
         status: 'Completed',
         paymentStatus: 'Paid',
-        paymentMethodDetail: humanPayMethod, // 寫入真實支付渠道
+        paymentMethodDetail: humanPayMethod,
         payRef: payRef || 'N/A',
         paidAt: nowIso,
         updatedAt: nowIso,
       };
 
-      batch.set(adminDb.collection('quick_orders').doc(ref), updatePayload, { merge: true });
-      batch.set(adminDb.collection('transactions').doc(ref), {
+      batch.set(quickDocRef, updatePayload, { merge: true });
+      batch.set(transDocRef, {
         ...updatePayload,
-        // ★ 核心修復 3：在報表副標題與描述強制露出「微信/支付寶」及「原本應收本金」
         subtitle: `【${humanPayMethod}】 | 網關流水號：${payRef || '網關確認'}`,
         description: `應收本金：$${subtotalNum.toLocaleString()} | 3%手續費：$${surchargeNum.toLocaleString()} | 刷卡總額：$${fromCents(totalPaidCents).toLocaleString()}`
       }, { merge: true });
@@ -123,7 +136,7 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // 分流 B：租客定期交租 (反查 transactions，保留本金與渠道)
+    // 分流 B：租客定期交租 (常規入帳)
     // ========================================================================
     const transDoc = await adminDb.collection('transactions').doc(ref).get();
     let tenantId = '';
@@ -133,6 +146,7 @@ export async function POST(request: Request) {
 
     if (transDoc.exists) {
       const transData = transDoc.data();
+      // 冪等性防禦
       if (transData?.paymentStatus === 'Paid' || transData?.status === 'completed') {
         return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
       }
@@ -149,11 +163,11 @@ export async function POST(request: Request) {
       tenantId,
       tenantName,
       amount: fromCents(totalPaidCents),
-      originalAmount: originalSubtotal, // ★ 記下房間/合約原本應收金額
+      originalAmount: originalSubtotal, 
       type: 'income',
       category: '租金收款',
       paymentMethod: 'PayDollar',
-      paymentMethodDetail: humanPayMethod, // ★ 記下 AlipayHK / WeChat Pay
+      paymentMethodDetail: humanPayMethod, 
       payRef: payRef || 'N/A',
       status: 'completed',
       paymentStatus: 'Paid',
@@ -167,7 +181,7 @@ export async function POST(request: Request) {
     batch.set(adminDb.collection('transactions').doc(ref), accountingPayload, { merge: true });
     batch.set(adminDb.collection('finances').doc(`FIN-${ref}`), accountingPayload, { merge: true });
 
-    // 自動執行單據 (documents) 與租客 (tenants) 平帳...
+    // 自動執行單據 (documents) 與租客 (tenants) 平帳
     if (tenantId) {
       const docsSnap = await adminDb.collection('documents').where('formData.tenantId', '==', tenantId).get();
       const allTenantDocs = docsSnap.docs.map(doc => ({ id: doc.id, ref: doc.ref, data: doc.data() }));
@@ -201,6 +215,7 @@ export async function POST(request: Request) {
       const remainingUnpaidDocs = allTenantDocs.filter(item => !targetDocsToClear.some(tc => tc.id === item.id) && item.data.paymentStatus !== 'Paid');
       const newAmountDueCents = remainingUnpaidDocs.reduce((sum, item) => sum + toCents(item.data.formData?.totalAmount || item.data.formData?.amount || 0), 0);
       const newAmountDue = fromCents(newAmountDueCents);
+      
       batch.update(adminDb.collection('tenants').doc(tenantId), {
         amountDue: newAmountDue,
         hasUnpaidBills: newAmountDue > 0,
