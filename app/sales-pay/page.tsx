@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, Phone, DollarSign, CheckCircle2, AlertCircle,
   Loader2, IdCard, Home, Lock, Building2, Calculator, QrCode, Copy, Check,
-  Download, Share, RefreshCw, MessageCircle, Wallet // ★ 新增 Wallet 圖示
+  Download, Share, RefreshCw, MessageCircle, Wallet
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -71,7 +71,7 @@ function SalesQuickPayContent() {
     amount: '', 
     remarks: '首期租金 / 預約訂金',
     salesPerson: '',
-    payMethod: 'ALL' // ★ 核心新增：預設為智能顯示所有渠道
+    payMethod: 'WECHAT' // ★ 預設選中微信支付
   });
 
   const pricingSummary = useMemo(() => {
@@ -89,14 +89,24 @@ function SalesQuickPayContent() {
 
   useEffect(() => {
     const savedPin = localStorage.getItem('SALES_PAY_TOKEN');
-    if (savedPin) {
-      setFormData(prev => ({ ...prev, passcode: savedPin }));
-      setIsAuthorized(true);
-    }
+    let defaultStaff = '';
+    
     const localStaff = localStorage.getItem('SALES_STAFF_HISTORY');
     if (localStaff) {
-      try { setSavedStaffList(JSON.parse(localStaff)); } catch (e) {}
+      try { 
+        const parsedList = JSON.parse(localStaff);
+        setSavedStaffList(parsedList); 
+        if (parsedList.length > 0) defaultStaff = parsedList[0];
+      } catch (e) {}
     }
+
+    setFormData(prev => ({ 
+      ...prev, 
+      passcode: savedPin || '',
+      salesPerson: defaultStaff 
+    }));
+    
+    if (savedPin) setIsAuthorized(true);
   }, []);
 
   useEffect(() => {
@@ -109,9 +119,10 @@ function SalesQuickPayContent() {
           setCrmStaffList(json.data.staffList || ['公司行政 (Office)']);
           setProperties(json.data.properties || []);
           setRooms(json.data.rooms || []);
-          if (!formData.salesPerson && json.data.staffList?.length > 0) {
-            setFormData(prev => ({ ...prev, salesPerson: json.data.staffList[0] }));
-          }
+          setFormData(prev => ({ 
+            ...prev, 
+            salesPerson: prev.salesPerson || (json.data.staffList?.[0] || '公司行政 (Office)') 
+          }));
         }
       } catch (err) {
         console.error('[初始化失敗] 盤源 Proxy 錯誤:', err);
@@ -122,10 +133,10 @@ function SalesQuickPayContent() {
 
     fetchFormData();
     return () => { isMounted = false; };
-  }, [formData.salesPerson]);
+  }, []);
 
   const combinedStaffList = useMemo(() => {
-    return Array.from(new Set([...crmStaffList, ...savedStaffList]));
+    return Array.from(new Set([...savedStaffList, ...crmStaffList]));
   }, [crmStaffList, savedStaffList]);
 
   const filteredSortedRooms = useMemo(() => {
@@ -174,7 +185,7 @@ function SalesQuickPayContent() {
     const failed = searchParams?.get('failed');
     const orderRef = searchParams?.get('orderRef');
     const payRef = searchParams?.get('PayRef') || searchParams?.get('payRef');
-    const payMethod = searchParams?.get('PayMethod') || searchParams?.get('payMethod') || 'CC';
+    const payMethod = searchParams?.get('PayMethod') || searchParams?.get('payMethod') || '線上支付';
 
     if (failed === 'true') {
       setIsFailed(true);
@@ -192,14 +203,13 @@ function SalesQuickPayContent() {
       })
         .then(res => res.json())
         .then(data => {
-          if (data.success) {
-            setPaidDetail(data.detail || '線上收款確認');
-          }
+          if (data.success) setPaidDetail(data.detail || '線上收款確認');
         })
         .catch(() => setPaidDetail('已收款 (付款渠道待同步)'));
     }
   }, [searchParams]);
 
+  // ★ 自動跳轉成功邏輯：依賴 Firestore 實時監聽
   useEffect(() => {
     if (!pendingOrderRef || !db) return;
 
@@ -249,10 +259,7 @@ function SalesQuickPayContent() {
       else setLoading(true);
 
       const phoneSuffix = formData.phone ? formData.phone.slice(-4) : '0000';
-      
-      // ★ 核心修正：將 roomId 截斷只取前 10 碼
-      // 組合後長度：SQP(3) + -(1) + 手機(4) + -(1) + 房號(10) + -R(2) + 時間戳(6) = 27 字元 (安全小於 35)
-      const safeRoomId = formData.roomId.substring(0, 10);
+      const safeRoomId = formData.roomId.substring(0, 10); // 確保單號長度合規
       const baseOrderRef = `SQP-${phoneSuffix}-${safeRoomId}`;
       const uniqueOrderRef = generateUniqueOrderRef(baseOrderRef);
 
@@ -484,26 +491,39 @@ function SalesQuickPayContent() {
             <p className="text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
           
-          {/* 微信與付款提示區塊 */}
-          <div className="bg-slate-900/50 border border-slate-700 p-4 rounded-xl space-y-3">
+          {/* 針對不同支付渠道顯示專屬提示 */}
+          <div className={`p-4 rounded-xl space-y-2 border ${
+            formData.payMethod === 'WECHAT' ? 'bg-emerald-900/40 border-emerald-500/30' : 
+            formData.payMethod === 'ALIPAY' ? 'bg-blue-900/40 border-blue-500/30' : 
+            'bg-amber-900/40 border-amber-500/30'
+          }`}>
              <div className="flex items-start gap-2.5">
-                <MessageCircle size={18} className="text-emerald-500 shrink-0 mt-0.5" />
+                {formData.payMethod === 'WECHAT' && <MessageCircle size={18} className="text-emerald-400 shrink-0 mt-0.5" />}
+                {formData.payMethod === 'ALIPAY' && <Wallet size={18} className="text-blue-400 shrink-0 mt-0.5" />}
+                {formData.payMethod === 'CC' && <CreditCard size={18} className="text-amber-400 shrink-0 mt-0.5" />}
+                
                 <div>
-                   <p className="text-xs font-bold text-emerald-400 mb-1">使用 WeChat Pay 微信支付必看</p>
-                   <p className="text-[10px] text-slate-400 leading-relaxed">
-                     <span className="text-red-400 font-bold">請勿</span>使用手機預設相機或 Safari 掃描。<br/>
-                     請將此 QR Code 截圖，打開 <strong className="text-white">微信 App 的「掃一掃」</strong>，從相簿選擇圖片掃描，即可成功喚起微信支付。
+                   <p className={`text-xs font-bold mb-1 ${
+                     formData.payMethod === 'WECHAT' ? 'text-emerald-300' :
+                     formData.payMethod === 'ALIPAY' ? 'text-blue-300' : 'text-amber-300'
+                   }`}>
+                     {formData.payMethod === 'WECHAT' ? 'WeChat Pay 微信支付提示' : 
+                      formData.payMethod === 'ALIPAY' ? 'Alipay 支付寶付款提示' : 
+                      '信用卡付款提示'}
                    </p>
+                   
+                   {formData.payMethod === 'WECHAT' || formData.payMethod === 'ALIPAY' ? (
+                     <p className="text-[10px] text-slate-300 leading-relaxed">
+                       <span className="text-red-400 font-bold">請勿</span>使用手機預設相機掃描。<br/>
+                       請將此 QR Code 截圖，打開 <strong className="text-white">{formData.payMethod === 'WECHAT' ? '微信' : '支付寶'} App 的「掃一掃」</strong>，從相簿選擇圖片，即可直接無縫付款。
+                     </p>
+                   ) : (
+                     <p className="text-[10px] text-slate-300 leading-relaxed">
+                       請直接使用手機的預設相機掃描此二維碼，系統將導向安全收銀台進行信用卡結帳。
+                     </p>
+                   )}
                 </div>
              </div>
-             
-             {formData.payMethod === 'WECHAT' && (
-                <div className="bg-red-500/10 border border-red-500/20 p-2 rounded-lg">
-                  <p className="text-[10px] text-red-400 font-bold text-center">
-                    ⚠️ 銷售員已強制鎖定為「微信支付」，若使用其他 APP 掃描將會報錯。
-                  </p>
-                </div>
-             )}
           </div>
 
           <div className="grid grid-cols-2 gap-3 pt-4 border-t border-slate-700">
@@ -511,7 +531,7 @@ function SalesQuickPayContent() {
               onClick={handleNativeShare} 
               className="py-3 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs flex items-center justify-center gap-1.5 transition"
             >
-              <Share size={16} /> 發送至微信/WA
+              <Share size={16} /> 發送至手機
             </button>
             <button 
               onClick={handleDownloadQr} 
@@ -559,7 +579,6 @@ function SalesQuickPayContent() {
     <div className="min-h-screen bg-slate-900 text-slate-100 py-10 px-4 font-sans flex justify-center">
       <div className="max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-6 md:p-8 shadow-2xl">
         
-        {/* 標題與鎖定開關 */}
         <div className="flex items-center justify-between border-b border-slate-700 pb-5 mb-6">
           <div>
             <span className="text-[10px] font-black tracking-widest text-orange-400 uppercase bg-orange-500/10 px-2.5 py-1 rounded-full border border-orange-500/20">
@@ -583,25 +602,74 @@ function SalesQuickPayContent() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          
-          {/* ★ 核心新增：指定支付渠道 */}
-          <div className="bg-slate-900/50 border border-slate-700 p-4 rounded-xl">
-            <label className="block text-xs font-bold text-emerald-400 mb-2 flex items-center gap-1.5">
-              <Wallet size={16}/> 客戶希望使用的支付渠道
-            </label>
-            <select
-              value={formData.payMethod}
-              onChange={e => setFormData({ ...formData, payMethod: e.target.value })}
-              className="w-full px-4 py-3 bg-slate-950 border border-slate-700 rounded-xl text-sm font-bold text-white outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/30"
-            >
-              <option value="ALL">🌟 智能收銀台 (自動顯示所有支援方式)</option>
-              <option value="WECHAT">🟢 微信支付 (WeChat Pay) - 強制喚起模式</option>
-              <option value="ALIPAY">🔵 支付寶 (Alipay)</option>
-              <option value="CC">💳 信用卡 (VISA / Master / UnionPay)</option>
-            </select>
-            <p className="text-[10px] text-slate-500 mt-2">
-              若客戶強烈要求使用微信，請務必選擇 <strong className="text-emerald-500">微信支付</strong>，系統將強制生成微信專用防屏蔽碼。
-            </p>
+
+          {/* ★ 亮點：親切的圖形化支付選擇大按鈕 */}
+          <div className="pt-2">
+            <label className="block text-xs font-bold text-slate-400 mb-2">請選擇客戶欲使用的支付方式 (直連) *</label>
+            <div className="grid grid-cols-3 gap-3">
+              {/* WeChat Pay */}
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, payMethod: 'WECHAT' })}
+                className={`relative p-3 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                  formData.payMethod === 'WECHAT' 
+                    ? 'border-emerald-500 bg-emerald-500/10 shadow-[0_0_10px_rgba(16,185,129,0.2)]' 
+                    : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                }`}
+              >
+                {formData.payMethod === 'WECHAT' && (
+                  <div className="absolute -top-2 -right-2 bg-emerald-500 text-white rounded-full p-0.5 shadow-sm">
+                    <Check size={14}/>
+                  </div>
+                )}
+                <div className="w-8 h-8 rounded-full bg-emerald-500/20 flex items-center justify-center text-emerald-400">
+                  <MessageCircle size={18} />
+                </div>
+                <span className="text-[11px] font-bold text-slate-300">微信支付</span>
+              </button>
+
+              {/* Alipay */}
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, payMethod: 'ALIPAY' })}
+                className={`relative p-3 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                  formData.payMethod === 'ALIPAY' 
+                    ? 'border-blue-500 bg-blue-500/10 shadow-[0_0_10px_rgba(59,130,246,0.2)]' 
+                    : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                }`}
+              >
+                {formData.payMethod === 'ALIPAY' && (
+                  <div className="absolute -top-2 -right-2 bg-blue-500 text-white rounded-full p-0.5 shadow-sm">
+                    <Check size={14}/>
+                  </div>
+                )}
+                <div className="w-8 h-8 rounded-full bg-blue-500/20 flex items-center justify-center text-blue-400">
+                  <Wallet size={18} />
+                </div>
+                <span className="text-[11px] font-bold text-slate-300">支付寶</span>
+              </button>
+
+              {/* Credit Card */}
+              <button
+                type="button"
+                onClick={() => setFormData({ ...formData, payMethod: 'CC' })}
+                className={`relative p-3 rounded-xl border-2 flex flex-col items-center justify-center gap-2 transition-all ${
+                  formData.payMethod === 'CC' 
+                    ? 'border-amber-500 bg-amber-500/10 shadow-[0_0_10px_rgba(245,158,11,0.2)]' 
+                    : 'border-slate-700 bg-slate-900 hover:border-slate-600'
+                }`}
+              >
+                {formData.payMethod === 'CC' && (
+                  <div className="absolute -top-2 -right-2 bg-amber-500 text-white rounded-full p-0.5 shadow-sm">
+                    <Check size={14}/>
+                  </div>
+                )}
+                <div className="w-8 h-8 rounded-full bg-amber-500/20 flex items-center justify-center text-amber-400">
+                  <CreditCard size={18} />
+                </div>
+                <span className="text-[11px] font-bold text-slate-300">信用卡</span>
+              </button>
+            </div>
           </div>
 
           <div className="border-t border-slate-700 pt-5">
@@ -777,7 +845,7 @@ function SalesQuickPayContent() {
               ) : (
                 <>
                   <QrCode size={20} />
-                  產生收款二維碼 (${pricingSummary.total})
+                  產生直連結帳二維碼 (${pricingSummary.total})
                 </>
               )}
             </button>
