@@ -168,7 +168,7 @@ export async function POST(request: Request) {
 
     // ★ 核心修復：使用 PayDollar 官方跳過頁面所需的 payMethod 參數
     let targetPayMethod = 'ALL';
-    if (payMethod === 'WECHAT') targetPayMethod = 'WECHAT';
+    if (payMethod === 'WECHAT') targetPayMethod = 'WECHATONL';
     else if (payMethod === 'ALIPAY') targetPayMethod = 'ALIPAY';
     else if (payMethod === 'CC') targetPayMethod = 'CC';
 
