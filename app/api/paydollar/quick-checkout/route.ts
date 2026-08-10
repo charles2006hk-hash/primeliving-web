@@ -163,7 +163,7 @@ export async function POST(request: Request) {
     );
 
     const origin = new URL(request.url).origin;
-    const cleanReturnUrl = `${origin}/sales-pay`;
+    const cleanReturnUrl = `${origin}/payment-status`;
     const safeRemark = `SALES ${toSafeAscii(quickOrderData.roomName)}`.trim();
 
     // ★ 核心修復：使用 PayDollar 官方跳過頁面所需的 payMethod 參數
