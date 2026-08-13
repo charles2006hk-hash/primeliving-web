@@ -4,7 +4,7 @@ import React, { useState, useEffect, Suspense, useMemo } from 'react';
 import { 
   CreditCard, User, DollarSign, CheckCircle2, AlertCircle,
   Loader2, Home, Lock, Building2, Calculator, QrCode, Copy, Check,
-  Download, Share, RefreshCw, MessageCircle, Wallet
+  Download, Share, RefreshCw, MessageCircle, Wallet, IdCard
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { doc, onSnapshot } from 'firebase/firestore';
@@ -58,7 +58,7 @@ function SalesQuickPayContent() {
   const [savedStaffList, setSavedStaffList] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(true);
 
-  // 表單狀態 - 移除電話 (phone) 與 身份證 (idNumber)
+  // 表單狀態 - 加回 idNumber
   const [formData, setFormData] = useState({
     passcode: '',
     propertyId: '',
@@ -66,10 +66,11 @@ function SalesQuickPayContent() {
     roomName: '',
     region: '',
     tenantName: '',
+    idNumber: '', // ★ 加回證件號碼
     amount: '', 
     remarks: '首期租金 / 預約訂金',
     salesPerson: '',
-    payMethod: 'WECHAT' // ★ 預設選中微信支付
+    payMethod: 'WECHAT' 
   });
 
   const pricingSummary = useMemo(() => {
@@ -207,7 +208,6 @@ function SalesQuickPayContent() {
     }
   }, [searchParams]);
 
-  // ★ 自動跳轉成功邏輯：依賴 Firestore 實時監聽
   useEffect(() => {
     if (!pendingOrderRef || !db) return;
 
@@ -256,7 +256,7 @@ function SalesQuickPayContent() {
       if (isRefresh) setIsRegenerating(true);
       else setLoading(true);
 
-      const safeRoomId = formData.roomId.substring(0, 10); // 確保單號長度合規
+      const safeRoomId = formData.roomId.substring(0, 10); 
       const baseOrderRef = `SQP-${safeRoomId}`;
       const uniqueOrderRef = generateUniqueOrderRef(baseOrderRef);
 
@@ -363,7 +363,8 @@ function SalesQuickPayContent() {
 
   if (!isAuthorized) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center p-4 sm:p-6 font-sans">
+      // ★ 使用 fixed inset-0 z-[100] 覆蓋原本系統的 Layout (頁首/頁尾)
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950 flex items-center justify-center p-4 sm:p-6 font-sans">
         <div className="bg-slate-900 border border-slate-800 max-w-sm w-full rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
           <div className="text-center space-y-2">
             <div className="w-16 h-16 bg-blue-500/10 text-blue-500 rounded-2xl flex items-center justify-center mx-auto border border-blue-500/20">
@@ -399,7 +400,7 @@ function SalesQuickPayContent() {
 
   if (isFailed) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 sm:p-6 font-sans">
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900 flex items-center justify-center p-4 sm:p-6 font-sans">
         <div className="bg-slate-800 border border-red-500/30 max-w-md w-full rounded-3xl p-6 sm:p-8 text-center shadow-2xl space-y-6">
           <div className="w-16 h-16 sm:w-20 sm:h-20 bg-red-500/20 text-red-400 rounded-full flex items-center justify-center mx-auto border border-red-500/30">
             <AlertCircle size={32} className="sm:w-10 sm:h-10" />
@@ -428,7 +429,7 @@ function SalesQuickPayContent() {
 
   if (isSuccess) {
     return (
-      <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4 sm:p-6 font-sans">
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900 flex items-center justify-center p-4 sm:p-6 font-sans">
         <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-6 sm:p-8 text-center shadow-2xl space-y-6">
           <div className="w-16 h-16 sm:w-20 sm:h-20 bg-emerald-500/20 text-emerald-400 rounded-full flex items-center justify-center mx-auto border border-emerald-500/30">
             <CheckCircle2 size={32} className="sm:w-10 sm:h-10" />
@@ -457,7 +458,7 @@ function SalesQuickPayContent() {
   if (payUrl) {
     const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(payUrl)}`;
     return (
-      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4 sm:p-6 font-sans">
+      <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900 flex flex-col items-center justify-center p-4 sm:p-6 font-sans">
         <div className="bg-slate-800 border border-slate-700 max-w-md w-full rounded-3xl p-5 sm:p-8 shadow-2xl space-y-5 sm:space-y-6 relative overflow-hidden">
           <div className="absolute top-0 left-0 w-full h-1 bg-blue-500/50 shadow-[0_0_15px_rgba(59,130,246,0.8)] animate-[scan_2s_ease-in-out_infinite]" />
 
@@ -573,8 +574,8 @@ function SalesQuickPayContent() {
 
   // 視圖 D：主收款表單
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-100 py-6 sm:py-10 px-3 sm:px-4 font-sans flex justify-center">
-      <div className="max-w-md sm:max-w-xl w-full bg-slate-800 border border-slate-700 rounded-3xl p-5 sm:p-8 shadow-2xl">
+    <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900 text-slate-100 py-6 sm:py-10 px-3 sm:px-4 font-sans flex justify-center">
+      <div className="max-w-md sm:max-w-xl w-full h-max bg-slate-800 border border-slate-700 rounded-3xl p-5 sm:p-8 shadow-2xl mb-10">
         
         <div className="flex items-center justify-between border-b border-slate-700 pb-4 sm:pb-5 mb-5 sm:mb-6">
           <div>
@@ -594,7 +595,6 @@ function SalesQuickPayContent() {
             >
               鎖定
             </button>
-            <img src="/logo.png" alt="Logo" className="h-6 sm:h-8 opacity-80 hidden sm:block" />
           </div>
         </div>
 
@@ -697,10 +697,25 @@ function SalesQuickPayContent() {
                 />
               </div>
             </div>
+
+            {/* ★ 重新加回：證件號碼 / HKID */}
+            <div className="col-span-2">
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-400 mb-1">證件號碼 / HKID (選填)</label>
+              <div className="relative">
+                <IdCard className="absolute left-2.5 sm:left-3 top-3 sm:top-3.5 text-slate-500" size={16} />
+                <input
+                  type="text"
+                  placeholder="e.g. A123456(7) 或後4碼"
+                  value={formData.idNumber}
+                  onChange={e => setFormData({ ...formData, idNumber: e.target.value })}
+                  className="w-full pl-8 sm:pl-9 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-xl text-[13px] sm:text-sm font-bold text-white outline-none focus:border-blue-500 uppercase"
+                />
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div className="col-span-1 sm:col-span-2 border-t border-slate-700 pt-3 sm:pt-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 border-t border-slate-700 pt-3 sm:pt-4">
+            <div className="col-span-1 sm:col-span-2">
               <label className="block text-[11px] sm:text-xs font-bold text-slate-400 mb-1 flex justify-between">
                 <span>大樓 / 盤源物業 *</span>
                 {dbLoading && <span className="text-blue-400 flex items-center gap-1"><Loader2 size={10} className="animate-spin" /></span>}
@@ -835,7 +850,7 @@ export default function SalesQuickPayPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-screen bg-slate-900 flex items-center justify-center">
+        <div className="fixed inset-0 z-[100] bg-slate-900 flex items-center justify-center">
           <Loader2 size={36} className="animate-spin text-blue-500" />
         </div>
       }
