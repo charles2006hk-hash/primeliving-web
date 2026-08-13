@@ -1,3 +1,4 @@
+// app/sales-pay/page.tsx
 'use client';
 
 import React, { useState, useEffect, Suspense, useMemo } from 'react';
@@ -24,7 +25,6 @@ interface Property {
   status?: string;
 }
 
-// 輔助函數：生成帶時間戳的唯一訂單號 (防重複機制)
 const generateUniqueOrderRef = (baseId: string) => {
   const timestamp = new Date().getTime().toString().slice(-6);
   return `${baseId}-R${timestamp}`;
@@ -35,7 +35,6 @@ function SalesQuickPayContent() {
   const [loading, setLoading] = useState(false);
   const [isRegenerating, setIsRegenerating] = useState(false);
 
-  // 交易回調與 QR Code 狀態
   const [isSuccess, setIsSuccess] = useState(false);
   const [isFailed, setIsFailed] = useState(false);
   const [successOrderRef, setSuccessOrderRef] = useState('');
@@ -46,19 +45,17 @@ function SalesQuickPayContent() {
   const [copied, setCopied] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
 
-  // 授權金鑰狀態
   const [isAuthorized, setIsAuthorized] = useState(false);
   const [pinInput, setPinInput] = useState('');
   const [authError, setAuthError] = useState('');
 
-  // CRM 資料池
   const [rooms, setRooms] = useState<Room[]>([]);
   const [properties, setProperties] = useState<Property[]>([]);
   const [crmStaffList, setCrmStaffList] = useState<string[]>(['公司行政 (Office)']);
   const [savedStaffList, setSavedStaffList] = useState<string[]>([]);
   const [dbLoading, setDbLoading] = useState(true);
 
-  // 表單狀態 - 加回 idNumber
+  // ★ 表單狀態：移除 phone，保留 idNumber 
   const [formData, setFormData] = useState({
     passcode: '',
     propertyId: '',
@@ -66,7 +63,7 @@ function SalesQuickPayContent() {
     roomName: '',
     region: '',
     tenantName: '',
-    idNumber: '', // ★ 加回證件號碼
+    idNumber: '', 
     amount: '', 
     remarks: '首期租金 / 預約訂金',
     salesPerson: '',
@@ -306,6 +303,7 @@ function SalesQuickPayContent() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    // ★ 表單驗證：移除電話驗證
     if (!formData.tenantName || !formData.amount || !formData.roomId) {
       return alert('請完整填寫客戶姓名、選擇單位及正確金額！');
     }
@@ -363,7 +361,6 @@ function SalesQuickPayContent() {
 
   if (!isAuthorized) {
     return (
-      // ★ 使用 fixed inset-0 z-[100] 覆蓋原本系統的 Layout (頁首/頁尾)
       <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-950 flex items-center justify-center p-4 sm:p-6 font-sans">
         <div className="bg-slate-900 border border-slate-800 max-w-sm w-full rounded-3xl p-6 sm:p-8 shadow-2xl space-y-6">
           <div className="text-center space-y-2">
@@ -489,7 +486,6 @@ function SalesQuickPayContent() {
             <p className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
           
-          {/* 針對不同支付渠道顯示專屬提示 */}
           <div className={`p-3 sm:p-4 rounded-xl space-y-2 border ${
             formData.payMethod === 'WECHAT' ? 'bg-emerald-900/40 border-emerald-500/30' : 
             formData.payMethod === 'ALIPAY' ? 'bg-blue-900/40 border-blue-500/30' : 
@@ -572,7 +568,6 @@ function SalesQuickPayContent() {
     );
   }
 
-  // 視圖 D：主收款表單
   return (
     <div className="fixed inset-0 z-[100] overflow-y-auto bg-slate-900 text-slate-100 py-6 sm:py-10 px-3 sm:px-4 font-sans flex justify-center">
       <div className="max-w-md sm:max-w-xl w-full h-max bg-slate-800 border border-slate-700 rounded-3xl p-5 sm:p-8 shadow-2xl mb-10">
@@ -600,7 +595,6 @@ function SalesQuickPayContent() {
 
         <form onSubmit={handleSubmit} className="space-y-4 sm:space-y-5">
 
-          {/* 支付方式選擇 */}
           <div className="pt-1">
             <label className="block text-[11px] sm:text-xs font-bold text-slate-400 mb-1.5">支付方式 *</label>
             <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -690,7 +684,7 @@ function SalesQuickPayContent() {
                 <input
                   type="text"
                   required
-                  placeholder="Chan Tai Man"
+                  placeholder="e.g. Chan Tai Man"
                   value={formData.tenantName}
                   onChange={e => setFormData({ ...formData, tenantName: e.target.value })}
                   className="w-full pl-8 sm:pl-9 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-xl text-[13px] sm:text-sm font-bold text-white outline-none focus:border-blue-500"
@@ -698,14 +692,14 @@ function SalesQuickPayContent() {
               </div>
             </div>
 
-            {/* ★ 重新加回：證件號碼 / HKID */}
+            {/* ★ 證件號碼：預設提示中國身份證格式 */}
             <div className="col-span-2">
-              <label className="block text-[11px] sm:text-xs font-bold text-slate-400 mb-1">證件號碼 / HKID (選填)</label>
+              <label className="block text-[11px] sm:text-xs font-bold text-slate-400 mb-1">證件號碼 (選填)</label>
               <div className="relative">
                 <IdCard className="absolute left-2.5 sm:left-3 top-3 sm:top-3.5 text-slate-500" size={16} />
                 <input
                   type="text"
-                  placeholder="e.g. A123456(7) 或後4碼"
+                  placeholder="e.g. 110105199001011234 或後4碼"
                   value={formData.idNumber}
                   onChange={e => setFormData({ ...formData, idNumber: e.target.value })}
                   className="w-full pl-8 sm:pl-9 pr-3 sm:pr-4 py-2.5 sm:py-3 bg-slate-900 border border-slate-700 rounded-xl text-[13px] sm:text-sm font-bold text-white outline-none focus:border-blue-500 uppercase"
