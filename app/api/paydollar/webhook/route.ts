@@ -36,7 +36,6 @@ function verifyPayDollarHash(data: Record<string, string>, secret: string): bool
   const { src = '', prc = '', successcode = '', Ref = '', PayRef = '', Cur = '', Amt = '', payerAuth = '', secureHash = '' } = data;
   if (!secureHash) return false;
   
-  // ★ 核心修復 1：PayDollar 官方規定必須使用 '|' 作為連接字元
   const buffer = [src, prc, successcode, Ref, PayRef, Cur, Amt, payerAuth, secret].join('|');
   const generatedHash = crypto.createHash('sha1').update(buffer).digest('hex').toUpperCase();
   
@@ -48,7 +47,6 @@ export async function POST(request: Request) {
     const contentType = request.headers.get('content-type') || '';
     let data: Record<string, string> = {};
 
-    // 處理 PayDollar 傳送 Payload 的格式
     if (contentType.includes('application/x-www-form-urlencoded')) {
       const formData = await request.formData();
       data = Object.fromEntries(formData.entries()) as Record<string, string>;
@@ -65,7 +63,6 @@ export async function POST(request: Request) {
     const payRef = data.PayRef || '';
     const payMethod = data.payMethod || 'CC';
 
-    // 測試單攔截
     if (ref === 'TestDatafeed' || ref === '12345678' || data.Ref === 'Test') {
       return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
@@ -76,7 +73,6 @@ export async function POST(request: Request) {
       return new NextResponse('Invalid Hash', { status: 400 });
     }
 
-    // 非成功付款，回傳 OK 讓網關停止重試
     if (successCode !== '0' && prc !== '0') {
       return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
@@ -99,7 +95,6 @@ export async function POST(request: Request) {
       
       const quickDoc = await quickDocRef.get();
       
-      // ★ 核心修復 2：增加冪等性 (Idempotency) 防禦，如果已經付款成功，直接回傳 OK，不浪費 DB 寫入
       if (quickDoc.exists && quickDoc.data()?.paymentStatus === 'Paid') {
         return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
       }
@@ -136,27 +131,49 @@ export async function POST(request: Request) {
     }
 
     // ========================================================================
-    // 分流 B：租客定期交租 (常規入帳)
+    // 分流 B：無主款項攔截 (固定碼掃碼支付)
     // ========================================================================
-    const transDoc = await adminDb.collection('transactions').doc(ref).get();
-    let tenantId = '';
-    let tenantName = '線上租客';
-    let billIds: string[] = [];
-    let originalSubtotal = fromCents(totalPaidCents);
+    const transDocRef = adminDb.collection('transactions').doc(ref);
+    const transDoc = await transDocRef.get();
 
-    if (transDoc.exists) {
-      const transData = transDoc.data();
-      // 冪等性防禦
-      if (transData?.paymentStatus === 'Paid' || transData?.status === 'completed') {
-        return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
-      }
-      tenantId = transData?.tenantId || '';
-      tenantName = fixChineseEncoding(transData?.tenantName || '線上租客');
-      billIds = transData?.billIds || [];
-      if (transData?.subtotal || transData?.originalAmount) {
-        originalSubtotal = Number(transData.subtotal || transData.originalAmount);
-      }
+    // ★ 如果找不到訂單，代表是未知的固定碼交易，寫入無主款項池
+    if (!transDoc.exists) {
+      console.log(`[PayDollar Webhook] 收到無主款項 (固定碼): ${ref}, 金額: ${amt}`);
+      
+      const unclaimedPayload = {
+        orderRef: ref,
+        payRef: payRef || 'N/A',
+        amount: fromCents(totalPaidCents),
+        paymentMethod: 'PayDollar',
+        paymentMethodDetail: humanPayMethod,
+        status: 'Unclaimed', 
+        paymentStatus: 'Paid',
+        subtitle: `【${humanPayMethod}】 | 網關流水號：${payRef || 'N/A'}`,
+        description: `固定碼收款，需手動配單。總額：$${fromCents(totalPaidCents).toLocaleString()}`,
+        receivedAt: nowIso,
+        updatedAt: nowIso,
+        assignedTo: null
+      };
+
+      batch.set(adminDb.collection('unclaimed_payments').doc(ref), unclaimedPayload, { merge: true });
+      await batch.commit();
+      
+      return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
     }
+
+    // ========================================================================
+    // 分流 C：租客定期交租 (常規入帳)
+    // ========================================================================
+    const transData = transDoc.data();
+    
+    if (transData?.paymentStatus === 'Paid' || transData?.status === 'completed') {
+      return new NextResponse('OK', { status: 200, headers: { 'Content-Type': 'text/plain' } });
+    }
+
+    const tenantId = transData?.tenantId || '';
+    const tenantName = fixChineseEncoding(transData?.tenantName || '線上租客');
+    const billIds = transData?.billIds || [];
+    const originalSubtotal = Number(transData?.subtotal || transData?.originalAmount || fromCents(totalPaidCents));
 
     const accountingPayload = {
       orderRef: ref,
@@ -178,10 +195,10 @@ export async function POST(request: Request) {
       updatedAt: nowIso
     };
 
-    batch.set(adminDb.collection('transactions').doc(ref), accountingPayload, { merge: true });
+    batch.set(transDocRef, accountingPayload, { merge: true });
     batch.set(adminDb.collection('finances').doc(`FIN-${ref}`), accountingPayload, { merge: true });
 
-    // 自動執行單據 (documents) 與租客 (tenants) 平帳
+    // 自動平帳邏輯
     if (tenantId) {
       const docsSnap = await adminDb.collection('documents').where('formData.tenantId', '==', tenantId).get();
       const allTenantDocs = docsSnap.docs.map(doc => ({ id: doc.id, ref: doc.ref, data: doc.data() }));
