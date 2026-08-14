@@ -29,6 +29,24 @@ export async function POST(request: Request) {
       );
     }
 
+// ★ 同步加入後端 API 72小時超時阻擋防護
+    if (orderRef) {
+      const orderDoc = await adminDb.collection('quick_orders').doc(orderRef).get();
+      if (orderDoc.exists) {
+        const createdAt = orderDoc.data()?.createdAt;
+        if (createdAt) {
+          const createdAtTime = new Date(createdAt).getTime();
+          const EXPIRY_HOURS = 72;
+          if (Date.now() > createdAtTime + EXPIRY_HOURS * 60 * 60 * 1000) {
+            return NextResponse.json(
+              { success: false, error: '此繳費單已超過 72 小時有效期，請聯繫業務重新開單。' },
+              { status: 403, headers: corsHeaders }
+            );
+          }
+        }
+      }
+    }
+    
     const merchantId = process.env.PAYDOLLAR_MERCHANT_ID;
     const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET;
     const endpoint = process.env.PAYDOLLAR_PAYMENT_URL || 'https://www.paydollar.com/b2c2/eng/payment/payForm.jsp';
