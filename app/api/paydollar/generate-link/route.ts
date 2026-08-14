@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import crypto from 'crypto';
+// ★ 補上這行：引入 adminDb 以便查詢訂單的 72 小時過期時間
+import { adminDb } from '@/lib/firebase-admin'; 
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,7 +9,6 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 };
 
-// 安全處理特殊字元 (避免 PayDollar 網關因奇怪符號報錯)
 const toSafeAscii = (str: string): string => {
   return (str || '').replace(/[^a-zA-Z0-9 _-]/g, '').trim().slice(0, 40);
 };
@@ -21,7 +22,6 @@ export async function POST(request: Request) {
     const body = await request.json();
     const { orderRef, amount, roomName, payMethod } = body;
 
-    // 基本防呆驗證
     if (!orderRef || !amount) {
       return NextResponse.json(
         { success: false, error: '缺少單號或金額參數' },
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
       );
     }
 
-// ★ 同步加入後端 API 72小時超時阻擋防護
+    // ★ 72小時超時阻擋防護
     if (orderRef) {
       const orderDoc = await adminDb.collection('quick_orders').doc(orderRef).get();
       if (orderDoc.exists) {
@@ -46,25 +46,22 @@ export async function POST(request: Request) {
         }
       }
     }
-    
+
     const merchantId = process.env.PAYDOLLAR_MERCHANT_ID;
     const secureHashSecret = process.env.PAYDOLLAR_SECURE_HASH_SECRET;
     const endpoint = process.env.PAYDOLLAR_PAYMENT_URL || 'https://www.paydollar.com/b2c2/eng/payment/payForm.jsp';
 
     if (!merchantId || !secureHashSecret) {
-      console.error('[Generate-Link Error]: 遺漏 PAYDOLLAR_MERCHANT_ID 或 PAYDOLLAR_SECURE_HASH_SECRET');
       return NextResponse.json(
         { success: false, error: '系統正式環境金鑰未正確設定' },
         { status: 500, headers: corsHeaders }
       );
     }
 
-    // 格式化金額，確保為 2 位小數字串 (防浮點數跳錯)
     const cleanAmountStr = Number(amount).toFixed(2);
-    const currCode = '344'; // HKD
-    const payType = 'N';    // Normal Sale
+    const currCode = '344'; 
+    const payType = 'N';    
 
-    // 產生 PayDollar 專屬安全簽章 (Secure Hash)
     const hashStr = [
       merchantId.trim(),
       String(orderRef).trim(),
@@ -76,18 +73,15 @@ export async function POST(request: Request) {
 
     const secureHash = crypto.createHash('sha1').update(hashStr).digest('hex');
 
-    // 處理返回網址 (指向我們剛做好的 payment-status 統一狀態頁面)
     const origin = new URL(request.url).origin;
     const cleanReturnUrl = `${origin}/payment-status`;
     const safeRemark = `SALES ${toSafeAscii(roomName || '')}`.trim();
 
-    // 映射對應的支付渠道代碼
     let targetPayMethod = 'ALL';
     if (payMethod === 'WECHAT') targetPayMethod = 'WECHATONL';
     else if (payMethod === 'ALIPAY') targetPayMethod = 'ALIPAY';
     else if (payMethod === 'CC') targetPayMethod = 'CC';
 
-    // 組合最終 Payload 返回給前端渲染
     const paymentPayload: Record<string, string> = {
       endpoint,
       merchantId,
