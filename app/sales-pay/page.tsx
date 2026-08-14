@@ -416,7 +416,7 @@ function SalesQuickPayContent() {
     );
   }
 
-  // ★ 顯示新版的動態繳費單網址 QR Code
+  // ★ 顯示新版的動態繳費單網址 QR Code 與銷售指引
   if (invoiceUrl) {
     const qrCodeImageUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&margin=10&data=${encodeURIComponent(invoiceUrl)}`;
     return (
@@ -439,11 +439,27 @@ function SalesQuickPayContent() {
             <p className="text-2xl sm:text-3xl font-black font-mono text-emerald-400">HKD ${pricingSummary.total}</p>
           </div>
           
-          <div className="p-3 sm:p-4 rounded-xl space-y-2 border bg-blue-900/20 border-blue-500/30 text-center">
-            <p className="text-[11px] sm:text-xs text-blue-300 font-bold leading-relaxed">
-              請出示此二維碼讓租客掃描，<br/>或點擊下方按鈕將網址發送給租客。<br/>
-              <span className="text-[10px] text-slate-400 mt-1 block font-normal">租客可在自己的手機上自由選擇微信、支付寶或信用卡付款。此連結永久有效。</span>
+          {/* ★ 新增：銷售發單操作指引 */}
+          <div className="bg-slate-900/50 p-4 rounded-2xl border border-slate-700 text-left space-y-3">
+            <p className="text-[10px] sm:text-xs font-black text-slate-400 border-b border-slate-700/80 pb-2 flex items-center gap-1.5">
+              💁‍♀️ 銷售專員發單指引
             </p>
+            
+            <div className="flex items-start gap-2.5">
+              <div className="bg-emerald-500/20 text-emerald-400 p-1.5 rounded-lg shrink-0 mt-0.5"><QrCode size={14}/></div>
+              <div>
+                <p className="text-[11px] sm:text-xs font-bold text-emerald-300">現場面對面交租</p>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 leading-relaxed">請將此畫面轉向客戶，請客戶直接用手機相機或微信掃描上方二維碼。</p>
+              </div>
+            </div>
+
+            <div className="flex items-start gap-2.5">
+              <div className="bg-blue-500/20 text-blue-400 p-1.5 rounded-lg shrink-0 mt-0.5"><Share size={14}/></div>
+              <div>
+                <p className="text-[11px] sm:text-xs font-bold text-blue-300">遠端發送 (WhatsApp / 微信)</p>
+                <p className="text-[9px] sm:text-[10px] text-slate-400 mt-0.5 leading-relaxed">點擊下方「複製純文字網址」，將繳費連結貼給客戶。客戶點開即可自主選擇支付方式。</p>
+              </div>
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-2 sm:gap-3 pt-3 sm:pt-4 border-t border-slate-700">
