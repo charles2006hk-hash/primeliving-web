@@ -120,8 +120,16 @@ export default function TenantInvoicePage() {
     );
   }
 
+  // ★ 判斷是否已經付款
   const isPaid = orderData.paymentStatus === 'Paid';
-  const isInvalid = orderData.status === 'Refunded' || orderData.status === 'Voided';
+  
+  // ★ 計算是否逾期 (設定為 72 小時 = 3 天有效期)
+  const EXPIRY_HOURS = 72;
+  const createdAtTime = orderData.createdAt ? new Date(orderData.createdAt).getTime() : 0;
+  const isExpired = createdAtTime > 0 && (Date.now() > createdAtTime + EXPIRY_HOURS * 60 * 60 * 1000);
+
+  // ★ 綜合失效判斷 (被手動作廢、退款，或超時)
+  const isInvalid = orderData.status === 'Refunded' || orderData.status === 'Voided' || isExpired;
 
   return (
     <div className="min-h-screen bg-slate-100/50 py-8 px-4 sm:px-6 font-sans flex flex-col items-center justify-center selection:bg-blue-100">
@@ -137,7 +145,7 @@ export default function TenantInvoicePage() {
         {/* 單據標頭區塊 */}
         <div className={`p-6 sm:p-8 text-center relative ${isPaid ? 'bg-emerald-50 border-b border-emerald-100' : isInvalid ? 'bg-slate-100 border-b border-slate-200' : 'bg-blue-600 border-b border-blue-700'}`}>
           <p className={`text-xs font-bold mb-2 uppercase tracking-widest ${isPaid ? 'text-emerald-600' : isInvalid ? 'text-slate-500' : 'text-blue-200'}`}>
-            {isPaid ? '已結清 (Paid)' : isInvalid ? '已失效 (Invalid)' : '應付總額 (Total Due)'}
+            {isPaid ? '已結清 (Paid)' : isExpired ? '已逾期失效 (Expired)' : isInvalid ? '已作廢 (Voided)' : '應付總額 (Total Due)'}
           </p>
           <p className={`text-4xl sm:text-5xl font-black font-mono tracking-tight ${isPaid ? 'text-emerald-700' : isInvalid ? 'text-slate-400 line-through' : 'text-white'}`}>
             <span className="text-2xl mr-1 sm:mr-2 opacity-80">HKD</span> 
