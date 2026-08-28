@@ -5,10 +5,10 @@ import {
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
-  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3
+  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2
 } from 'lucide-react';
 import Link from 'next/link';
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
@@ -869,7 +869,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Navbar */}
+      {/* Navbar - 加入登出按鈕 */}
       <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
         <Link href="/" className="flex items-center">
           <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
@@ -1101,8 +1101,25 @@ function DashboardContent() {
                 myInquiries.map(log => {
                   const isOfficial = log.type === 'official_notice'; 
                   const isMyTicket = !log.type || log.type === 'ticket'; 
+                  
+                  // ★ 新增：刪除通知函數
+                  const handleDeleteLog = async () => {
+                    if (confirm('確定要刪除這條通知紀錄嗎？')) {
+                      try {
+                        await deleteDoc(doc(db, 'inquiries', log.id));
+                      } catch (e) {
+                        alert('刪除失敗');
+                      }
+                    }
+                  };
+
                   return (
-                    <div key={log.id} className="space-y-3 mb-4">
+                    <div key={log.id} className="space-y-3 mb-4 group relative">
+                      {/* ★ 新增：刪除按鈕 (Hover 顯示) */}
+                      <button onClick={handleDeleteLog} className="absolute -top-2 -right-2 z-10 bg-white border border-slate-200 text-slate-300 hover:text-red-500 hover:border-red-200 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-sm">
+                        <Trash2 size={12} />
+                      </button>
+
                       {isOfficial && (
                         <div className="bg-white p-4 rounded-xl border border-blue-200 shadow-sm relative overflow-hidden">
                           <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
@@ -1175,6 +1192,7 @@ function DashboardContent() {
                ))}
                <div ref={chatEndRef} />
             </div>
+            {/* ★ 移除了原有的 WhatsApp / 電話連結區塊 */}
             <div className="p-4 bg-white border-t border-slate-100 flex-none pb-8 sm:pb-4">
               <form onSubmit={(e) => { e.preventDefault(); handleSendChatMessage(chatInput); }} className="flex gap-2">
                 <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="請輸入您的問題..." className="flex-1 px-4 py-3 bg-slate-100 border-transparent rounded-full text-sm outline-none focus:ring-2 focus:ring-orange-500/20 focus:bg-white transition" />
@@ -1182,7 +1200,6 @@ function DashboardContent() {
                    {isSubmittingTicket ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
                 </button>
               </form>
-              
             </div>
           </div>
         </div>
