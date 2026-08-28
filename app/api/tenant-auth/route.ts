@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 // ⚠️ 修正：直接對應你原版 firebaseAdmin.ts 導出的 adminDb 變數
-import { adminDb } from '@/lib/firebaseAdmin';
+import { adminDb } from '@/lib/firebase-admin';
 
 export async function POST(request: Request) {
   try {
