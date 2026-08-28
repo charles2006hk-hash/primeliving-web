@@ -20,7 +20,6 @@ export default function Navbar() {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // ★ 升級字體大小至 text-base (16px)，這是 B2C 網站的最佳閱讀比例
   const linkStyle = (path: string) => {
     const isActive = pathname === path;
     return `relative group py-2 text-base font-bold transition-colors duration-300 ${
@@ -35,6 +34,12 @@ export default function Navbar() {
     }`;
   };
 
+  // ★ 核心修復：如果目前在「租客儀表板」頁面，直接隱藏全域 Navbar
+  // 這樣就能讓儀表板內建的 Navbar (包含安全登出按鈕) 正常顯示在最上方
+  if (pathname?.startsWith('/tenant-portal/dashboard')) {
+    return null;
+  }
+
   return (
     <>
       <nav 
@@ -48,7 +53,6 @@ export default function Navbar() {
           
           <div className="flex-1 flex justify-start">
             <Link href="/" className="flex items-center gap-2 z-50 transition-transform hover:opacity-90 active:scale-95 shrink-0">
-              {/* ★ 放大 Logo 圖片與文字 */}
               <img src="/logo.png" alt="Prime Living Logo" className="h-9 sm:h-10 object-contain drop-shadow-sm" />
               <span className="font-extrabold text-xl sm:text-2xl tracking-tight text-slate-800 flex items-baseline gap-1">
                 佳寓 <span className="text-orange-500 text-sm sm:text-base font-black">PrimeLiving</span>
@@ -76,7 +80,6 @@ export default function Navbar() {
           </div>
 
           <div className="flex-1 flex justify-end items-center gap-2 sm:gap-4 z-50 shrink-0">
-             {/* ★ 同步放大按鈕文字至 text-base */}
              <button 
                onClick={() => setIsContactModalOpen(true)}
                className="bg-gradient-to-r from-emerald-400 to-emerald-500 text-white px-6 py-2.5 rounded-full text-sm md:text-base font-black flex items-center gap-2 hover:from-emerald-500 hover:to-emerald-600 hover:-translate-y-0.5 hover:shadow-lg hover:shadow-emerald-500/30 transition-all duration-300 active:scale-95"
