@@ -45,7 +45,25 @@ export async function POST(request: Request) {
     });
 
     if (matchedTenant) {
-      return NextResponse.json({ id: matchedTenant.id, ...matchedTenant.data() }, { status: 200 });
+      const data = matchedTenant.data();
+      
+      // ★ 防護升級：建立安全 Payload，過濾掉完整的身分證字號、內部備註等敏感資訊
+      const safePayload = {
+        id: matchedTenant.id,
+        name: data.name,
+        propertyAddress: data.propertyAddress,
+        roomName: data.roomName,
+        phone: data.phone, // 前端可能需要顯示遮蔽後的手機
+        leaseStart: data.leaseStart,
+        leaseEnd: data.leaseEnd,
+        monthlyRent: data.monthlyRent,
+        deposit: data.deposit,
+        amountDue: data.amountDue,
+        hasUnpaidBills: data.hasUnpaidBills,
+        status: data.status,
+      };
+
+      return NextResponse.json(safePayload, { status: 200 });
     } else {
       return NextResponse.json({ error: '登入碼無效。請確認您的姓名與密碼是否正確。' }, { status: 401 });
     }
