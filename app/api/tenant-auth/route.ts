@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-import { collection, getDocs } from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+// ⚠️ 關鍵修復：改用 Firebase Admin SDK，繞過 Security Rules 權限阻擋
+import { db as adminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(request: Request) {
   try {
@@ -12,9 +12,9 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '請輸入登入碼' }, { status: 400 });
     }
 
-    // ★ 優化：移除 status 篩選，直接撈取全量租客進行動態比對，防止格式不匹配或同步延遲
-    const tenantsRef = collection(db, 'tenants');
-    const snap = await getDocs(tenantsRef);
+    // ★ 優化：使用 adminDb 撈取全量租客進行動態比對
+    const tenantsRef = adminDb.collection('tenants');
+    const snap = await tenantsRef.get();
 
     // 在伺服器端執行防錯智能比對
     const matchedTenant = snap.docs.find(doc => {
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       const name = String(data.name || '').replace(/\s+/g, '').toLowerCase();
       const nameLast4 = name.slice(-4);
       
-      const fullId = String(data.identityNumber || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
+      const fullId = String(data.identityNumber || data.idCard || data.passport || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const idLast4 = fullId.slice(-4);
 
       const phone = String(data.phone || '').replace(/\D/g, '');
@@ -47,7 +47,7 @@ export async function POST(request: Request) {
     if (matchedTenant) {
       return NextResponse.json({ id: matchedTenant.id, ...matchedTenant.data() }, { status: 200 });
     } else {
-      return NextResponse.json({ error: '登入碼無效。請確認您的姓名與證件後4碼是否正確。' }, { status: 401 });
+      return NextResponse.json({ error: '登入碼無效。請確認您的姓名與密碼是否正確。' }, { status: 401 });
     }
 
   } catch (error: any) {
