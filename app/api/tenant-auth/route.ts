@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-// ⚠️ 關鍵修復：改用 Firebase Admin SDK，繞過 Security Rules 權限阻擋
+// ⚠️ 使用 Admin SDK 繞過 Firestore Security Rules 阻擋，解決 500 權限錯誤
 import { db as adminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(request: Request) {
@@ -24,6 +24,7 @@ export async function POST(request: Request) {
       const name = String(data.name || '').replace(/\s+/g, '').toLowerCase();
       const nameLast4 = name.slice(-4);
       
+      // 支援多種證件欄位
       const fullId = String(data.identityNumber || data.idCard || data.passport || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
       const idLast4 = fullId.slice(-4);
 
