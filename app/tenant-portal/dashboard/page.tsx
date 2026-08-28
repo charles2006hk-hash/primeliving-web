@@ -1,5 +1,7 @@
 'use client';
 
+
+
 import React, { useEffect, useState, Suspense, useRef, useMemo } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
@@ -18,9 +20,6 @@ import { ref, uploadBytesResumable, getDownloadURL, getStorage } from 'firebase/
 // 財務精確計算 (單位：分 Cents) - 避免 JS 浮點數誤差
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
-
-const [passportFile, setPassportFile] = useState<File | null>(null);
-  const [idCardFile, setIdCardFile] = useState<File | null>(null);
 
 // 安全時間戳解析器：相容 Firestore Timestamp、ISO String 與 Date 物件
 const getSafeTime = (val: any): number => {
@@ -64,6 +63,9 @@ function DashboardContent() {
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
+
+  const [passportFile, setPassportFile] = useState<File | null>(null);
+  const [idCardFile, setIdCardFile] = useState<File | null>(null);
 
   const [chatMessages, setChatMessages] = useState<{sender: 'bot'|'user', text: string, options?: string[]}[]>([]);
   const [chatCategory, setChatCategory] = useState('');
