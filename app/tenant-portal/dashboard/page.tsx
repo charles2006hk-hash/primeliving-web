@@ -914,23 +914,18 @@ function DashboardContent() {
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
               
-              {/* 原本的逾期警告 (加上 !billingSummary.isSplitNeeded 避免與拆單提示打架) */}
               {billingSummary.hasOverdue && !billingSummary.isSplitNeeded && (
                 <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
                   <AlertCircle size={16} className="text-red-400 shrink-0"/>
                   <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
                 </div>
               )}
-
-              {/* 原本的即將到期提示 */}
               {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
                 <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
                   <Clock size={16} className="text-amber-400 shrink-0"/>
                   <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
                 </div>
               )}
-              
-              {/* ★ 新增：若超過 10 萬，顯示紫色的拆單通知 */}
               {billingSummary.isSplitNeeded && (
                 <div className="bg-purple-500/20 border border-purple-500/40 text-purple-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-start sm:items-center gap-2 mb-6 animate-pulse relative z-10">
                   <AlertCircle size={16} className="text-purple-400 shrink-0 mt-0.5 sm:mt-0"/>
@@ -941,18 +936,16 @@ function DashboardContent() {
               <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
                   <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
-                  {/* ★ 修改：主數字顯示當次可結帳金額 (checkoutTotal) */}
                   <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
-                  {/* ★ 新增：若有拆單，下方小字顯示真實總欠款 (grandTotal) */}
                   {billingSummary.isSplitNeeded && (
                     <p className="text-sm text-slate-400 font-bold mt-1">目前總欠款: ${billingSummary.grandTotal.toLocaleString()}</p>
                   )}
                 </div>
                 <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : billingSummary.hasUpcoming ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即即將到期帳單' : tenantData.status}
+                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即將到期帳單' : tenantData.status}
                 </span>
               </div>
-            </div>
+
               <div className="mb-6 relative z-10">
                 <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition">
                   {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
@@ -1007,6 +1000,7 @@ function DashboardContent() {
                 <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
               </button>
             </div>
+            
             <div className="grid grid-cols-2 gap-4">
               <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
                 <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
