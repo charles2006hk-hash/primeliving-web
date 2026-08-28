@@ -1,7 +1,5 @@
 'use client';
 
-
-
 import React, { useEffect, useState, Suspense, useRef, useMemo } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
@@ -1184,10 +1182,7 @@ function DashboardContent() {
                    {isSubmittingTicket ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
                 </button>
               </form>
-              <div className="mt-4 flex justify-center gap-6 text-xs font-bold text-slate-400">
-                <a href="https://wa.me/85239969796" target="_blank" rel="noopener noreferrer" className="flex items-center hover:text-green-600 transition"><MessageCircle size={14} className="mr-1"/> WhatsApp</a>
-                <a href="tel:+85239969796" className="flex items-center hover:text-blue-600 transition"><PhoneCall size={14} className="mr-1"/> 致電專人</a>
-              </div>
+              
             </div>
           </div>
         </div>
