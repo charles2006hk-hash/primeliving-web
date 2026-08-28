@@ -1,5 +1,7 @@
 'use client';
 
+
+
 import React, { useEffect, useState, Suspense, useRef, useMemo } from 'react';
 import { 
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
@@ -288,12 +290,14 @@ function DashboardContent() {
     thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
     thirtyDaysLater.setHours(23, 59, 59, 999);
 
+    // 過濾出尚未繳費的單據
     const pendingDocs = tenantDocs.filter(d => {
       const isPaid = d.status === 'Completed' || d.status === 'Paid' || d.paymentStatus === 'Paid';
       const isReview = d.paymentStatus === 'Under Review';
       return !isPaid && !isReview;
     });
 
+    // 解析金額與日期
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
       const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
@@ -309,9 +313,6 @@ function DashboardContent() {
       const dueDate = new Date(dueDateStr);
       dueDate.setHours(0, 0, 0, 0);
 
-      const isOverdue = dueDate < today;
-      const isDueToday = dueDate.getTime() === today.getTime();
-
       return { 
         id: item.id, 
         title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), 
@@ -319,31 +320,55 @@ function DashboardContent() {
         amountCents, 
         dueDateStr, 
         dueDate, 
-        isOverdue, 
-        isDueToday 
+        isOverdue: dueDate < today, 
+        isDueToday: dueDate.getTime() === today.getTime() 
       };
     });
 
+    // ★ 關鍵1：強制按到期日「由舊到新」排序 (必須先清舊帳)
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
-    const mandatoryCents = mandatoryItems.reduce((sum, b) => sum + b.amountCents, 0);
-    const optionalCents = optionalItems
-      .filter(b => selectedOptionalBillIds.includes(b.id))
-      .reduce((sum, b) => sum + b.amountCents, 0);
+    // ★ 關鍵2：實作 PayDollar 10萬 HKD 結帳限額拆單邏輯
+    const PAYDOLLAR_LIMIT_CENTS = 100000 * 100; // 10萬 HKD 轉 Cents
+    let currentCheckoutCents = 0;
+    const currentCheckoutBillIds: string[] = [];
+    let isSplitNeeded = false;
 
-    const grandTotalCents = mandatoryCents + optionalCents;
-    const hasOverdue = mandatoryItems.some(b => b.isOverdue);
-    const hasUpcoming = optionalItems.length > 0;
+    // 將本次準備要結帳的所有單據 (必繳 + 勾選的選繳) 組成陣列
+    const allPayingBills = [
+      ...mandatoryItems,
+      ...optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
+    ].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+
+    // 依序加總，直到觸碰 10 萬上限
+    for (const bill of allPayingBills) {
+      if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
+        isSplitNeeded = true;
+        // 防呆：如果連第一筆單據本身就超過 10 萬，強制納入以免系統卡死無法繳費
+        if (currentCheckoutBillIds.length === 0) {
+          currentCheckoutBillIds.push(bill.id);
+          currentCheckoutCents += bill.amountCents;
+        }
+        break; // 停止加入後面的單據
+      }
+      currentCheckoutBillIds.push(bill.id);
+      currentCheckoutCents += bill.amountCents;
+    }
+
+    const grandTotalCents = allPayingBills.reduce((sum, b) => sum + b.amountCents, 0);
 
     return {
-      grandTotal: fromCents(grandTotalCents),
+      grandTotal: fromCents(grandTotalCents),         // 真實總欠款
+      checkoutTotal: fromCents(currentCheckoutCents), // ★ 本次被切分的實際結帳金額
+      checkoutBillIds: currentCheckoutBillIds,        // ★ 本次被切分的實際結帳單據 IDs
+      isSplitNeeded,                                  // ★ 標記是否觸發了拆單機制
       mandatoryItems,
       optionalItems,
-      hasOverdue,
-      hasUpcoming
+      hasOverdue: mandatoryItems.some(b => b.isOverdue),
+      hasUpcoming: optionalItems.length > 0
     };
   }, [tenantDocs, selectedOptionalBillIds]);
 
@@ -399,15 +424,9 @@ function DashboardContent() {
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      const payingBillIds = [
-        ...billingSummary.mandatoryItems.map(b => b.id),
-        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
-      ];
-
-      const exactPayingTotal = [
-        ...billingSummary.mandatoryItems,
-        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
-      ].reduce((sum, b) => sum + b.amount, 0);
+      // ★ 核心修改：捨棄重新陣列計算，直接使用自動拆單後 (<= 10萬) 的實際請款單據 ID 與金額
+      const payingBillIds = billingSummary.checkoutBillIds;
+      const exactPayingTotal = billingSummary.checkoutTotal; // 已透過 fromCents 處理，無浮點數誤差
 
       const response = await fetch('/api/paydollar/verify', {
         method: 'POST',
@@ -427,6 +446,7 @@ function DashboardContent() {
         throw new Error(data.error || '無法完成核銷手續');
       }
 
+      // 繳費成功後，清空勾選狀態
       setSelectedOptionalBillIds([]);
       if (typeof window !== 'undefined') window.history.replaceState(null, '', '/tenant-portal/dashboard');
       alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
@@ -460,10 +480,8 @@ function DashboardContent() {
 
     setIsUploading(true);
     try {
-      const payingBillIds = [
-        ...billingSummary.mandatoryItems.map(b => b.id),
-        ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
-      ];
+      const payingBillIds = billingSummary.checkoutBillIds;
+      const amount = billingSummary.checkoutTotal;
 
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id,
@@ -471,10 +489,10 @@ function DashboardContent() {
         phone: tenantData.phone || '',
         roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
         category: '轉帳付款核對',
-        message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${billingSummary.grandTotal.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`,
+        message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${amount.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`,
         type: 'ticket',
         status: 'In Progress',
-        amount: billingSummary.grandTotal,
+        amount: amount,
         billIds: payingBillIds,
         createdAt: serverTimestamp()
       });
@@ -483,7 +501,7 @@ function DashboardContent() {
         await updateDoc(doc(db, 'documents', billId), { paymentStatus: 'Under Review', updatedAt: serverTimestamp() });
       }
 
-      alert("✅ 入數紙已成功送出！\n\n管家將於 24 小時內確認銀行進帳並開立正式收據，確認後本系統會自動清除逾期警告。");
+      alert("✅ 入數紙已成功送出！管家將於 24 小時內確認銀行進帳並開立收據。");
       setActiveModal('none');
     } catch (error: any) {
       alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。");
@@ -493,13 +511,11 @@ function DashboardContent() {
   };
 
   const handlePayDollarCheckout = async () => {
-    if (!tenantData || billingSummary.grandTotal <= 0) return alert("目前沒有需要繳納的金額。");
+    if (!tenantData || billingSummary.checkoutTotal <= 0) return alert("目前沒有需要繳納的金額。");
     setIsPayDollarLoading(true);
 
-    const payingBillIds = [
-      ...billingSummary.mandatoryItems.map(b => b.id),
-      ...billingSummary.optionalItems.filter(b => selectedOptionalBillIds.includes(b.id)).map(b => b.id)
-    ];
+    const payingBillIds = billingSummary.checkoutBillIds;
+    const amount = billingSummary.checkoutTotal;
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
 
     try {
@@ -508,7 +524,7 @@ function DashboardContent() {
         tenantId: tenantData.id, 
         tenantName: tenantData.name,
         roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
-        amount: billingSummary.grandTotal, 
+        amount: amount, 
         billIds: payingBillIds,
         status: 'Pending', 
         gateway: 'PayDollar', 
@@ -519,7 +535,7 @@ function DashboardContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          amountDue: billingSummary.grandTotal, 
+          amountDue: amount, 
           tenantId: tenantData.id, 
           tenantName: tenantData.name,
           roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
@@ -898,29 +914,45 @@ function DashboardContent() {
             <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
               <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
               
-              {billingSummary.hasOverdue && (
+              {/* 原本的逾期警告 (加上 !billingSummary.isSplitNeeded 避免與拆單提示打架) */}
+              {billingSummary.hasOverdue && !billingSummary.isSplitNeeded && (
                 <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
                   <AlertCircle size={16} className="text-red-400 shrink-0"/>
                   <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
                 </div>
               )}
-              {!billingSummary.hasOverdue && billingSummary.hasUpcoming && (
+
+              {/* 原本的即將到期提示 */}
+              {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
                 <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
                   <Clock size={16} className="text-amber-400 shrink-0"/>
                   <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
                 </div>
               )}
               
+              {/* ★ 新增：若超過 10 萬，顯示紫色的拆單通知 */}
+              {billingSummary.isSplitNeeded && (
+                <div className="bg-purple-500/20 border border-purple-500/40 text-purple-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-start sm:items-center gap-2 mb-6 animate-pulse relative z-10">
+                  <AlertCircle size={16} className="text-purple-400 shrink-0 mt-0.5 sm:mt-0"/>
+                  <span>金流限額 10 萬元，系統已為您自動按期數拆單。本次將優先結算前 {billingSummary.checkoutBillIds.length} 筆舊單，餘額請於本次完成後再次繳付。</span>
+                </div>
+              )}
+              
               <div className="flex justify-between items-start mb-4 relative z-10">
                 <div>
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次應繳/預繳總額 (HKD)</p>
-                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.grandTotal.toLocaleString()}</h2>
+                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
+                  {/* ★ 修改：主數字顯示當次可結帳金額 (checkoutTotal) */}
+                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
+                  {/* ★ 新增：若有拆單，下方小字顯示真實總欠款 (grandTotal) */}
+                  {billingSummary.isSplitNeeded && (
+                    <p className="text-sm text-slate-400 font-bold mt-1">目前總欠款: ${billingSummary.grandTotal.toLocaleString()}</p>
+                  )}
                 </div>
                 <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : billingSummary.hasUpcoming ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即將到期帳單' : tenantData.status}
+                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即即將到期帳單' : tenantData.status}
                 </span>
               </div>
-
+            </div>
               <div className="mb-6 relative z-10">
                 <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition">
                   {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
@@ -1166,8 +1198,7 @@ function DashboardContent() {
           </div>
         </div>
       )}
-
-      {/* 繳費 Modal */}
+{/* 繳費 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -1194,7 +1225,8 @@ function DashboardContent() {
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">本次應付總額 (HKD)</p>
-                      <p className="text-3xl font-black text-slate-800">${billingSummary.grandTotal.toLocaleString()}</p>
+                      {/* ★ 已修改為 checkoutTotal */}
+                      <p className="text-3xl font-black text-slate-800">${billingSummary.checkoutTotal.toLocaleString()}</p>
                     </div>
                     <div className="pt-4 border-t border-slate-100 space-y-3">
                       <div className="flex justify-between items-center"><p className="text-xs font-bold text-slate-500">帳戶銀行</p><p className="text-sm font-bold text-slate-800">恆生銀行 (HANG SENG BANK)</p></div>
@@ -1221,9 +1253,10 @@ function DashboardContent() {
                     </div>
                   </div>
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
-                    <div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單金額</p><p className="font-mono font-bold text-slate-800">${billingSummary.grandTotal.toLocaleString()}</p></div>
-                    <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.grandTotal) * 0.03)).toLocaleString()}</p></div>
-                    <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.grandTotal) + Math.round(toCents(billingSummary.grandTotal) * 0.03))).toLocaleString()}</p></div>
+                    {/* ★ 以下三個計算欄位皆已修改為 checkoutTotal */}
+                    <div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單金額</p><p className="font-mono font-bold text-slate-800">${billingSummary.checkoutTotal.toLocaleString()}</p></div>
+                    <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.checkoutTotal) * 0.03)).toLocaleString()}</p></div>
+                    <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.checkoutTotal) + Math.round(toCents(billingSummary.checkoutTotal) * 0.03))).toLocaleString()}</p></div>
                   </div>
                   <button onClick={handlePayDollarCheckout} disabled={isPayDollarLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">
                     {isPayDollarLoading ? <><Loader2 size={18} className="animate-spin"/> 連線安全金流...</> : <>前往安全結帳 <ChevronRight size={18}/></>}
