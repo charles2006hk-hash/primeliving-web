@@ -662,23 +662,25 @@ function DashboardContent() {
     if (docData.type === 'Lease') {
       const fd = docData.formData || {};
       return (
-        <div ref={isSigningMode ? contractRef : undefined} className="w-[794px] bg-white text-slate-900 font-sans relative shadow-lg origin-top mx-auto">
+        // ★ 加入 min-h-[1123px] 防止高度塌陷
+        <div ref={isSigningMode ? contractRef : undefined} className="w-[794px] min-h-[1123px] bg-white text-slate-900 font-sans relative shadow-lg origin-top mx-auto">
           <ContractTemplate
             data={{
-              tenantName: fd.tenantName || tenantData.name || '未填寫租客', 
-              tenantPhone: fd.tenantPhone || tenantData.phone || '未提供',
-              tenantIdNumber: fd.tenantIdNumber || tenantData.identityNumber || '未提供', 
-              propertyAddress: fd.propertyAddress || tenantData.propertyName || '',
-              roomName: fd.roomName || tenantData.roomName || '', 
-              leaseStart: fd.leaseStart || tenantData.leaseStart || '',
-              leaseEnd: fd.leaseEnd || tenantData.leaseEnd || '', 
+              tenantName: fd.tenantName || tenantData?.name || '未填寫租客', 
+              tenantPhone: fd.tenantPhone || tenantData?.phone || '未提供',
+              tenantIdNumber: fd.tenantIdNumber || tenantData?.identityNumber || '未提供', 
+              propertyAddress: fd.propertyAddress || tenantData?.propertyName || '',
+              roomName: fd.roomName || tenantData?.roomName || '', 
+              leaseStart: fd.leaseStart || tenantData?.leaseStart || '',
+              leaseEnd: fd.leaseEnd || tenantData?.leaseEnd || '', 
               monthlyRent: Number(fd.monthlyRent) || 0, 
               securityDeposit: Number(fd.deposit) || 0,
-              paymentSchedule: fd.paymentSchedule, 
-              tenantSignature: fd.tenantSignature || tenantData.signature, 
-              signedAt: fd.signedAt || tenantData.signedAt
+              // ★ 核心防呆：強制轉為陣列，防止 ContractTemplate 內部 map() 報錯導致白屏
+              paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], 
+              tenantSignature: fd.tenantSignature || tenantData?.signature || '', 
+              signedAt: fd.signedAt || tenantData?.signedAt || ''
             }}
-            isSigningMode={isSigningMode && !tenantData.isContractSigned} 
+            isSigningMode={isSigningMode && !tenantData?.isContractSigned} 
             isSigningLoading={isSigning} 
             showStamp={true}
             onSignComplete={async (signatureBase64) => {
@@ -711,7 +713,6 @@ function DashboardContent() {
         </div>
       );
     }
-
     const fd = docData.formData || {}; 
     const items = docData.items || [];
     const baseRent = Number(fd.monthlyRent) || 0; 
@@ -1239,21 +1240,24 @@ function DashboardContent() {
       )}
 
       {activeModal === 'contract' && (
-        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-slate-100 w-full sm:max-w-[1000px] rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative">
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-100 w-full max-w-[1000px] rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
             
             {/* ★ 全螢幕手寫簽名板遮罩 */}
             {showSigPad && (
-              <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in zoom-in-95">
-                <div className="p-4 bg-slate-900 text-white flex justify-between items-center">
+              <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in zoom-in-95 duration-200">
+                <div className="p-4 bg-slate-900 text-white flex justify-between items-center flex-none">
                   <div>
                     <h4 className="font-bold text-lg">親筆電子簽名</h4>
                     <p className="text-xs text-slate-300">請在下方空白處用手指或滑鼠簽名</p>
                   </div>
-                  <button onClick={() => setShowSigPad(false)} className="p-2 hover:bg-slate-800 rounded-full"><X size={20}/></button>
+                  <button onClick={() => setShowSigPad(false)} className="p-2 hover:bg-slate-800 rounded-full transition"><X size={20}/></button>
                 </div>
                 
                 <div className="flex-1 bg-slate-50 relative cursor-crosshair touch-none">
+                  <div className="absolute inset-x-8 inset-y-12 border-2 border-dashed border-slate-300 rounded-xl pointer-events-none flex items-center justify-center">
+                    <span className="text-slate-300 font-bold text-3xl opacity-30 select-none">簽名區</span>
+                  </div>
                   <canvas 
                     ref={sigCanvasRef} 
                     className="w-full h-full relative z-10" 
@@ -1263,21 +1267,66 @@ function DashboardContent() {
                   />
                 </div>
                 
-                <div className="p-4 bg-white border-t flex gap-4">
-                  <button onClick={clearSignature} className="px-6 py-3 font-bold text-slate-500 bg-slate-100 rounded-xl">清除重寫</button>
-                  <button onClick={handleConfirmSignature} disabled={isSigning} className="flex-1 font-bold text-white bg-purple-600 rounded-xl flex items-center justify-center gap-2">
-                    {isSigning ? <Loader2 className="animate-spin" size={18}/> : '確認簽署並蓋印至合約'}
+                <div className="p-4 bg-white border-t border-slate-200 flex gap-4 flex-none shadow-sm">
+                  <button onClick={clearSignature} className="px-6 py-3 font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition">清除重寫</button>
+                  <button onClick={handleConfirmSignature} disabled={isSigning} className="flex-1 font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-md transition flex items-center justify-center gap-2">
+                    {isSigning ? <><Loader2 className="animate-spin" size={18}/> 儲存中...</> : <><CheckCircle2 size={18}/> 確認簽署並印於合約</>}
                   </button>
                 </div>
               </div>
             )}
 
-            {/* Modal Body & 合約渲染 ... (維持原樣) */}
-            <div className="w-full md:w-[320px] bg-white border-l p-6 flex flex-col justify-center">
-              {!tenantData.isContractSigned && (
-                <button onClick={() => setShowSigPad(true)} className="w-full py-3 bg-purple-600 text-white font-bold rounded-lg shadow-md flex items-center justify-center gap-2">
-                  <Edit3 size={16}/> 開啟親筆簽名板
-                </button>
+            {/* Modal Header (固定於頂部) */}
+            <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-slate-200 flex-none relative z-20">
+              <h3 className="font-black text-lg sm:text-xl text-slate-800 flex items-center">
+                <FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約
+              </h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Modal Body & 合約渲染 */}
+            <div className="flex-1 overflow-y-auto flex flex-col md:flex-row relative z-10">
+              <div className="flex-1 bg-slate-200 flex justify-center py-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
+                {latestLease ? (
+                  <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-max pb-12">
+                    {/* ★ 傳入 true，啟用 ContractTemplate 內部綁定的 ref */}
+                    {renderA4Document(latestLease, true)}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 py-12">
+                    <AlertCircle size={48} className="mb-4 opacity-50" />
+                    <p className="font-bold">管家尚未發布合約</p>
+                  </div>
+                )}
+              </div>
+              
+              {latestLease && (
+                <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none">
+                  {tenantData?.isContractSigned ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
+                      <CheckCircle2 size={32} className="mx-auto text-emerald-500 mb-2"/>
+                      <p className="text-sm font-black text-emerald-800">合約已成功簽署</p>
+                      <button onClick={handleDownloadPDF} disabled={isSignDownloading} className="mt-4 w-full py-3 bg-white border border-emerald-200 text-emerald-700 font-bold rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-100 transition-colors shadow-sm disabled:opacity-50">
+                        {isSignDownloading ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} 下載 PDF 副本
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-purple-50 p-5 rounded-xl border border-purple-200 shadow-sm text-center">
+                        <FileSignature size={32} className="mx-auto text-purple-500 mb-2"/>
+                        <p className="text-sm font-black text-purple-900 mb-1">等待您的親筆簽署</p>
+                        <p className="text-[11px] text-purple-700 leading-normal mb-4">
+                          請核對合約內容無誤後，點擊下方按鈕進行電子觸控簽名。
+                        </p>
+                        <button onClick={() => setShowSigPad(true)} className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2">
+                          <Edit3 size={16}/> 開啟簽名板
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
