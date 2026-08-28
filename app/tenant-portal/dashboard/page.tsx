@@ -1088,7 +1088,7 @@ function DashboardContent() {
               </div>
             </div>
           </div>
-          /* ★ 新增：頁面底部的專屬浮水印 / Minimal Footer */}
+          
           <div className="mt-auto pt-12 text-center pb-4 opacity-60 hover:opacity-100 transition-opacity flex-none">
             <div className="flex items-center justify-center gap-2 mb-1">
               <img src="/logo.png" alt="Prime Living" className="h-4 object-contain grayscale" />
