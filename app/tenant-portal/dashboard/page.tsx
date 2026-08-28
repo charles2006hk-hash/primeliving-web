@@ -134,7 +134,7 @@ function DashboardContent() {
       setLoading(false);
     });
 
-    // 獲取租客的合約與客服資料
+    // 獲取租客的合約與客服資料 (正確的單一 useEffect)
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
     if (!sessionStr) { router.push('/tenant-portal'); return; }
@@ -142,7 +142,6 @@ function DashboardContent() {
 
     const fetchData = async () => {
       try {
-        // 1. 取得文件與互動記錄
         const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
         if (res.ok) {
           const { documents, inquiries } = await res.json();
@@ -158,7 +157,6 @@ function DashboardContent() {
       }
     };
 
-    // 2. 監聽租客本體狀態 (包含剩餘天數等計算)
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
       if (!docSnap.exists()) {
         localStorage.removeItem('pm_tenant_session');
@@ -200,8 +198,7 @@ function DashboardContent() {
       setLoading(false);
     });
 
-    fetchData(); // 初次載入資料
-    // 每 30 秒自動刷新一次背景資料 (模擬即時同步)
+    fetchData(); 
     const interval = setInterval(fetchData, 30000);
 
     return () => { 
