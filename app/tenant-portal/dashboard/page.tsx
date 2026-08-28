@@ -134,21 +134,80 @@ function DashboardContent() {
       setLoading(false);
     });
 
-    const qDocs = query(collection(db, 'documents'), where('formData.tenantId', '==', sessionData.id));
-    const unsubDocs = onSnapshot(qDocs, snap => setTenantDocs(
-      snap.docs.map(d => ({ id: d.id, ...d.data() }))
-        .sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt))
-    ));
+    // 獲取租客的合約與客服資料
+  useEffect(() => {
+    const sessionStr = localStorage.getItem('pm_tenant_session');
+    if (!sessionStr) { router.push('/tenant-portal'); return; }
+    const sessionData = JSON.parse(sessionStr);
 
-    const qInq = query(collection(db, 'inquiries'), where('tenantId', '==', sessionData.id));
-    const unsubInq = onSnapshot(qInq, snap => {
-      let logs = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-      logs = logs.filter(log => log.type !== 'internal_note');
-      logs.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
-      setMyInquiries(logs);
+    const fetchData = async () => {
+      try {
+        // 1. 取得文件與互動記錄
+        const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
+        if (res.ok) {
+          const { documents, inquiries } = await res.json();
+          
+          const sortedDocs = documents.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
+          setTenantDocs(sortedDocs);
+
+          const sortedInqs = inquiries.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
+          setMyInquiries(sortedInqs);
+        }
+      } catch (error) {
+        console.error("資料加載失敗:", error);
+      }
+    };
+
+    // 2. 監聽租客本體狀態 (包含剩餘天數等計算)
+    const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
+      if (!docSnap.exists()) {
+        localStorage.removeItem('pm_tenant_session');
+        router.push('/tenant-portal');
+        return;
+      }
+
+      const data = docSnap.data();
+      const end = new Date(data.leaseEnd || new Date());
+      const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+      
+      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+
+      setTenantData({ 
+        id: docSnap.id, 
+        email: data.email || '', 
+        name: data.name, 
+        daysRemaining: diffDays > 0 ? diffDays : 0, 
+        status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
+        roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
+        isContractSigned: data.isContractSigned || !!data.signature, 
+        signature: data.signature || '', 
+        signedAt: data.signedAt || '',
+        propertyName: data.propertyName || '', 
+        roomId: data.roomId || '', 
+        roomName: data.roomName || data.roomId || '', 
+        leaseStart: data.leaseStart || '', 
+        leaseEnd: data.leaseEnd || '', 
+        deposit: data.deposit || 0, 
+        phone: data.phone || '', 
+        identityNumber: resolvedIdNumber,
+        isPhysicalSigned: data.isPhysicalSigned || false 
+      });
+
+      if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
+      if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
+      if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
+      
+      setLoading(false);
     });
 
-    return () => { unsubTenant(); unsubDocs(); unsubInq(); };
+    fetchData(); // 初次載入資料
+    // 每 30 秒自動刷新一次背景資料 (模擬即時同步)
+    const interval = setInterval(fetchData, 30000);
+
+    return () => { 
+      unsubTenant(); 
+      clearInterval(interval); 
+    };
   }, [router]);
 
   // ★ 自動預選：未來 30 天內到期單據
