@@ -1301,6 +1301,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 這是最後一個 Modal (查看單據) */}
       {activeModal === 'view_doc' && viewingDoc && (
         <div className="fixed inset-0 bg-slate-900/80 z-[110] flex flex-col items-center p-0 md:p-6 backdrop-blur-sm animate-in fade-in duration-200">
            <div className="w-full flex justify-end p-4 md:p-0 md:mb-4 flex-none max-w-[800px]">
@@ -1317,9 +1318,10 @@ function DashboardContent() {
       )}
 
     </div>
-  );
-}
+  ); // 👈 確保 DashboardContent 的 return 有被這個 ); 閉合
+} // 👈 確保 DashboardContent 函數本身有被這個 } 閉合
 
+// 這是檔案最底部的 Default Export
 export default function DashboardPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>}>
