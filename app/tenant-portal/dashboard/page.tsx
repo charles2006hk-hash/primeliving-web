@@ -1315,8 +1315,8 @@ function DashboardContent() {
       )}
 
     </div>
-  ); // 👈 確保 DashboardContent 的 return 有被這個 ); 閉合
-} // 👈 確保 DashboardContent 函數本身有被這個 } 閉合
+  );
+} 
 
 // 這是檔案最底部的 Default Export
 export default function DashboardPage() {
