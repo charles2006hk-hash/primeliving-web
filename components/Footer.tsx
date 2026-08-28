@@ -1,9 +1,17 @@
 'use client';
 import React from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation'; // ★ 新增：匯入 usePathname
 import { ShieldCheck, MapPin } from 'lucide-react';
 
 export default function Footer() {
+  const pathname = usePathname(); // ★ 獲取當前路徑
+
+  // ★ 核心修復：在租客儀表板隱藏 Footer，配合沉浸式 App 佈局
+  if (pathname?.startsWith('/tenant-portal/dashboard')) {
+    return null;
+  }
+
   return (
     <footer className="bg-slate-900 text-slate-400 py-16 px-4 border-t border-slate-800">
       <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-5 gap-12 border-b border-white/10 pb-12">
@@ -44,7 +52,6 @@ export default function Footer() {
         {/* 戰略聯營機構 (Strategic Partner) */}
         <div className="col-span-1">
           <h4 className="text-white font-bold mb-6 uppercase tracking-widest text-xs">戰略聯營機構</h4>
-          {/* ★ 修改 href 指向內部維護頁 */}
           <Link 
             href="/partner" 
             className="flex items-center gap-3 bg-white/5 p-3 rounded-xl border border-white/10 hover:bg-white/10 transition group"
