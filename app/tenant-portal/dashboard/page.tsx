@@ -872,8 +872,12 @@ function DashboardContent() {
 
       {/* Navbar - 設為 flex-none 固定在頂部，並微調 padding 使其更飽滿 */}
       <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 md:py-5 flex justify-between items-center z-40 shadow-sm flex-none">
-        <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
-          <img src="/logo.png" alt="Prime Living" className="h-8 md:h-9 object-contain" />
+        <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+          <img src="/logo.png" alt="Prime Living" className="h-8 md:h-9 object-contain drop-shadow-sm" />
+          {/* ★ 新增：品牌文字，手機版隱藏以節省空間，平板以上顯示 */}
+          <span className="font-extrabold text-xl tracking-tight text-slate-800 hidden sm:flex items-baseline gap-1">
+            佳寓 <span className="text-orange-500 text-sm font-black">PrimeLiving</span>
+          </span>
         </Link>
         <button onClick={handleLogout} className="text-slate-500 hover:text-red-600 bg-white/50 hover:bg-white px-4 py-2 rounded-full transition-all flex items-center text-sm font-bold shadow-sm border border-white/60">
           <LogOut size={16} className="mr-1.5"/> 登出
@@ -1083,6 +1087,14 @@ function DashboardContent() {
                 </button>
               </div>
             </div>
+          </div>
+          /* ★ 新增：頁面底部的專屬浮水印 / Minimal Footer */}
+          <div className="mt-auto pt-12 text-center pb-4 opacity-60 hover:opacity-100 transition-opacity flex-none">
+            <div className="flex items-center justify-center gap-2 mb-1">
+              <img src="/logo.png" alt="Prime Living" className="h-4 object-contain grayscale" />
+              <span className="text-[11px] font-black text-slate-500 uppercase tracking-widest">佳寓 PrimeLiving</span>
+            </div>
+            <p className="text-[9px] font-bold text-slate-400 tracking-wider">© {new Date().getFullYear()} PRIME LIVING PROPERTY (HK) MANAGEMENT LTD.</p>
           </div>
         </div>
       </div>
