@@ -214,7 +214,8 @@ function DashboardContent() {
         daysRemaining: diffDays > 0 ? diffDays : 0, 
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
-        isContractSigned: data.isContractSigned || !!data.signature, 
+        // ★ 核心修復：強制要求必須有真實的簽名編碼，才算真正簽署
+        isContractSigned: !!data.signature && data.signature.length > 50, 
         signature: data.signature || '', 
         signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
@@ -1302,9 +1303,11 @@ function DashboardContent() {
                 )}
               </div>
               
+              {/* 右側 / 底部 操作控制面板 */}
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none">
-                  {tenantData?.isContractSigned ? (
+                  {/* ★ 核心修復：判斷是否有真實簽名圖片 */}
+                  {tenantData?.signature ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
                       <CheckCircle2 size={32} className="mx-auto text-emerald-500 mb-2"/>
                       <p className="text-sm font-black text-emerald-800">合約已成功簽署</p>
@@ -1318,7 +1321,7 @@ function DashboardContent() {
                         <FileSignature size={32} className="mx-auto text-purple-500 mb-2"/>
                         <p className="text-sm font-black text-purple-900 mb-1">等待您的親筆簽署</p>
                         <p className="text-[11px] text-purple-700 leading-normal mb-4">
-                          請核對合約內容無誤後，點擊下方按鈕進行電子觸控簽名。
+                          請核對合約內容無誤後，點擊下方按鈕進行電子觸控簽名。簽名將直接印於合約底部。
                         </p>
                         <button onClick={() => setShowSigPad(true)} className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2">
                           <Edit3 size={16}/> 開啟簽名板
