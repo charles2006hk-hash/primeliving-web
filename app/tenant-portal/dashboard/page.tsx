@@ -857,7 +857,8 @@ function DashboardContent() {
   if (!tenantData) return null;
 
   return (
-    <div className={`min-h-screen pb-12 selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 ${weather.bgClass}`}>
+    // ★ 1. 最外層改為 h-screen, flex-col, overflow-hidden (鎖定螢幕、禁止外層滾動)
+    <div className={`h-screen flex flex-col selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 overflow-hidden ${weather.bgClass}`}>
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
       
@@ -869,214 +870,218 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Navbar - 加入登出按鈕 */}
-      <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 flex justify-between items-center sticky top-0 z-40 shadow-sm">
-        <Link href="/" className="flex items-center">
-          <img src="/logo.png" alt="Prime Living" className="h-8 object-contain" />
+      {/* Navbar - 設為 flex-none 固定在頂部，並微調 padding 使其更飽滿 */}
+      <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 md:py-5 flex justify-between items-center z-40 shadow-sm flex-none">
+        <Link href="/" className="flex items-center hover:opacity-80 transition-opacity">
+          <img src="/logo.png" alt="Prime Living" className="h-8 md:h-9 object-contain" />
         </Link>
-        <button onClick={handleLogout} className="text-slate-500 hover:text-red-500 transition-colors flex items-center text-sm font-bold">
-          <LogOut size={16} className="mr-1"/> 登出
+        <button onClick={handleLogout} className="text-slate-500 hover:text-red-600 bg-white/50 hover:bg-white px-4 py-2 rounded-full transition-all flex items-center text-sm font-bold shadow-sm border border-white/60">
+          <LogOut size={16} className="mr-1.5"/> 登出
         </button>
       </div>
 
-      <div className="max-w-5xl mx-auto space-y-8 pt-8 px-4 md:px-8">
-        <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
-          <div className="animate-in slide-in-from-bottom-4 duration-500">
-            <p className="text-slate-600 font-bold tracking-widest text-xs mb-1">
-              {new Date().toLocaleDateString('zh-HK', { month: 'long', day: 'numeric', weekday: 'long' })}
-            </p>
-            <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-4">
-              尊貴的 {tenantData.name}，您好
-            </h1>
-            <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
-              <div className="p-2 bg-white/60 rounded-full shadow-sm">{weather.icon}</div>
-              <div>
-                <p className="text-sm font-black text-slate-800">目前香港天氣：{weather.desc}，氣溫 {weather.temp}°C</p>
-                <p className="text-xs text-slate-600 mt-1 font-bold">{weather.suggestion}</p>
+      {/* ★ 2. 內部內容區塊設為 flex-1 overflow-y-auto (僅內部滾動，宛如原生 App) */}
+      <div className="flex-1 overflow-y-auto custom-scrollbar">
+        {/* 微調頂部間距 pt-6 md:pt-10，讓內容自然往上靠，消除空洞感 */}
+        <div className="max-w-5xl mx-auto space-y-8 pt-6 md:pt-10 pb-16 px-4 md:px-8 min-h-full flex flex-col">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
+            <div className="animate-in slide-in-from-bottom-4 duration-500">
+              <p className="text-slate-600 font-bold tracking-widest text-xs mb-1">
+                {new Date().toLocaleDateString('zh-HK', { month: 'long', day: 'numeric', weekday: 'long' })}
+              </p>
+              <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-4">
+                尊貴的 {tenantData.name}，您好
+              </h1>
+              <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
+                <div className="p-2 bg-white/60 rounded-full shadow-sm">{weather.icon}</div>
+                <div>
+                  <p className="text-sm font-black text-slate-800">目前香港天氣：{weather.desc}，氣溫 {weather.temp}°C</p>
+                  <p className="text-xs text-slate-600 mt-1 font-bold">{weather.suggestion}</p>
+                </div>
               </div>
             </div>
-          </div>
-          <button onClick={() => setActiveModal('notifications')} className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' : 'bg-white/60 border-white/60 hover:shadow-md'}`}>
-            <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'text-red-600' : 'text-slate-600'} />
-            {myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') && (
-              <span className="absolute top-1.5 right-1.5 flex h-3.5 w-3.5">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-white"></span>
-              </span>
-            )}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
-            <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
-              
-              {billingSummary.hasOverdue && !billingSummary.isSplitNeeded && (
-                <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
-                  <AlertCircle size={16} className="text-red-400 shrink-0"/>
-                  <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
-                </div>
-              )}
-              {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
-                <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
-                  <Clock size={16} className="text-amber-400 shrink-0"/>
-                  <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
-                </div>
-              )}
-              {billingSummary.isSplitNeeded && (
-                <div className="bg-purple-500/20 border border-purple-500/40 text-purple-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-start sm:items-center gap-2 mb-6 animate-pulse relative z-10">
-                  <AlertCircle size={16} className="text-purple-400 shrink-0 mt-0.5 sm:mt-0"/>
-                  <span>金流限額 10 萬元，系統已為您自動按期數拆單。本次將優先結算前 {billingSummary.checkoutBillIds.length} 筆舊單，餘額請於本次完成後再次繳付。</span>
-                </div>
-              )}
-              
-              <div className="flex justify-between items-start mb-4 relative z-10">
-                <div>
-                  <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
-                  <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
-                  {billingSummary.isSplitNeeded && (
-                    <p className="text-sm text-slate-400 font-bold mt-1">目前總欠款: ${billingSummary.grandTotal.toLocaleString()}</p>
-                  )}
-                </div>
-                <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : billingSummary.hasUpcoming ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
-                  {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即將到期帳單' : tenantData.status}
+            <button onClick={() => setActiveModal('notifications')} className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' : 'bg-white/60 border-white/60 hover:shadow-md'}`}>
+              <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'text-red-600' : 'text-slate-600'} />
+              {myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') && (
+                <span className="absolute top-1.5 right-1.5 flex h-3.5 w-3.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-white"></span>
                 </span>
-              </div>
+              )}
+            </button>
+          </div>
 
-              <div className="mb-6 relative z-10">
-                <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition">
-                  {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                  {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
-                </button>
-                {showBillDetails && (
-                  <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
-                    <div>
-                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期必須繳納單據：</p>
-                      {billingSummary.mandatoryItems.length === 0 ? (
-                        <p className="text-slate-400 py-1">目前無任何逾期/本日到期單據</p>
-                      ) : (
-                        billingSummary.mandatoryItems.map(item => (
-                          <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
-                            <div className="flex items-center gap-2">
-                              <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
-                              <span className="flex items-center gap-1.5 flex-wrap">
-                                {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
-                                {item.isDueToday && <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">今日到期</span>}
-                                {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                              </span>
-                            </div>
-                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                    {billingSummary.optionalItems.length > 0 && (
-                      <div className="pt-2 border-t border-white/10">
-                        <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來 30 天內即將到期帳單 (預設已為您勾選，可提前支付)：</p>
-                        {billingSummary.optionalItems.map(item => { 
-                          const isChecked = selectedOptionalBillIds.includes(item.id); 
-                          return (
-                            <div key={item.id} onClick={() => setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/10 px-1 rounded transition text-slate-200">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
+            <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
+              <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
+                
+                {billingSummary.hasOverdue && !billingSummary.isSplitNeeded && (
+                  <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
+                    <AlertCircle size={16} className="text-red-400 shrink-0"/>
+                    <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
+                  </div>
+                )}
+                {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
+                  <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
+                    <Clock size={16} className="text-amber-400 shrink-0"/>
+                    <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
+                  </div>
+                )}
+                {billingSummary.isSplitNeeded && (
+                  <div className="bg-purple-500/20 border border-purple-500/40 text-purple-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-start sm:items-center gap-2 mb-6 animate-pulse relative z-10">
+                    <AlertCircle size={16} className="text-purple-400 shrink-0 mt-0.5 sm:mt-0"/>
+                    <span>金流限額 10 萬元，系統已為您自動按期數拆單。本次將優先結算前 {billingSummary.checkoutBillIds.length} 筆舊單，餘額請於本次完成後再次繳付。</span>
+                  </div>
+                )}
+                
+                <div className="flex justify-between items-start mb-4 relative z-10">
+                  <div>
+                    <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
+                    <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
+                    {billingSummary.isSplitNeeded && (
+                      <p className="text-sm text-slate-400 font-bold mt-1">目前總欠款: ${billingSummary.grandTotal.toLocaleString()}</p>
+                    )}
+                  </div>
+                  <span className={`px-4 py-2 rounded-full text-xs font-black border backdrop-blur-sm ${billingSummary.hasOverdue ? 'bg-red-500/20 text-red-400 border-red-500/30' : billingSummary.hasUpcoming ? 'bg-amber-500/20 text-amber-300 border-amber-500/30' : tenantData.status === '合約已生效' ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' : 'bg-orange-500/20 text-orange-400 border-orange-500/30'}`}>
+                    {billingSummary.hasOverdue ? '有逾期帳單' : billingSummary.hasUpcoming ? '有即將到期帳單' : tenantData.status}
+                  </span>
+                </div>
+
+                <div className="mb-6 relative z-10">
+                  <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition">
+                    {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                    {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
+                  </button>
+                  {showBillDetails && (
+                    <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
+                      <div>
+                        <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期必須繳納單據：</p>
+                        {billingSummary.mandatoryItems.length === 0 ? (
+                          <p className="text-slate-400 py-1">目前無任何逾期/本日到期單據</p>
+                        ) : (
+                          billingSummary.mandatoryItems.map(item => (
+                            <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
                               <div className="flex items-center gap-2">
-                                {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
+                                <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
                                 <span className="flex items-center gap-1.5 flex-wrap">
-                                  <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-blue-500/30">30天內到期</span>
+                                  {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                                  {item.isDueToday && <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">今日到期</span>}
                                   {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
                                 </span>
                               </div>
                               <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
                             </div>
-                          ); 
-                        })}
+                          ))
+                        )}
                       </div>
-                    )}
-                  </div>
-                )}
+                      {billingSummary.optionalItems.length > 0 && (
+                        <div className="pt-2 border-t border-white/10">
+                          <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來 30 天內即將到期帳單 (預設已為您勾選，可提前支付)：</p>
+                          {billingSummary.optionalItems.map(item => { 
+                            const isChecked = selectedOptionalBillIds.includes(item.id); 
+                            return (
+                              <div key={item.id} onClick={() => setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/10 px-1 rounded transition text-slate-200">
+                                <div className="flex items-center gap-2">
+                                  {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
+                                  <span className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-blue-500/30">30天內到期</span>
+                                    {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                                  </span>
+                                </div>
+                                <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                              </div>
+                            ); 
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+                <button onClick={() => setActiveModal('payment')} disabled={billingSummary.grandTotal === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
+                  <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
+                </button>
               </div>
-              <button onClick={() => setActiveModal('payment')} disabled={billingSummary.grandTotal === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
-                <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
-              </button>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
+                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
+                  <p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p>
+                </div>
+                <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden">
+                  <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
+                  <p className="text-sm font-black text-slate-800 truncate">{tenantData.roomInfo}</p>
+                </div>
+              </div>
             </div>
-            
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
-                <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
-                <p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p>
-              </div>
-              <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden">
-                <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
-                <p className="text-sm font-black text-slate-800 truncate">{tenantData.roomInfo}</p>
-              </div>
-            </div>
-          </div>
 
-          <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
-            <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
-              <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}>
-                    <FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/>
+            <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
+              <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
+                <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}>
+                      <FileSignature size={20} className={tenantData.isContractSigned ? 'text-emerald-500' : 'text-purple-500'}/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
+                      <p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-500' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">電子合約與簽署 {!tenantData.isContractSigned && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
-                    <p className={`text-[10px] font-bold ${tenantData.isContractSigned ? 'text-slate-500' : 'text-red-500'}`}>{tenantData.isContractSigned ? '已簽署，可下載 PDF' : '尚未簽署，請立即完成'}</p>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+                </button>
+                
+                <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                  <div className="flex items-center gap-4">
+                    <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-rose-50'}`}>
+                      <ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-rose-500'}/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
+                      <p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-500' : 'text-rose-500'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p>
+                    </div>
                   </div>
-                </div>
-                <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
-              </button>
-              
-              <button onClick={() => setActiveModal('profile')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
-                <div className="flex items-center gap-4">
-                  <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${isProfileComplete ? 'bg-emerald-50' : 'bg-rose-50'}`}>
-                    <ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-rose-500'}/>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+                </button>
+                
+                <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <Wrench size={20} className="text-blue-500"/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p>
+                      <p className="text-[10px] font-bold text-slate-500">設備損壞一鍵呼叫師傅</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
-                    <p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-500' : 'text-rose-500'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+                </button>
+                
+                <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <Receipt size={20} className="text-cyan-500"/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p>
+                      <p className="text-[10px] font-bold text-slate-500">查看管家開立之收據與對數單</p>
+                    </div>
                   </div>
-                </div>
-                <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
-              </button>
-              
-              <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                    <Wrench size={20} className="text-blue-500"/>
+                  <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
+                </button>
+                
+                <button onClick={() => { initChat(); setActiveModal('contact'); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <UserCircle size={20} className="text-orange-500"/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-orange-900 mb-0.5">聯絡專屬管家</p>
+                      <p className="text-[10px] text-orange-600 font-bold">智能客服與真人支援</p>
+                    </div>
                   </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p>
-                    <p className="text-[10px] font-bold text-slate-500">設備損壞一鍵呼叫師傅</p>
-                  </div>
-                </div>
-                <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
-              </button>
-              
-              <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                    <Receipt size={20} className="text-cyan-500"/>
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">歷史單據與帳單</p>
-                    <p className="text-[10px] font-bold text-slate-500">查看管家開立之收據與對數單</p>
-                  </div>
-                </div>
-                <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
-              </button>
-              
-              <button onClick={() => { initChat(); setActiveModal('contact'); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
-                <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-orange-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
-                    <UserCircle size={20} className="text-orange-500"/>
-                  </div>
-                  <div>
-                    <p className="text-sm font-black text-orange-900 mb-0.5">聯絡專屬管家</p>
-                    <p className="text-[10px] text-orange-600 font-bold">智能客服與真人支援</p>
-                  </div>
-                </div>
-                <ChevronRight size={18} className="text-orange-400 group-hover:text-orange-500 transition-colors" />
-              </button>
+                  <ChevronRight size={18} className="text-orange-400 group-hover:text-orange-500 transition-colors" />
+                </button>
+              </div>
             </div>
           </div>
         </div>
