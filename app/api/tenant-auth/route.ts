@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
-// ⚠️ 使用 Admin SDK 繞過 Firestore Security Rules 阻擋，解決 500 權限錯誤
-import { db as adminDb } from '@/lib/firebaseAdmin';
+// ⚠️ 修正：直接對應你原版 firebaseAdmin.ts 導出的 adminDb 變數
+import { adminDb } from '@/lib/firebaseAdmin';
 
 export async function POST(request: Request) {
   try {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: '請輸入登入碼' }, { status: 400 });
     }
 
-    // ★ 優化：使用 adminDb 撈取全量租客進行動態比對
+    // ★ 使用 adminDb 撈取全量租客進行動態比對 (擁有 Firebase Admin 最高權限)
     const tenantsRef = adminDb.collection('tenants');
     const snap = await tenantsRef.get();
 
@@ -20,7 +20,6 @@ export async function POST(request: Request) {
     const matchedTenant = snap.docs.find(doc => {
       const data = doc.data();
       
-      // 強制轉型為字串並清洗
       const name = String(data.name || '').replace(/\s+/g, '').toLowerCase();
       const nameLast4 = name.slice(-4);
       
@@ -36,11 +35,11 @@ export async function POST(request: Request) {
 
       // 建立多重容錯合法登入碼池
       const validCodes = [];
-      if (name && idLast4) validCodes.push(name + idLast4);             // 姓名 + 證件後4碼
-      if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   // 姓名後4字 + 證件後4碼
-      if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         // 手機 + 證件後4碼
-      if (name && phone4) validCodes.push(name + phone4);               // 姓名 + 手機後4碼 (備用)
-      if (contractId) validCodes.push(contractId);                      // 系統編號
+      if (name && idLast4) validCodes.push(name + idLast4);             
+      if (nameLast4 && idLast4) validCodes.push(nameLast4 + idLast4);   
+      if (phone8 && idLast4) validCodes.push(phone8 + idLast4);         
+      if (name && phone4) validCodes.push(name + phone4);               
+      if (contractId) validCodes.push(contractId);                      
 
       return validCodes.includes(cleanInput);
     });
@@ -48,13 +47,13 @@ export async function POST(request: Request) {
     if (matchedTenant) {
       const data = matchedTenant.data();
       
-      // ★ 防護升級：建立安全 Payload，過濾掉完整的身分證字號、內部備註等敏感資訊
+      // ★ 防護升級：資料脫敏 (Data Sanitization)，避免 PII 外洩
       const safePayload = {
         id: matchedTenant.id,
         name: data.name,
         propertyAddress: data.propertyAddress,
         roomName: data.roomName,
-        phone: data.phone, // 前端可能需要顯示遮蔽後的手機
+        phone: data.phone,
         leaseStart: data.leaseStart,
         leaseEnd: data.leaseEnd,
         monthlyRent: data.monthlyRent,
