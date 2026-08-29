@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation'; // ★ 引入 Next.js 原生路由
+import { useRouter } from 'next/navigation';
 import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 import { 
@@ -23,9 +23,8 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
-// ★ 明確指定回傳型別 JSX.Element 避免 TSC 結尾解析錯誤
 export default function HomePage(): React.JSX.Element {
-  const router = useRouter(); // ★ 實例化 Next.js 路由
+  const router = useRouter();
 
   // --- 基礎數據狀態 ---
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
@@ -80,19 +79,18 @@ export default function HomePage(): React.JSX.Element {
     fetchAllData();
   }, []);
 
-  // ★ 將完整區域名稱丟入搜尋引擎
-  const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, areaName: string) => {
+  // ★ 核心修改：點擊百科卡片時，跳轉至專屬的小區百科頁面
+  const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, areaId: string) => {
     e.preventDefault();
-    setLoadingArea(areaName);
+    setLoadingArea(areaId); // 改用 areaId 來控制 loading 狀態
     
     setTimeout(() => {
       setLoadingArea(null);
-      // 直接傳遞完整名稱，新版計分引擎會自動提取關鍵字
-      router.push(`/properties?search=${encodeURIComponent(areaName)}`);
+      // ★ 完美串接：跳轉到我們剛剛建立的 app/encyclopedia/[estateId]/page.tsx
+      router.push(`/encyclopedia/${areaId}`);
     }, 400);
   };
 
-  // ★ 嚴格化表單事件型別 (React.FormEvent<HTMLFormElement>)
   const handleAreaLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setSubmittingLead(true);
@@ -183,15 +181,16 @@ export default function HomePage(): React.JSX.Element {
                         <p className="text-xs font-bold text-slate-800">{area.estates}</p>
                       </div>
                     </div>
+                    {/* ★ 更新按鈕事件與文案 */}
                     <button 
-                      onClick={(e) => handleAreaClick(e, area.name)} 
-                      disabled={loadingArea === area.name} 
+                      onClick={(e) => handleAreaClick(e, area.id)} 
+                      disabled={loadingArea === area.id} 
                       className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
                     >
-                      {loadingArea === area.name ? (
-                        <><Loader2 className="animate-spin" size={18}/> 正在前往...</>
+                      {loadingArea === area.id ? (
+                        <><Loader2 className="animate-spin" size={18}/> 正在前往百科...</>
                       ) : (
-                        <>探索此區房源 <ArrowRight size={18} /></>
+                        <>探索百科與房源 <ArrowRight size={18} /></>
                       )}
                     </button>
                   </div>
@@ -211,8 +210,6 @@ export default function HomePage(): React.JSX.Element {
           
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {featuredProps.map((prop: any) => {
-              
-              // ★ 嚴格定義 Link 內部 onClick 型別
               const handlePropClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
                 if (!prop.hasPublishedRooms) {
                   e.preventDefault();
@@ -301,7 +298,6 @@ export default function HomePage(): React.JSX.Element {
 
       </div>
 
-      {/* ★ 嚴格 JSX 判斷：使用 !== null，防止字串隱式轉換引發 TSC Error */}
       {fullArea !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white/95 backdrop-blur-xl border border-white rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
