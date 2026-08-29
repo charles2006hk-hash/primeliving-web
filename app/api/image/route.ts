@@ -9,16 +9,28 @@ export async function GET(request: Request) {
   }
 
   try {
-    // 讓 Vercel 伺服器 (海外) 去向 Google 拿圖片，完美繞過 GFW 與解碼問題
-    const response = await fetch(url);
+    const targetUrl = new URL(url);
+    
+    // 🚨 核心安全防護：僅允許代理 Firebase Storage 的圖片，防止 SSRF 攻擊
+    if (!targetUrl.hostname.includes('firebasestorage.googleapis.com')) {
+      return new NextResponse('Forbidden: Domain not allowed', { status: 403 });
+    }
+
+    // 透過 Vercel Server 請求 Google 圖片，完美繞過 GFW
+    const response = await fetch(targetUrl.toString(), {
+      // 確保不會緩存錯誤的響應
+      cache: 'force-cache' 
+    });
+
     if (!response.ok) throw new Error(`Fetch failed: ${response.status}`);
-    
+
     const buffer = await response.arrayBuffer();
-    
+    const contentType = response.headers.get('Content-Type') || 'image/jpeg';
+
     return new NextResponse(buffer, {
       headers: {
-        'Content-Type': response.headers.get('Content-Type') || 'image/jpeg',
-        // 加上 Vercel CDN 快取機制，讓租客第二次看圖瞬間秒開！
+        'Content-Type': contentType,
+        // Vercel Edge CDN 緩存策略：邊緣節點緩存 1 天，背景重新驗證期 12 小時
         'Cache-Control': 'public, s-maxage=86400, stale-while-revalidate=43200',
       },
     });
