@@ -13,6 +13,7 @@ import {
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
 
+// 圖片代理處理
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
@@ -22,33 +23,30 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
-// ★ 將中文小區名稱映射到我們剛剛建立的 encyclopedia ID
-const ENCYCLOPEDIA_MAP: Record<string, string> = {
-  '柏傲莊': 'pavilia-farm',
-  '大圍 名城': 'festival-city',
-  '名城': 'festival-city',
-  '火炭 星凱堤岸': 'the-arles',
-  '星凱堤岸': 'the-arles',
-  '火炭 御龍山': 'the-palazzo',
-  '御龍山': 'the-palazzo',
-  '坑口 蔚藍灣畔': 'residence-oasis',
-  '蔚藍灣畔': 'residence-oasis',
-  '坑口 南豐廣場': 'nan-fung-plaza',
-  '南豐廣場': 'nan-fung-plaza',
-  '紅磡 曦匯': 'baker-circle',
-  '曦匯': 'baker-circle',
-  '太和 美豐花園': 'mei-fung-gardens',
-  '美豐花園': 'mei-fung-gardens',
-  '太和 美菱居': 'mei-ling-cabin',
-  '美菱居': 'mei-ling-cabin',
-  '太和 太湖花園': 'serenity-park',
-  '太湖花園': 'serenity-park',
-  '太和 翠怡花園': 'greenery-plaza',
-  '翠怡花園': 'greenery-plaza',
-  '大埔 大埔中心': 'tai-po-centre',
-  '大埔中心': 'tai-po-centre',
-  '大埔 新達廣場': 'uptown-plaza',
-  '新達廣場': 'uptown-plaza'
+// ★ 升級版：支援繁簡體與模糊匹配的百科字典
+const ENCYCLOPEDIA_LIST = [
+  { id: 'pavilia-farm', aliases: ['柏傲莊', '柏傲庄'] },
+  { id: 'festival-city', aliases: ['名城'] },
+  { id: 'the-arles', aliases: ['星凱堤岸', '星凯堤岸'] },
+  { id: 'the-palazzo', aliases: ['御龍山', '御龙山'] },
+  { id: 'residence-oasis', aliases: ['蔚藍灣畔', '蔚蓝湾畔'] },
+  { id: 'nan-fung-plaza', aliases: ['南豐廣場', '南丰广场'] },
+  { id: 'baker-circle', aliases: ['曦匯', '曦汇'] },
+  { id: 'mei-fung-gardens', aliases: ['美豐花園', '美丰花园'] },
+  { id: 'mei-ling-cabin', aliases: ['美菱居'] },
+  { id: 'serenity-park', aliases: ['太湖花園', '太湖花园'] },
+  { id: 'greenery-plaza', aliases: ['翠怡花園', '翠怡花园'] },
+  { id: 'tai-po-centre', aliases: ['大埔中心'] },
+  { id: 'uptown-plaza', aliases: ['新達廣場', '新达广场'] }
+];
+
+// 智能查找對應的 Encyclopedia ID
+const findEncyclopediaId = (name: string) => {
+  if (!name) return null;
+  const matched = ENCYCLOPEDIA_LIST.find(record =>
+    record.aliases.some(alias => name.includes(alias))
+  );
+  return matched ? matched.id : null;
 };
 
 export default function HomePage(): React.JSX.Element {
@@ -70,22 +68,30 @@ export default function HomePage(): React.JSX.Element {
     async function fetchAllData() {
       try {
         if (!db) return;
+        
+        // 1. 拉取區域百科指南
         const qArea = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         
-        // 將 Firebase 讀出的資料加上 encyclopediaId，以備跳轉使用
         const guides = snapArea.docs.map(d => {
           const data = d.data();
-          // 嘗試從 Map 中找到對應的英文 ID，如果沒有，就先用原本的名字去 fallback 搜尋
-          const eId = ENCYCLOPEDIA_MAP[data.name] || encodeURIComponent(data.name);
-          return { id: d.id, ...data, encyclopediaId: eId, imageUrl: data.imageUrl || data.img || '' };
+          const eId = findEncyclopediaId(data.name);
+          return { 
+            id: d.id, 
+            ...data, 
+            encyclopediaId: eId || encodeURIComponent(data.name), 
+            hasEncyclopedia: !!eId, // 標記是否成功匹配到百科
+            imageUrl: data.imageUrl || data.img || '' 
+          };
         });
         setAreaGuides(guides);
 
+        // 2. 拉取評論
         const qTest = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
         setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })));
 
+        // 3. 拉取最新上架盤源
         const qProp = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
         const roomsSnap = await getDocs(collection(db, 'rooms'));
@@ -97,10 +103,19 @@ export default function HomePage(): React.JSX.Element {
           const data = doc.data();
           const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
           const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
-          
           const hasPublishedRooms = allRooms.some(r => r.propertyId === doc.id && r.webStatus === 'published' && String(r.status).toLowerCase() !== 'occupied');
           
-          return { id: doc.id, ...data, primaryImage: primaryImg, hasPublishedRooms };
+          // ★ 最新盤源也執行智能百科匹配
+          const eId = findEncyclopediaId(data.name);
+
+          return { 
+            id: doc.id, 
+            ...data, 
+            primaryImage: primaryImg, 
+            hasPublishedRooms,
+            encyclopediaId: eId || encodeURIComponent(data.name),
+            hasEncyclopedia: !!eId
+          };
         });
         setFeaturedProps(propsData);
       } catch (e) { 
@@ -112,15 +127,14 @@ export default function HomePage(): React.JSX.Element {
     fetchAllData();
   }, []);
 
-  // ★ 點擊百科卡片，跳轉至小區百科專頁
+  // ★ 處理百科卡片點擊：透過 hasEncyclopedia 決定跳轉位置
   const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, area: any) => {
     e.preventDefault();
     setLoadingArea(area.id); 
     
     setTimeout(() => {
       setLoadingArea(null);
-      // 如果它在 mapping 表裡，跳去百科；否則跳去全域搜尋
-      if (ENCYCLOPEDIA_MAP[area.name]) {
+      if (area.hasEncyclopedia) {
          router.push(`/encyclopedia/${area.encyclopediaId}`);
       } else {
          router.push(`/properties?search=${area.encyclopediaId}`);
@@ -217,7 +231,6 @@ export default function HomePage(): React.JSX.Element {
                         <p className="text-xs font-bold text-slate-800">{area.estates}</p>
                       </div>
                     </div>
-                    {/* ★ 更新按鈕事件與文案：探索百科 */}
                     <button 
                       onClick={(e) => handleAreaClick(e, area)} 
                       disabled={loadingArea === area.id} 
@@ -253,9 +266,14 @@ export default function HomePage(): React.JSX.Element {
                 }
               };
 
+              // ★ 最新盤源也完美支援百科跳轉
+              const hrefUrl = prop.hasEncyclopedia 
+                 ? `/encyclopedia/${prop.encyclopediaId}` 
+                 : `/properties?search=${prop.encyclopediaId}`;
+
               return (
                 <Link 
-                  href={`/properties?search=${encodeURIComponent(prop.name)}`} 
+                  href={hrefUrl} 
                   onClick={handlePropClick}
                   key={prop.id} 
                   className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative cursor-pointer"
