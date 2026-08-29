@@ -303,14 +303,12 @@ async function getRelatedRooms(searchKeywordStr: string) {
       });
     } catch(e) {}
 
-    // ★ 核心升級：支援用逗號(全/半形)分割多個關鍵字
     const keywords = searchKeywordStr.split(/[,，]/).map(k => k.trim().toLowerCase()).filter(k => k);
 
     rooms = [...internalRooms, ...competitorRooms]
       .filter(r => r.webStatus === 'published' || String(r.status).toLowerCase() === 'occupied')
       .filter(r => {
          const targetStr = (r.propertyName + ' ' + r.estateName + ' ' + r.name).toLowerCase();
-         // 只要滿足其中一個關鍵字即匹配顯示
          return keywords.some(kw => targetStr.includes(kw));
       });
 
@@ -341,18 +339,25 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         const resolvedParams = await Promise.resolve(params);
         const rawId = decodeURIComponent(resolvedParams.estateId);
         
+        // 先找出可能對應的備用 Mock 字典資料 (利用 alias 輔助辨識)
+        const defaultMock = mockDatabase[rawId] || Object.values(mockDatabase).find(m => m.aliases.some(alias => rawId.includes(alias)));
+        const searchAliases = defaultMock ? defaultMock.aliases : [];
+        const searchName = defaultMock ? defaultMock.title : rawId;
+        
         let estateData: EncyclopediaData | null = null;
 
-        // ★ 核心升級：絕對優先從 Firebase 獲取資料，確保與 CMS 實時同步
+        // ★ 核心升級：跨欄位智能比對 Firebase CMS 資料
         const guidesSnap = await getDocs(collection(db, 'area_guides'));
         let matchedDoc: any = null;
         
         guidesSnap.forEach(doc => {
           const d = doc.data();
-          // 匹配 Document ID、名稱、或別名 (包含部分配對)
           if (
             doc.id === rawId || 
+            d.id === rawId ||  // 比對 CMS 初始化寫入的英文 ID
             d.name === rawId || 
+            d.name === searchName || 
+            searchAliases.some(alias => d.name?.includes(alias)) ||
             (d.aliases && d.aliases.some((alias: string) => rawId.includes(alias)))
           ) {
              matchedDoc = { id: doc.id, ...d };
@@ -381,8 +386,8 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                roomTypes: matchedDoc.roomTypes || [] 
              };
         } else {
-           // 如果 CMS 中真的找不到，才降級使用前端的 Mock 資料
-           estateData = mockDatabase[rawId] || Object.values(mockDatabase).find(m => m.aliases.some(alias => rawId.includes(alias))) || null;
+           // 如果 Firebase 完全找不到，才用回 Mock 資料
+           estateData = defaultMock || null;
         }
         
         if (!estateData) {
@@ -511,7 +516,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 屋苑設施與亮點
             </h2>
             
-            {/* 新版標籤化：小區設施 (向下相容舊版文字) */}
             {(estate.facilities?.length ? estate.facilities.length > 0 : estate.facilitiesText) && (
               <div className="mb-8">
                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 小區設施</h3>
@@ -527,7 +531,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
-            {/* 新版標籤化：房間設施 */}
             {estate.roomAmenities && estate.roomAmenities.length > 0 && (
               <div className="mb-8">
                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><BedDouble className="text-orange-500" size={18}/> 房間標準配置</h3>
@@ -539,7 +542,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
-            {/* 歷史相容：如果有舊版/新版的房間設施圖，依然顯示 */}
             {(estate.roomAmenitiesImages?.length ? estate.roomAmenitiesImages.length > 0 : estate.roomAmenitiesUrl) && (
               <div className="mb-8">
                 <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
@@ -554,7 +556,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
-            {/* 新版文字化：佳寓服務亮點 (向下相容單圖) */}
             {(estate.highlights?.length ? estate.highlights.length > 0 : estate.highlightsUrl) && (
               <div className="mb-8">
                  <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Star className="text-orange-500" size={18}/> 佳寓服務亮點</h3>
@@ -574,7 +575,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
-            {/* 小區公共區域圖庫 */}
             {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
               <div className="mt-8">
                 <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 公共區域展示</h3>
