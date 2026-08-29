@@ -13,7 +13,6 @@ import {
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
 
-// 圖片代理處理，避免跨域或直接讀取失敗
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
@@ -23,16 +22,43 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
+// ★ 將中文小區名稱映射到我們剛剛建立的 encyclopedia ID
+const ENCYCLOPEDIA_MAP: Record<string, string> = {
+  '柏傲莊': 'pavilia-farm',
+  '大圍 名城': 'festival-city',
+  '名城': 'festival-city',
+  '火炭 星凱堤岸': 'the-arles',
+  '星凱堤岸': 'the-arles',
+  '火炭 御龍山': 'the-palazzo',
+  '御龍山': 'the-palazzo',
+  '坑口 蔚藍灣畔': 'residence-oasis',
+  '蔚藍灣畔': 'residence-oasis',
+  '坑口 南豐廣場': 'nan-fung-plaza',
+  '南豐廣場': 'nan-fung-plaza',
+  '紅磡 曦匯': 'baker-circle',
+  '曦匯': 'baker-circle',
+  '太和 美豐花園': 'mei-fung-gardens',
+  '美豐花園': 'mei-fung-gardens',
+  '太和 美菱居': 'mei-ling-cabin',
+  '美菱居': 'mei-ling-cabin',
+  '太和 太湖花園': 'serenity-park',
+  '太湖花園': 'serenity-park',
+  '太和 翠怡花園': 'greenery-plaza',
+  '翠怡花園': 'greenery-plaza',
+  '大埔 大埔中心': 'tai-po-centre',
+  '大埔中心': 'tai-po-centre',
+  '大埔 新達廣場': 'uptown-plaza',
+  '新達廣場': 'uptown-plaza'
+};
+
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
 
-  // --- 基礎數據狀態 ---
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [featuredProps, setFeaturedProps] = useState<any[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
 
-  // --- 滿租轉化機制 (Lead Generation) 狀態 ---
   const [loadingArea, setLoadingArea] = useState<string | null>(null);
   const [fullArea, setFullArea] = useState<string | null>(null);
   const [leadName, setLeadName] = useState<string>('');
@@ -40,14 +66,21 @@ export default function HomePage(): React.JSX.Element {
   const [leadReq, setLeadReq] = useState<string>('');
   const [submittingLead, setSubmittingLead] = useState<boolean>(false);
 
-  // 初始化拉取 Firebase 數據
   useEffect(() => {
     async function fetchAllData() {
       try {
         if (!db) return;
         const qArea = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
-        setAreaGuides(snapArea.docs.map(d => ({ id: d.id, ...d.data(), imageUrl: d.data().imageUrl || d.data().img || ''})));
+        
+        // 將 Firebase 讀出的資料加上 encyclopediaId，以備跳轉使用
+        const guides = snapArea.docs.map(d => {
+          const data = d.data();
+          // 嘗試從 Map 中找到對應的英文 ID，如果沒有，就先用原本的名字去 fallback 搜尋
+          const eId = ENCYCLOPEDIA_MAP[data.name] || encodeURIComponent(data.name);
+          return { id: d.id, ...data, encyclopediaId: eId, imageUrl: data.imageUrl || data.img || '' };
+        });
+        setAreaGuides(guides);
 
         const qTest = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
@@ -79,15 +112,19 @@ export default function HomePage(): React.JSX.Element {
     fetchAllData();
   }, []);
 
-  // ★ 核心修改：點擊百科卡片時，跳轉至專屬的小區百科頁面
-  const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, areaId: string) => {
+  // ★ 點擊百科卡片，跳轉至小區百科專頁
+  const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, area: any) => {
     e.preventDefault();
-    setLoadingArea(areaId); // 改用 areaId 來控制 loading 狀態
+    setLoadingArea(area.id); 
     
     setTimeout(() => {
       setLoadingArea(null);
-      // ★ 完美串接：跳轉到我們剛剛建立的 app/encyclopedia/[estateId]/page.tsx
-      router.push(`/encyclopedia/${areaId}`);
+      // 如果它在 mapping 表裡，跳去百科；否則跳去全域搜尋
+      if (ENCYCLOPEDIA_MAP[area.name]) {
+         router.push(`/encyclopedia/${area.encyclopediaId}`);
+      } else {
+         router.push(`/properties?search=${area.encyclopediaId}`);
+      }
     }, 400);
   };
 
@@ -121,7 +158,6 @@ export default function HomePage(): React.JSX.Element {
   return (
     <main className="relative min-h-screen bg-gradient-to-br from-orange-50 via-rose-50 to-amber-50 overflow-hidden selection:bg-orange-200">
       
-      {/* 沉浸式極光背景層 */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute inset-0 opacity-60 mix-blend-overlay"><WeatherAmbientBackground /></div>
         <div className="absolute -top-[10%] -left-[10%] w-[50vw] h-[50vw] rounded-full bg-orange-400/30 blur-[120px] mix-blend-multiply" />
@@ -181,9 +217,9 @@ export default function HomePage(): React.JSX.Element {
                         <p className="text-xs font-bold text-slate-800">{area.estates}</p>
                       </div>
                     </div>
-                    {/* ★ 更新按鈕事件與文案 */}
+                    {/* ★ 更新按鈕事件與文案：探索百科 */}
                     <button 
-                      onClick={(e) => handleAreaClick(e, area.id)} 
+                      onClick={(e) => handleAreaClick(e, area)} 
                       disabled={loadingArea === area.id} 
                       className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
                     >
