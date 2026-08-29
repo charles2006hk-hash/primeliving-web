@@ -1,11 +1,10 @@
-import React from 'react';
+'use client'; // ★ 改為 Client Component 以支援圖片放大與滑動狀態
+
+import React, { useState, useEffect } from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-// ★ 修復核心：補上漏掉的 CheckCircle2
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2 } from 'lucide-react';
+import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2 } from 'lucide-react';
 import Link from 'next/link';
-
-export const dynamic = 'force-dynamic';
 
 // ==========================================
 // 1. 圖片安全處理元件
@@ -18,7 +17,8 @@ const getProxiedUrl = (url?: string | null) => {
   return url; 
 };
 
-const SafeImage = ({ src, alt, className }: { src: string, alt?: string, className?: string }) => {
+// 支援 onClick 的安全圖片元件
+const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string, className?: string, onClick?: () => void }) => {
   const safeSrc = getProxiedUrl(src);
   return (
     <img 
@@ -26,6 +26,7 @@ const SafeImage = ({ src, alt, className }: { src: string, alt?: string, classNa
       alt={alt || '圖片'} 
       className={`object-cover ${className || ''}`} 
       loading="lazy"
+      onClick={onClick}
     />
   );
 };
@@ -53,6 +54,7 @@ interface EncyclopediaData {
   }[];
 }
 
+// Mock 資料 (已增加多張圖片以展示滑動效果)
 const getEncyclopediaData = (id: string): EncyclopediaData => ({
   id,
   title: '大圍 柏傲莊',
@@ -63,31 +65,41 @@ const getEncyclopediaData = (id: string): EncyclopediaData => ({
   estateIntro: '位於香港新界沙田區車公廟路18號，於2022年下半年開始開放入住。小區內部直通大圍地鐵站和大型商場圍方（下雨可不用打傘），坐落於獅子山腳，依傍護城河，山水相依，屋苑園林景觀優美別緻，周邊生活配套齊全。',
   estateImages: [
     'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&q=80&w=1200',
-    'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=1200'
+    'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=1200',
+    'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&q=80&w=1200' // 第三張圖
   ],
   facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
   roomAmenitiesUrl: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&q=80&w=1200', 
   highlightsUrl: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=1200', 
   publicAreaImages: [
     'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&q=80&w=800',
-    'https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&q=80&w=800'
+    'https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&q=80&w=800',
+    'https://images.unsplash.com/photo-1542361345-89e58247f2d5?auto=format&fit=crop&q=80&w=800', // 第三張圖
+    'https://images.unsplash.com/photo-1582719478250-c89af14fbfee?auto=format&fit=crop&q=80&w=800'  // 第四張圖
   ],
   roomTypes: [
     {
       name: '三房一廁 陽台大單間A-D',
       floorPlanUrl: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&q=80&w=800',
-      roomImages: ['https://images.unsplash.com/photo-1522771731470-ea457f920257?auto=format&fit=crop&q=80&w=800']
+      roomImages: [
+        'https://images.unsplash.com/photo-1522771731470-ea457f920257?auto=format&fit=crop&q=80&w=800',
+        'https://images.unsplash.com/photo-1502672260266-1c1de2d9200b?auto=format&fit=crop&q=80&w=800', // 第二張
+        'https://images.unsplash.com/photo-1560185007-cde436f6a4d0?auto=format&fit=crop&q=80&w=800'  // 第三張
+      ]
     },
     {
       name: '四房二廁 獨衛陽台大單間A',
       floorPlanUrl: 'https://images.unsplash.com/photo-1600607687920-4e2a09cf159d?auto=format&fit=crop&q=80&w=800',
-      roomImages: ['https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&q=80&w=800']
+      roomImages: [
+        'https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&q=80&w=800',
+        'https://images.unsplash.com/photo-1513694203232-719a280e022f?auto=format&fit=crop&q=80&w=800' // 第二張
+      ]
     }
   ]
 });
 
 // ==========================================
-// 3. 拉取大系統房源 (限制 6 個以維持版面平衡)
+// 3. 拉取大系統房源
 // ==========================================
 async function getRelatedRooms(searchKeyword: string) {
   let rooms: any[] = [];
@@ -141,61 +153,105 @@ async function getRelatedRooms(searchKeyword: string) {
 
   } catch (error) {}
   
-  return rooms.slice(0, 6); 
+  return rooms.slice(0, 8); 
 }
 
 // ==========================================
-// 4. 頁面渲染 
+// 4. 頁面渲染
 // ==========================================
-export default async function EstateEncyclopediaPage({ params }: { params: Promise<{ estateId: string }> }) {
-  const resolvedParams = await params;
-  const estate = getEncyclopediaData(resolvedParams.estateId);
-  const relatedRooms = await getRelatedRooms(estate.searchKeyword);
+export default function EstateEncyclopediaPage({ params }: { params: Promise<{ estateId: string }> | { estateId: string } }) {
+  const [data, setData] = useState<{ estate: EncyclopediaData, rooms: any[] } | null>(null);
+  const [loading, setLoading] = useState(true);
+  
+  // ★ 放大圖片用的 State
+  const [lightboxImage, setLightboxImage] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadData() {
+      try {
+        // 處理 Next.js Params
+        const resolvedParams = await Promise.resolve(params);
+        const estateData = getEncyclopediaData(resolvedParams.estateId);
+        const roomData = await getRelatedRooms(estateData.searchKeyword);
+        setData({ estate: estateData, rooms: roomData });
+      } catch (error) {
+        console.error("載入百科失敗:", error);
+      } finally {
+        setLoading(false);
+      }
+    }
+    loadData();
+  }, [params]);
+
+  if (loading || !data) {
+    return (
+      <div className="min-h-screen flex justify-center items-center bg-slate-50">
+        <Loader2 className="animate-spin text-orange-500" size={40}/>
+      </div>
+    );
+  }
+
+  const { estate, rooms: relatedRooms } = data;
 
   return (
     <div className="relative min-h-screen bg-gradient-to-br from-orange-50 via-rose-50 to-amber-50 selection:bg-orange-200 pb-24 font-sans">
       
+      {/* ★ 圖片放大燈箱 (Lightbox) */}
+      {lightboxImage && (
+        <div 
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/95 p-4 md:p-10 backdrop-blur-md animate-in fade-in duration-200 cursor-zoom-out" 
+          onClick={() => setLightboxImage(null)}
+        >
+          <button className="absolute top-6 right-6 text-white hover:text-orange-400 bg-white/10 hover:bg-white/20 rounded-full p-2 transition-colors z-50">
+            <X size={28} />
+          </button>
+          <img src={getProxiedUrl(lightboxImage)} className="max-w-full max-h-full object-contain rounded-2xl shadow-2xl" alt="Enlarged" />
+        </div>
+      )}
+
       {/* 沉浸式背景層 */}
       <div className="absolute inset-0 z-0 overflow-hidden pointer-events-none">
         <div className="absolute -top-[10%] -left-[10%] w-[50vw] h-[50vw] rounded-full bg-orange-400/20 blur-[120px] mix-blend-multiply" />
         <div className="absolute top-[20%] -right-[10%] w-[45vw] h-[45vw] rounded-full bg-rose-400/20 blur-[130px] mix-blend-multiply" />
       </div>
 
-      {/* 頂部形象圖與標題 */}
-      <div className="relative pt-24 md:pt-32 pb-12 z-10 max-w-7xl mx-auto px-4">
-         <div className="text-center mb-10">
-           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-orange-600 text-xs font-black tracking-widest mb-4 shadow-sm">
-             <MapPin size={14} /> 小區生活圈百科
-           </div>
-           <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight drop-shadow-sm mb-4">
-             {estate.title}
-           </h1>
-           <p className="text-slate-600 font-bold max-w-2xl mx-auto leading-relaxed whitespace-pre-wrap">
-             {estate.targetAudience}
-           </p>
-         </div>
-
-         {/* 懸浮導航 (Pill Design) */}
-         <div className="sticky top-[80px] z-50 flex justify-center mb-12">
-            <div className="bg-white/80 backdrop-blur-xl border border-white/60 shadow-lg shadow-slate-200/50 rounded-full px-2 py-2 flex gap-1 overflow-x-auto custom-scrollbar max-w-full">
-               {[
-                 { id: '#intro', icon: Building, label: '小區介紹' },
-                 { id: '#traffic', icon: Navigation, label: '交通攻略' },
-                 { id: '#facilities', icon: Sparkles, label: '設施與亮點' },
-                 { id: '#floorplans', icon: LayoutList, label: '戶型圖則' },
-                 { id: '#available-rooms', icon: Home, label: '可租盤源' }
-               ].map(nav => (
-                 <a key={nav.id} href={nav.id} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-black text-slate-600 hover:bg-orange-500 hover:text-white transition-all whitespace-nowrap">
-                   <nav.icon size={16}/> {nav.label}
-                 </a>
-               ))}
-            </div>
-         </div>
-
-         {/* 主視覺大圖 */}
-         <div id="intro" className="h-[400px] md:h-[500px] rounded-[3rem] overflow-hidden shadow-2xl shadow-slate-200/50 relative group scroll-mt-32">
+      {/* 整合文字的沉浸式主視覺大圖 */}
+      <div className="relative pt-24 md:pt-28 z-10 max-w-7xl mx-auto px-4 mb-8">
+        <div id="intro" className="h-[450px] md:h-[550px] rounded-[3rem] overflow-hidden shadow-2xl shadow-slate-200/50 relative group scroll-mt-32 flex flex-col justify-end p-8 md:p-12">
+          
+          <div className="absolute inset-0">
             <SafeImage src={estate.estateImages[0]} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" />
-            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-slate-900/90 via-slate-900/40 to-transparent" />
+          </div>
+
+          <div className="relative z-10 text-white max-w-3xl">
+            <div className="inline-flex items-center gap-1.5 px-3 py-1 mb-4 rounded-full bg-white/20 backdrop-blur-md border border-white/30 text-white text-[10px] font-black tracking-widest shadow-sm">
+              <MapPin size={14} /> 小區生活圈百科
+            </div>
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-black tracking-tight drop-shadow-lg mb-4">
+              {estate.title}
+            </h1>
+            <p className="text-slate-200 font-medium leading-relaxed whitespace-pre-wrap text-sm md:text-base drop-shadow-md">
+              {estate.targetAudience}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      {/* 懸浮導航 (Pill Design) */}
+      <div className="sticky top-[80px] z-50 flex justify-center mb-10 px-4">
+         <div className="bg-white/80 backdrop-blur-xl border border-white/60 shadow-lg shadow-slate-200/50 rounded-full px-2 py-2 flex gap-1 overflow-x-auto custom-scrollbar max-w-full">
+            {[
+              { id: '#intro', icon: Building, label: '小區介紹' },
+              { id: '#traffic', icon: Navigation, label: '交通攻略' },
+              { id: '#facilities', icon: Sparkles, label: '設施與亮點' },
+              { id: '#floorplans', icon: LayoutList, label: '戶型圖則' },
+              { id: '#available-rooms', icon: Home, label: '可租盤源' }
+            ].map(nav => (
+              <a key={nav.id} href={nav.id} className="flex items-center gap-2 px-5 py-2.5 rounded-full text-sm font-black text-slate-600 hover:bg-orange-500 hover:text-white transition-all whitespace-nowrap">
+                <nav.icon size={16}/> {nav.label}
+              </a>
+            ))}
          </div>
       </div>
 
@@ -203,13 +259,22 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
       <div className="relative z-10 max-w-7xl mx-auto px-4 grid grid-cols-1 lg:grid-cols-12 gap-8">
         
         {/* 左側：詳細資訊 */}
-        <div className="lg:col-span-8 space-y-8">
+        <div className="lg:col-span-8 space-y-8 min-w-0">
           
           <section className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80">
-            <h2 className="text-2xl font-black text-slate-800 mb-4 flex items-center gap-3">
+            <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 關於本小區
             </h2>
-            <p className="text-slate-700 leading-relaxed font-medium text-lg">{estate.estateIntro}</p>
+            <p className="text-slate-700 leading-relaxed font-medium text-lg mb-6">{estate.estateIntro}</p>
+            
+            {/* ★ 橫向滑動圖片庫 */}
+            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {estate.estateImages.slice(1).map((img, i) => (
+                <div key={i} className="shrink-0 w-72 md:w-80 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                  <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                </div>
+              ))}
+            </div>
           </section>
 
           <section id="traffic" className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80 scroll-mt-32">
@@ -217,8 +282,8 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 交通與通勤
             </h2>
             <p className="text-slate-700 leading-relaxed font-medium text-base mb-6">{estate.trafficDesc}</p>
-            <div className="rounded-2xl overflow-hidden border border-slate-200/50 shadow-sm h-[300px]">
-              <SafeImage src={estate.trafficMapUrl} className="w-full h-full object-cover" />
+            <div className="rounded-2xl overflow-hidden border border-slate-200/50 shadow-sm h-[300px] cursor-zoom-in" onClick={() => setLightboxImage(estate.trafficMapUrl)}>
+              <SafeImage src={estate.trafficMapUrl} className="w-full h-full object-cover hover:scale-105 transition-transform duration-500" />
             </div>
           </section>
 
@@ -228,15 +293,29 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
             </h2>
             <p className="text-slate-700 leading-relaxed font-medium text-base mb-8">{estate.facilitiesText}</p>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
               <div>
                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 房間標準配置</h3>
-                <div className="rounded-2xl overflow-hidden shadow-sm h-64 border border-slate-200/50"><SafeImage src={estate.roomAmenitiesUrl} className="w-full h-full object-cover" /></div>
+                <div className="rounded-2xl overflow-hidden shadow-sm h-48 border border-slate-200/50 cursor-zoom-in" onClick={() => setLightboxImage(estate.roomAmenitiesUrl)}>
+                   <SafeImage src={estate.roomAmenitiesUrl} className="w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                </div>
               </div>
               <div>
                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 佳寓服務亮點</h3>
-                <div className="rounded-2xl overflow-hidden shadow-sm h-64 border border-slate-200/50"><SafeImage src={estate.highlightsUrl} className="w-full h-full object-cover" /></div>
+                <div className="rounded-2xl overflow-hidden shadow-sm h-48 border border-slate-200/50 cursor-zoom-in" onClick={() => setLightboxImage(estate.highlightsUrl)}>
+                   <SafeImage src={estate.highlightsUrl} className="w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                </div>
               </div>
+            </div>
+
+            <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 公共區域展示</h3>
+            {/* ★ 橫向滑動圖片庫 */}
+            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+              {estate.publicAreaImages.map((img, i) => (
+                <div key={i} className="shrink-0 w-64 md:w-72 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                  <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                </div>
+              ))}
             </div>
           </section>
 
@@ -254,12 +333,21 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60">
-                      <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><Map size={16}/> 戶型圖則</p>
-                      <div className="h-64 rounded-2xl overflow-hidden bg-white"><SafeImage src={rt.floorPlanUrl} className="w-full h-full object-contain" /></div>
+                      <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><Map size={16}/> 戶型圖則 (點擊放大)</p>
+                      <div className="h-48 md:h-56 rounded-2xl overflow-hidden bg-white cursor-zoom-in" onClick={() => setLightboxImage(rt.floorPlanUrl)}>
+                         <SafeImage src={rt.floorPlanUrl} className="w-full h-full object-contain" />
+                      </div>
                     </div>
-                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60">
-                      <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><BedDouble size={16}/> 房間實景</p>
-                      <div className="h-64 rounded-2xl overflow-hidden bg-white"><SafeImage src={rt.roomImages[0]} className="w-full h-full object-cover" /></div>
+                    <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60 min-w-0">
+                      <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><BedDouble size={16}/> 房間實景 ({rt.roomImages.length} 張)</p>
+                      {/* ★ 橫向滑動圖片庫 */}
+                      <div className="flex overflow-x-auto gap-3 snap-x snap-mandatory pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                        {rt.roomImages.map((img, i) => (
+                           <div key={i} className="shrink-0 w-[85%] h-48 md:h-56 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                             <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                           </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -320,7 +408,9 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                 <>
                   {isSoldOut && (
                     <div className="absolute inset-0 bg-slate-100/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700">SOLD OUT</div>
+                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
+                        SOLD OUT
+                      </div>
                     </div>
                   )}
 
@@ -335,9 +425,10 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                        <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.estateName || room.propertyName}
                     </div>
 
+                    {/* ★ 行家標籤：明確標示為 HK港灣之家 */}
                     {room.isCompetitor && (
                       <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10 border border-white/50">
-                         <Building2 size={12}/> 精選合作盤源
+                         <Building2 size={12}/> HK港灣之家
                       </div>
                     )}
                   </div>
