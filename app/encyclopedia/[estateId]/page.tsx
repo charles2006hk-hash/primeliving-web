@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2 } from 'lucide-react';
+import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -44,9 +44,18 @@ interface EncyclopediaData {
   trafficMapUrl: string; 
   estateIntro: string; 
   estateImages: string[]; 
-  facilitiesText: string; 
-  roomAmenitiesUrl: string; 
-  highlightsUrl: string; 
+  
+  // ★ 新版 CMS 同步欄位
+  facilitiesText?: string; 
+  facilities?: string[]; 
+  
+  roomAmenitiesUrl?: string; 
+  roomAmenitiesImages?: string[];
+  roomAmenities?: string[];
+  
+  highlightsUrl?: string; 
+  highlights?: string[];
+  
   publicAreaImages: string[]; 
   roomTypes: {
     name: string; 
@@ -349,12 +358,21 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                trafficDesc: cmsData.trafficDesc || '',
                trafficMapUrl: cmsData.trafficMapUrl || '',
                estateIntro: cmsData.estateIntro || cmsData.desc || '',
-               estateImages: cmsData.imageUrl ? [cmsData.imageUrl] : [],
+               estateImages: cmsData.estateImages || (cmsData.imageUrl ? [cmsData.imageUrl] : []), // 相容舊版單圖
+               
+               // ★ 新版 CMS 同步：標籤與設施
                facilitiesText: cmsData.facilitiesText || '',
+               facilities: cmsData.facilities || [],
+               
                roomAmenitiesUrl: cmsData.roomAmenitiesUrl || '',
+               roomAmenitiesImages: cmsData.roomAmenitiesImages || (cmsData.roomAmenitiesUrl ? [cmsData.roomAmenitiesUrl] : []),
+               roomAmenities: cmsData.roomAmenities || [],
+               
                highlightsUrl: cmsData.highlightsUrl || '',
-               publicAreaImages: [],
-               roomTypes: cmsData.roomTypes || [] // ★ 這裡確保了從 CMS 讀取戶型陣列
+               highlights: cmsData.highlights || [],
+               
+               publicAreaImages: cmsData.publicAreaImages || [],
+               roomTypes: cmsData.roomTypes || [] 
              };
           }
         }
@@ -409,7 +427,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
       <div className="relative pt-24 md:pt-28 z-10 max-w-7xl mx-auto px-4 mb-8">
         <div id="intro" className="h-[450px] md:h-[550px] rounded-[3rem] overflow-hidden shadow-2xl shadow-slate-200/50 relative group scroll-mt-32 flex flex-col justify-end p-8 md:p-12">
           <div className="absolute inset-0">
-            {estate.estateImages[0] ? (
+            {estate.estateImages && estate.estateImages[0] ? (
               <SafeImage src={estate.estateImages[0]} className="w-full h-full object-cover transition-transform duration-1000 group-hover:scale-105" />
             ) : (
               <div className="w-full h-full bg-slate-200 flex items-center justify-center text-slate-400">尚無封面圖片</div>
@@ -455,7 +473,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 關於本小區
             </h2>
             <p className="text-slate-700 leading-relaxed font-medium text-lg mb-6 whitespace-pre-wrap">{estate.estateIntro}</p>
-            {estate.estateImages.length > 1 && (
+            {estate.estateImages && estate.estateImages.length > 1 && (
               <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
                 {estate.estateImages.slice(1).map((img, i) => (
                   <div key={i} className="shrink-0 w-72 md:w-80 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
@@ -484,38 +502,82 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
             <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 屋苑設施與亮點
             </h2>
-            <p className="text-slate-700 leading-relaxed font-medium text-base mb-8 whitespace-pre-wrap">{estate.facilitiesText}</p>
             
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-              {estate.roomAmenitiesUrl && (
-                <div>
-                  <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 房間標準配置</h3>
-                  <div className="rounded-2xl overflow-hidden shadow-sm h-48 border border-slate-200/50 cursor-zoom-in" onClick={() => setLightboxImage(estate.roomAmenitiesUrl)}>
-                     <SafeImage src={estate.roomAmenitiesUrl} className="w-full h-full object-cover hover:opacity-90 transition-opacity" />
+            {/* ★ 新版標籤化：小區設施 (相容舊版文字) */}
+            {(estate.facilities?.length ? estate.facilities.length > 0 : estate.facilitiesText) && (
+              <div className="mb-8">
+                <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 小區設施</h3>
+                {estate.facilities && estate.facilities.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {estate.facilities.map((f: string, i: number) => (
+                      <span key={i} className="bg-blue-50 text-blue-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm border border-blue-100/50">{f}</span>
+                    ))}
                   </div>
-                </div>
-              )}
-              {estate.highlightsUrl && (
-                <div>
-                  <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 佳寓服務亮點</h3>
-                  <div className="rounded-2xl overflow-hidden shadow-sm h-48 border border-slate-200/50 cursor-zoom-in" onClick={() => setLightboxImage(estate.highlightsUrl)}>
-                     <SafeImage src={estate.highlightsUrl} className="w-full h-full object-cover hover:opacity-90 transition-opacity" />
-                  </div>
-                </div>
-              )}
-            </div>
+                ) : (
+                  <p className="text-slate-700 leading-relaxed font-medium text-base whitespace-pre-wrap">{estate.facilitiesText}</p>
+                )}
+              </div>
+            )}
 
+            {/* ★ 新版標籤化：房間設施 */}
+            {estate.roomAmenities && estate.roomAmenities.length > 0 && (
+              <div className="mb-8">
+                <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><BedDouble className="text-orange-500" size={18}/> 房間標準配置</h3>
+                <div className="flex flex-wrap gap-2">
+                  {estate.roomAmenities.map((a: string, i: number) => (
+                    <span key={i} className="bg-emerald-50 text-emerald-700 px-4 py-2 rounded-xl text-sm font-bold shadow-sm border border-emerald-100/50">{a}</span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ★ 新版多圖：房間設施圖片 (相容舊版單圖) */}
+            {(estate.roomAmenitiesImages?.length ? estate.roomAmenitiesImages.length > 0 : estate.roomAmenitiesUrl) && (
+              <div className="mb-8">
+                <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
+                  {(estate.roomAmenitiesImages && estate.roomAmenitiesImages.length > 0 ? estate.roomAmenitiesImages : [estate.roomAmenitiesUrl]).map((img, i) => (
+                    img && (
+                      <div key={i} className="shrink-0 w-72 md:w-80 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                        <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                      </div>
+                    )
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* ★ 新版文字化：佳寓服務亮點 (相容舊版單圖) */}
+            {(estate.highlights?.length ? estate.highlights.length > 0 : estate.highlightsUrl) && (
+              <div className="mb-8">
+                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><Star className="text-orange-500" size={18}/> 佳寓服務亮點</h3>
+                 {estate.highlights && estate.highlights.length > 0 ? (
+                   <div className="bg-amber-50/50 p-6 rounded-2xl border border-amber-100 space-y-3">
+                     {estate.highlights.map((hl: string, i: number) => (
+                       <div key={i} className="bg-white px-5 py-3 rounded-xl shadow-sm text-sm font-bold text-amber-900 leading-relaxed flex items-start gap-2">
+                         <span className="text-amber-500 mt-0.5 shrink-0">✨</span> {hl}
+                       </div>
+                     ))}
+                   </div>
+                 ) : (
+                   <div className="rounded-2xl overflow-hidden shadow-sm h-48 border border-slate-200/50 cursor-zoom-in" onClick={() => setLightboxImage(estate.highlightsUrl!)}>
+                      <SafeImage src={estate.highlightsUrl!} className="w-full h-full object-cover hover:opacity-90 transition-opacity" />
+                   </div>
+                 )}
+              </div>
+            )}
+
+            {/* 小區公共區域多圖 */}
             {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
-              <>
+              <div className="mt-8">
                 <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 公共區域展示</h3>
                 <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
-                  {estate.publicAreaImages.map((img, i) => (
+                  {estate.publicAreaImages.map((img: string, i: number) => (
                     <div key={i} className="shrink-0 w-64 md:w-72 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
                       <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
                     </div>
                   ))}
                 </div>
-              </>
+              </div>
             )}
           </section>
 
