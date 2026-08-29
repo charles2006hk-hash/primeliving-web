@@ -1,8 +1,8 @@
 import React from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-// ★ 修復：補上漏掉的 Map 圖示，防止 React 把全域的 JS Map 物件拿來渲染導致 500 崩潰
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map } from 'lucide-react';
+// ★ 修復核心：補上漏掉的 CheckCircle2
+import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2 } from 'lucide-react';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -170,7 +170,7 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
            <h1 className="text-4xl md:text-5xl font-black text-slate-900 tracking-tight drop-shadow-sm mb-4">
              {estate.title}
            </h1>
-           <p className="text-slate-600 font-bold max-w-2xl mx-auto leading-relaxed">
+           <p className="text-slate-600 font-bold max-w-2xl mx-auto leading-relaxed whitespace-pre-wrap">
              {estate.targetAudience}
            </p>
          </div>
@@ -320,9 +320,7 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                 <>
                   {isSoldOut && (
                     <div className="absolute inset-0 bg-slate-100/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
-                        SOLD OUT
-                      </div>
+                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700">SOLD OUT</div>
                     </div>
                   )}
 
@@ -337,10 +335,9 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
                        <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.estateName || room.propertyName}
                     </div>
 
-                    {/* ★ 行家盤源改回 HK港灣之家 */}
                     {room.isCompetitor && (
                       <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10 border border-white/50">
-                         <Building2 size={12}/> HK港灣之家
+                         <Building2 size={12}/> 精選合作盤源
                       </div>
                     )}
                   </div>
