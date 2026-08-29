@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2 } from 'lucide-react';
 import Link from 'next/link';
@@ -34,11 +34,11 @@ const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string
 // ==========================================
 // 2. CMS 資料庫介面定義與過渡期 Mock 資料
 // ==========================================
-// ★ 未來 CMS 開發指南：後台資料表 area_encyclopedias 請嚴格對齊此介面
 interface EncyclopediaData {
   id: string;
   title: string;
   searchKeyword: string; 
+  aliases: string[]; // ★ 新增：用於繁簡體與多重名稱模糊匹配
   targetAudience: string; 
   trafficDesc: string; 
   trafficMapUrl: string; 
@@ -55,7 +55,6 @@ interface EncyclopediaData {
   }[];
 }
 
-// 預設佔位圖片 (供 CMS 尚未上傳圖片時使用)
 const DUMMY_MAP = 'https://images.unsplash.com/photo-1555931202-b8830f80bb1a?auto=format&fit=crop&q=80&w=1200';
 const DUMMY_ESTATE = 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&q=80&w=1200';
 const DUMMY_FACILITY = 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&q=80&w=1200';
@@ -67,15 +66,14 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     id: 'pavilia-farm',
     title: '大圍 柏傲莊',
     searchKeyword: '柏傲莊',
+    aliases: ['柏傲莊', '柏傲庄'],
     targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學\n【適合人群】學生、上班族。交通便利，新界、九龍、港島主要辦公區都適合。',
     trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站，只需乘港鐵一個站6分鐘便可到達九龍塘站，到紅磡站、大學站亦只需15分鐘。位於東鐵線，只需半個小時到口岸。小區樓下便是地鐵站和公交站。',
     trafficMapUrl: DUMMY_MAP, 
     estateIntro: '位於香港新界沙田區車公廟路18號，於2022年下半年開始開放入住。小區內部直通大圍地鐵站和大型商場圍方（下雨可不用打傘），坐落於獅子山腳，依傍護城河，山水相依，屋苑園林景觀優美別緻，周邊生活配套齊全。',
     estateImages: [DUMMY_ESTATE, 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
-    roomAmenitiesUrl: DUMMY_FACILITY, 
-    highlightsUrl: DUMMY_FACILITY, 
-    publicAreaImages: [DUMMY_ROOM, DUMMY_ROOM],
+    roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM, DUMMY_ROOM],
     roomTypes: [
       { name: '三房一廁 陽台大單間A-D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] },
       { name: '四房二廁 獨衛陽台大單間A', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
@@ -83,8 +81,9 @@ const mockDatabase: Record<string, EncyclopediaData> = {
   },
   'festival-city': {
     id: 'festival-city',
-    title: '大圍 名城 (Festival City)',
+    title: '大圍 名城',
     searchKeyword: '名城',
+    aliases: ['名城'],
     targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學、香港恆生大學、香港都會大學\n【適合人群】學生、上班族。交通便利，新界、九龍、港島主要辦公區都適合。',
     trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站，只需乘港鐵一個站6分鐘便可到達九龍塘站，到紅磡站、大學站亦只需15分鐘。位於東鐵線，只需半個小時到口岸。小區樓下便是地鐵站和公交站。',
     trafficMapUrl: DUMMY_MAP, 
@@ -92,15 +91,14 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: ['https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '四房二廁 獨衛陽台大單間A', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '四房二廁 獨衛陽台大單間A', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'the-arles': {
     id: 'the-arles',
     title: '火炭 星凱堤岸',
     searchKeyword: '星凱堤岸',
-    targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學、香港恒生大學、香港都会大学\n【适合上班族位置】交通便利，新界、九龙、港岛主要办公区都适合。',
+    aliases: ['星凱堤岸', '星凯堤岸'],
+    targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學、香港恒生大学、香港都会大学\n【适合上班族位置】交通便利，新界、九龙、港岛主要办公区都适合。',
     trafficDesc: '火炭地铁站B/D口，出站口即见，步行约3-8分钟即可到达地铁站，只需乘坐港铁一站三分钟便可到达大学站，只需乘港铁三个站10分钟便可到达九龙塘站，到红磡站亦只需15分钟左右。位于东铁线，只需不到半个小时到口岸。',
     trafficMapUrl: DUMMY_MAP, 
     estateIntro: '位于香港新界沙田区火炭坳背街1号，于2023年上半年开始开放入住，小区毗邻火炭地铁站和小区自带商场，设国际级幼稚园、餐厅和超级市场，屋苑平台风景优美别致，部分房型可看到赛马景观，周边生活配套齐全。',
@@ -116,6 +114,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     id: 'the-palazzo',
     title: '火炭 御龍山',
     searchKeyword: '御龍山',
+    aliases: ['御龍山', '御龙山'],
     targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學、香港恒生大学(可租學生的戶型少)\n【適合上班族】交通便利，新界、港島主要办公区都适合。',
     trafficDesc: '火炭地铁站C口，出站口即见，步行约2-6分钟即可到达地铁站，只需乘坐港铁一站三分钟便可到达大学站，只需乘港铁三个站10分钟便可到达九龙塘站，到红磡站亦只需15分钟左右位于东铁线，只需不到半个小时到口岸。',
     trafficMapUrl: DUMMY_MAP, 
@@ -123,14 +122,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑实行24小时安保管理建筑会所：桑拿浴室、蒸气浴室、乒乓球室、保龄球场、电影院、音乐室、健康舞室、健身室、室内/室外游泳池、香薰水疗等。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '御龍山標準戶型', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '御龍山標準戶型', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'residence-oasis': {
     id: 'residence-oasis',
     title: '坑口 蔚藍灣畔',
     searchKeyword: '蔚藍灣畔',
+    aliases: ['蔚藍灣畔', '蔚蓝湾畔'],
     targetAudience: '【適合學校】香港科技大學\n【適合上班族】交通便利，新界、九龍、港島主要办公区都适合。',
     trafficDesc: '位于坑口地铁站上盖，步行约3-8分钟即可到达地铁站，乘坐11号专线小巴(B1出口) 10分钟直达科技大学，乘坐地铁30分钟到达港岛核心区域。',
     trafficMapUrl: DUMMY_MAP, 
@@ -138,14 +136,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑实行24小时安保管理。除现时一般屋苑提供的设施如室内泳池、多用途运动场、桌球室、健身中心、桑拿浴室等之外，亦提供宴会厅、户外烧烤场及网球场。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: 'F戶型/標準單間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: 'F戶型/標準單間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'nan-fung-plaza': {
     id: 'nan-fung-plaza',
     title: '坑口 南豐廣場',
     searchKeyword: '南豐廣場',
+    aliases: ['南豐廣場', '南丰广场'],
     targetAudience: '【適合學校】香港科技大學\n【適合上班族】交通便利，新界、九龍、港島主要办公区都适合。',
     trafficDesc: '位于坑口地铁站上盖，步行约3-8分钟即可到达地铁站，乘坐11号专线小巴(B1出口) 10分钟直达科技大学，乘坐地铁30分钟到达港岛核心区域。',
     trafficMapUrl: DUMMY_MAP, 
@@ -153,14 +150,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑实行24小时安保管理。设施包含室内泳池、多用途运动场、桌球室、健身中心、桑拿浴室、宴会厅、缓跑径、户外烧烤场及网球场。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '四房两厕(含阳台及储藏间)', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '四房两厕(含阳台及储藏间)', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'baker-circle': {
     id: 'baker-circle',
     title: '紅磡 曦匯',
     searchKeyword: '曦匯',
+    aliases: ['曦匯', '曦汇'],
     targetAudience: '九龙核心区高校学生首选！必嘉坊曦汇坐拥红磡-何文田黄金地段，超适合：香港理工大学、香港都会大学、香港城市大学、香港浸会大学&恒生大学。省时省力，跨校区上课也无压力！',
     trafficDesc: '「双地铁交汇|红磡站+何文田站」步行5-8分钟即达！地铁网络：屯马线、东铁线、观塘线。小区门口多条线路覆盖全港，A21机场巴士直达香港机场。',
     trafficMapUrl: DUMMY_MAP, 
@@ -168,14 +164,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '会所设施：天际泳池、24小时健身房、瑜伽室、共享办公区、儿童游乐场。公共空间：空中花园、BBQ露台。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '独卫阳台大单间', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '独卫阳台大单间', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'mei-fung-gardens': {
     id: 'mei-fung-gardens',
     title: '太和 美豐花園',
     searchKeyword: '美豐花園',
+    aliases: ['美豐花園', '美丰花园'],
     targetAudience: '香港中文大学，香港教育大学，香港恒生大学，香港城市大学，香港浸会大学；适合东铁沿线上班族，交通便利，新界、九龙主要办公区都适合。',
     trafficDesc: '太和地铁站，非常邻近，步行约5-8分钟即可到达地铁站，只需乘坐港铁二站10分钟便可到达大学站，只需乘港铁六个站十几分钟便可到达九龙塘站，到红磡站亦只需20多分钟。',
     trafficMapUrl: DUMMY_MAP, 
@@ -192,6 +187,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     id: 'mei-ling-cabin',
     title: '太和 美菱居',
     searchKeyword: '美菱居',
+    aliases: ['美菱居'],
     targetAudience: '香港中文大学，香港教育大学，香港恒生大学；适合东铁沿线上班族，交通便利，新界、九龙主要办公区都适合。',
     trafficDesc: '距离太和地铁站仅几分钟路程，只需20分钟左右可达中大和教大，只需20多分钟便可到达九龙，只需不到15分钟到口岸。',
     trafficMapUrl: DUMMY_MAP, 
@@ -199,14 +195,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑配有多用途运动场、健身中心等。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '四房一厕-B/C/D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '四房一厕-B/C/D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'serenity-park': {
     id: 'serenity-park',
     title: '太和 太湖花園',
     searchKeyword: '太湖花園',
+    aliases: ['太湖花園', '太湖花园'],
     targetAudience: '适合大学：香港中文大学、香港城市大学，香港浸会大学，香港教育大学，香港恒生大学，香港理工大学，香港都会大学；适合东铁沿线上班族。',
     trafficDesc: '太和地铁站，非常邻近，步行约3-8分钟即可到达地铁站，只需乘坐港铁二站10分钟便可到达大学站，只需乘港铁六个站十几分钟便可到达九龙塘站。',
     trafficMapUrl: DUMMY_MAP, 
@@ -223,6 +218,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     id: 'greenery-plaza',
     title: '太和 翠怡花園',
     searchKeyword: '翠怡花園',
+    aliases: ['翠怡花園', '翠怡花园'],
     targetAudience: '香港中文大学、香港城市大学，香港浸会大学，香港教育大学，香港恒生大学，香港理工大学，香港都会大学；适合东铁沿线上班族。',
     trafficDesc: '太和地铁站，非常邻近，步行约2-5分钟即可到达地铁站，只需乘坐港铁二站10分钟便可到达大学站。',
     trafficMapUrl: DUMMY_MAP, 
@@ -230,14 +226,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑配有多用途运动场、健身中心等。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '三方一厕-A/B/C房間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '三方一厕-A/B/C房間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'tai-po-centre': {
     id: 'tai-po-centre',
     title: '大埔 大埔中心',
     searchKeyword: '大埔中心',
+    aliases: ['大埔中心'],
     targetAudience: '香港中文大学，香港教育大学，香港恒生大学；适合东铁沿线上班族，交通便利，新界、九龙主要办公区都适合。',
     trafficDesc: '临近大埔区最主要交通枢纽，大埔区公交总站，且距离太和地铁站仅几分钟路程，只需十几分钟可达中大和教大。',
     trafficMapUrl: DUMMY_MAP, 
@@ -245,14 +240,13 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑配有多用途运动场、健身中心等。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '三方一厕-A/B/C房間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '三方一厕-A/B/C房間', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
   'uptown-plaza': {
     id: 'uptown-plaza',
     title: '大埔 新達廣場',
     searchKeyword: '新達廣場',
+    aliases: ['新達廣場', '新达广场'],
     targetAudience: '香港中文大学，香港教育大学，香港恒生大学，香港城市大学，香港浸会大学',
     trafficDesc: '位于大埔墟地铁站上盖，地铁0距离，只需一站到达大学站，几站到达九龙塘站，交通路线也多。',
     trafficMapUrl: DUMMY_MAP, 
@@ -260,9 +254,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateImages: [DUMMY_ESTATE],
     facilitiesText: '屋苑配有多用途运动场、健身中心等。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
-    roomTypes: [
-      { name: '單人房 A/B/C/D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
-    ]
+    roomTypes: [{ name: '單人房 A/B/C/D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   }
 };
 
@@ -336,14 +328,26 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
     async function loadData() {
       try {
         const resolvedParams = await Promise.resolve(params);
+        const rawId = resolvedParams.estateId;
         
-        // ★ CMS 轉換點：未來只要將下方這行替換為 Firebase getDoc 即可
-        // const docSnap = await getDoc(doc(db, 'area_encyclopedias', resolvedParams.estateId));
-        // const estateData = docSnap.exists() ? docSnap.data() as EncyclopediaData : null;
-        const estateData = mockDatabase[resolvedParams.estateId];
+        let estateData = mockDatabase[rawId];
+
+        // ★ 智能解析：如果傳進來的是 Firebase 的 Document ID，自動反查資料庫以取得名稱
+        if (!estateData) {
+          const docRef = doc(db, 'area_guides', rawId);
+          const docSnap = await getDoc(docRef);
+          
+          if (docSnap.exists()) {
+             const areaName = docSnap.data().name || '';
+             // 利用 aliases 陣列進行繁簡體模糊匹配，安全容錯
+             estateData = Object.values(mockDatabase).find(
+               (m) => m.aliases.some(alias => areaName.includes(alias))
+             ) as EncyclopediaData;
+          }
+        }
         
         if (!estateData) {
-           notFound();
+           notFound(); // 真的查無此小區才觸發 404
            return;
         }
 
