@@ -4,10 +4,11 @@ import { db } from '@/lib/firebase';
 import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building } from 'lucide-react';
 import Link from 'next/link';
 
+// 強制伺服器端動態渲染，獲取最新房源庫存
 export const dynamic = 'force-dynamic';
 
 // ==========================================
-// 1. 圖片安全處理元件 (解決 500 錯誤)
+// 1. 圖片安全處理元件 (純 Server 端渲染，已移除 onError 避免崩潰)
 // ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -15,7 +16,7 @@ const getProxiedUrl = (url?: string | null) => {
   if (url.includes('firebasestorage.googleapis.com')) {
     return `/api/image?url=${encodeURIComponent(url)}`;
   }
-  return url; // 其他圖片 (如 Unsplash) 直接直連
+  return url; // 其他圖片 (如 Unsplash) 直接直連，不會觸發 500 錯誤
 };
 
 const SafeImage = ({ src, alt, className }: { src: string, alt?: string, className?: string }) => {
@@ -26,10 +27,6 @@ const SafeImage = ({ src, alt, className }: { src: string, alt?: string, classNa
       alt={alt || '圖片'} 
       className={`object-cover ${className || ''}`} 
       loading="lazy"
-      onError={(e) => { 
-        // 圖片代理失敗時，自動降級使用原始網址
-        if (e.currentTarget.src !== src) e.currentTarget.src = src; 
-      }} 
     />
   );
 };
@@ -146,7 +143,7 @@ async function getRelatedRooms(searchKeyword: string) {
 
   } catch (error) {}
   
-  return rooms.slice(0, 8); // ★ 限制只出 8 個關聯盤源
+  return rooms.slice(0, 8); // 限制只出 8 個關聯盤源
 }
 
 // ==========================================
@@ -169,7 +166,7 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
         </div>
       </div>
 
-      {/* 懸浮導航列 (對齊港灣之家) */}
+      {/* 懸浮導航列 */}
       <div className="sticky top-[64px] md:top-[76px] z-40 bg-white border-b border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
         <div className="max-w-3xl mx-auto flex items-center gap-6 px-4 py-3 min-w-max">
           <span className="font-black text-blue-600 text-lg mr-2 sm:mr-4">佳寓 PrimeLiving</span>
