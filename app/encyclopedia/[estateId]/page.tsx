@@ -38,7 +38,7 @@ interface EncyclopediaData {
   id: string;
   title: string;
   searchKeyword: string; 
-  aliases: string[]; // ★ 新增：用於繁簡體與多重名稱模糊匹配
+  aliases: string[]; 
   targetAudience: string; 
   trafficDesc: string; 
   trafficMapUrl: string; 
@@ -75,7 +75,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM, DUMMY_ROOM],
     roomTypes: [
-      { name: '三房一廁 陽台大單間A-D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] },
+      { name: '三房一廁 陽台大單間A-D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM, DUMMY_ROOM] },
       { name: '四房二廁 獨衛陽台大單間A', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }
     ]
   },
@@ -332,14 +332,13 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         
         let estateData = mockDatabase[rawId];
 
-        // ★ 智能解析：如果傳進來的是 Firebase 的 Document ID，自動反查資料庫以取得名稱
+        // 智能解析：支援首頁傳過來的 Firebase ID
         if (!estateData) {
           const docRef = doc(db, 'area_guides', rawId);
           const docSnap = await getDoc(docRef);
           
           if (docSnap.exists()) {
              const areaName = docSnap.data().name || '';
-             // 利用 aliases 陣列進行繁簡體模糊匹配，安全容錯
              estateData = Object.values(mockDatabase).find(
                (m) => m.aliases.some(alias => areaName.includes(alias))
              ) as EncyclopediaData;
@@ -347,7 +346,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         }
         
         if (!estateData) {
-           notFound(); // 真的查無此小區才觸發 404
+           notFound();
            return;
         }
 
@@ -438,7 +437,8 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                <div className="w-2 h-8 bg-orange-500 rounded-full"/> 關於本小區
             </h2>
             <p className="text-slate-700 leading-relaxed font-medium text-lg mb-6 whitespace-pre-wrap">{estate.estateIntro}</p>
-            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+            {/* ★ 採用 custom-scrollbar 取代原本完全隱藏的寫法 */}
+            <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
               {estate.estateImages.slice(1).map((img, i) => (
                 <div key={i} className="shrink-0 w-72 md:w-80 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
                   <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
@@ -481,7 +481,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
             {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
               <>
                 <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 公共區域展示</h3>
-                <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
                   {estate.publicAreaImages.map((img, i) => (
                     <div key={i} className="shrink-0 w-64 md:w-72 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
                       <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
@@ -512,7 +512,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                     </div>
                     <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60 min-w-0">
                       <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><BedDouble size={16}/> 房間實景 ({rt.roomImages.length} 張)</p>
-                      <div className="flex overflow-x-auto gap-3 snap-x snap-mandatory pb-2 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
+                      <div className="flex overflow-x-auto gap-3 snap-x snap-mandatory pb-2 custom-scrollbar">
                         {rt.roomImages.map((img, i) => (
                            <div key={i} className="shrink-0 w-[85%] h-48 md:h-56 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
                              <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
