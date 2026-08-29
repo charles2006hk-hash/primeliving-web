@@ -1,14 +1,14 @@
 import React from 'react';
 import { collection, getDocs } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building } from 'lucide-react';
+// ★ 修復：補上了漏掉的 Sparkles 圖示引用
+import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles } from 'lucide-react';
 import Link from 'next/link';
 
-// 強制伺服器端動態渲染，獲取最新房源庫存
 export const dynamic = 'force-dynamic';
 
 // ==========================================
-// 1. 圖片安全處理元件 (純 Server 端渲染，已移除 onError 避免崩潰)
+// 1. 圖片安全處理元件
 // ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -16,7 +16,7 @@ const getProxiedUrl = (url?: string | null) => {
   if (url.includes('firebasestorage.googleapis.com')) {
     return `/api/image?url=${encodeURIComponent(url)}`;
   }
-  return url; // 其他圖片 (如 Unsplash) 直接直連，不會觸發 500 錯誤
+  return url; 
 };
 
 const SafeImage = ({ src, alt, className }: { src: string, alt?: string, className?: string }) => {
@@ -37,24 +37,23 @@ const SafeImage = ({ src, alt, className }: { src: string, alt?: string, classNa
 interface EncyclopediaData {
   id: string;
   title: string;
-  searchKeyword: string; // 用於匹配大系統的盤源
-  targetAudience: string; // 適合人群
-  trafficDesc: string; // 交通攻略
-  trafficMapUrl: string; // 交通地圖
-  estateIntro: string; // 小區介紹
-  estateImages: string[]; // 小區圖片
-  facilitiesText: string; // 設施介紹文字
-  roomAmenitiesUrl: string; // 房間設施清單 (圖)
-  highlightsUrl: string; // 公寓亮點 (圖)
-  publicAreaImages: string[]; // 公共區域展示
+  searchKeyword: string; 
+  targetAudience: string; 
+  trafficDesc: string; 
+  trafficMapUrl: string; 
+  estateIntro: string; 
+  estateImages: string[]; 
+  facilitiesText: string; 
+  roomAmenitiesUrl: string; 
+  highlightsUrl: string; 
+  publicAreaImages: string[]; 
   roomTypes: {
-    name: string; // 戶型名稱 (例：三房一廁 陽台大單間)
-    floorPlanUrl: string; // 戶型圖則
-    roomImages: string[]; // 房間實景
+    name: string; 
+    floorPlanUrl: string; 
+    roomImages: string[]; 
   }[];
 }
 
-// Mock 資料：完全對齊港灣之家 PDF 的內容架構
 const getEncyclopediaData = (id: string): EncyclopediaData => ({
   id,
   title: '大圍 柏傲莊',
@@ -68,8 +67,8 @@ const getEncyclopediaData = (id: string): EncyclopediaData => ({
     'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=600'
   ],
   facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
-  roomAmenitiesUrl: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&q=80&w=800', // 替換為設施表截圖
-  highlightsUrl: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=800', // 替換為亮點宣傳圖
+  roomAmenitiesUrl: 'https://images.unsplash.com/photo-1524758631624-e2822e304c36?auto=format&fit=crop&q=80&w=800', 
+  highlightsUrl: 'https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&q=80&w=800', 
   publicAreaImages: [
     'https://images.unsplash.com/photo-1560448204-e02f11c3d0e2?auto=format&fit=crop&q=80&w=400',
     'https://images.unsplash.com/photo-1505691938895-1758d7feb511?auto=format&fit=crop&q=80&w=400'
@@ -143,7 +142,7 @@ async function getRelatedRooms(searchKeyword: string) {
 
   } catch (error) {}
   
-  return rooms.slice(0, 8); // 限制只出 8 個關聯盤源
+  return rooms.slice(0, 8); 
 }
 
 // ==========================================
@@ -166,14 +165,14 @@ export default async function EstateEncyclopediaPage({ params }: { params: Promi
         </div>
       </div>
 
-      {/* 懸浮導航列 */}
+      {/* 懸浮導航列 (對齊港灣之家) */}
       <div className="sticky top-[64px] md:top-[76px] z-40 bg-white border-b border-slate-200 shadow-sm overflow-x-auto custom-scrollbar">
         <div className="max-w-3xl mx-auto flex items-center gap-6 px-4 py-3 min-w-max">
           <span className="font-black text-blue-600 text-lg mr-2 sm:mr-4">佳寓 PrimeLiving</span>
           <a href="#traffic" className="text-slate-600 hover:text-blue-600 font-bold text-sm transition-colors">交通攻略</a>
           <a href="#intro" className="text-slate-600 hover:text-blue-600 font-bold text-sm transition-colors">小區介紹</a>
           <a href="#facilities" className="text-slate-600 hover:text-blue-600 font-bold text-sm transition-colors">設施介紹</a>
-          <a href="#rooms" className="text-slate-600 hover:text-blue-600 font-bold text-sm transition-colors">戶型介紹</a>
+          <a href="#floorplans" className="text-slate-600 hover:text-blue-600 font-bold text-sm transition-colors">戶型介紹</a>
         </div>
       </div>
 
