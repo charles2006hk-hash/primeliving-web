@@ -7,17 +7,19 @@ import Link from 'next/link';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 
-// 深度調研：香港大專院校與熱門租房區域映射
+// ★ 深度調研：香港大專院校與熱門租房區域映射
+// value 的設計：前面是大學代號，後面跟著逗號分隔的區域關鍵字
+// 這樣傳給 /properties?search=... 時，盤源頁的模糊引擎就能拆分匹配
 const UNI_AREAS = [
-  { value: "cuhk_shatin", label: "中大 CUHK (沙田 / 大圍 / 火炭)" },
-  { value: "eduhk_taipo", label: "教大 EdUHK (大埔 / 太和)" },
-  { value: "polyu_hunghom", label: "理大 PolyU (紅磡 / 黃埔 / 何文田)" },
-  { value: "cityu_hkbu", label: "城大 CityU / 浸大 HKBU (九龍塘 / 石硤尾)" },
-  { value: "hku_west", label: "港大 HKU (西營盤 / 堅尼地城 / 薄扶林)" },
-  { value: "hkust_tko", label: "科大 HKUST (將軍澳 / 坑口 / 寶琳)" },
-  { value: "hkmu_mk", label: "都大 HKMU (何文田 / 旺角)" },
-  { value: "lingnan_tm", label: "嶺大 Lingnan (屯門 / 兆康)" },
-  { value: "cbd_central", label: "港島商業區 (中環 / 灣仔 / 銅鑼灣)" }
+  { value: "cuhk_沙田,大圍,火炭", label: "中大 CUHK (沙田 / 大圍 / 火炭)" },
+  { value: "eduhk_大埔,太和", label: "教大 EdUHK (大埔 / 太和)" },
+  { value: "polyu_紅磡,黃埔,何文田", label: "理大 PolyU (紅磡 / 黃埔 / 何文田)" },
+  { value: "cityu_九龍塘,石硤尾", label: "城大 CityU / 浸大 HKBU (九龍塘 / 石硤尾)" },
+  { value: "hku_西營盤,堅尼地城,薄扶林", label: "港大 HKU (西營盤 / 堅尼地城 / 薄扶林)" },
+  { value: "hkust_將軍澳,坑口,寶琳,康城", label: "科大 HKUST (將軍澳 / 坑口 / 寶琳 / 康城)" },
+  { value: "hkmu_何文田,旺角", label: "都大 HKMU (何文田 / 旺角)" },
+  { value: "lingnan_屯門,兆康", label: "嶺大 Lingnan (屯門 / 兆康)" },
+  { value: "cbd_中環,灣仔,銅鑼灣", label: "港島商業區 (中環 / 灣仔 / 銅鑼灣)" }
 ];
 
 export default function HomeSearch() {
@@ -43,10 +45,14 @@ export default function HomeSearch() {
 
     setTimeout(() => {
       setIsSearching(false);
-      // 假設目前大埔、沙田、紅磡有房，其他區域顯示滿租轉化表單
-      const isAvailable = uni.includes('shatin') || uni.includes('taipo') || uni.includes('hunghom');
+      
+      // ★ 判斷滿租邏輯 (這裡先寫死一個簡單規則，假設港島與屯門目前無庫存)
+      const searchKeywords = uni.split('_')[1] || '';
+      const isAvailable = !searchKeywords.includes('西營盤') && !searchKeywords.includes('屯門');
+      
       if (isAvailable) {
-        router.push(`/properties?search=${encodeURIComponent(uni.split('_')[1] || uni)}&type=${roomType}`);
+        // 將逗號分隔的關鍵字作為參數傳給 properties 頁面
+        router.push(`/properties?search=${encodeURIComponent(searchKeywords)}&type=${roomType}`);
       } else {
         setSearchResult('full');
       }
@@ -62,7 +68,7 @@ export default function HomeSearch() {
         tenantId: `visitor_${Date.now()}`,
         name: leadName,
         phone: leadPhone,
-        message: `【官網首頁-候補需求】\n目標區域/大學：${UNI_AREAS.find(u => u.value === uni)?.label || uni}\n房型偏好：${roomType || '不限'}\n預期入住與預算：${leadReq}`,
+        message: `【官網首頁搜尋-候補需求】\n目標區域/大學：${UNI_AREAS.find(u => u.value === uni)?.label || uni}\n房型偏好：${roomType || '不限'}\n預期入住與預算：${leadReq}`,
         type: 'official_notice',
         status: 'New',
         createdAt: serverTimestamp(),
