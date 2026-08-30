@@ -1,14 +1,14 @@
 'use client';
 
-import React, { useState, useEffect, useRef, Suspense } from 'react';
+import React, { useState, useEffect, Suspense } from 'react';
 import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase'; 
-import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
+import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, AlertCircle, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 // ==========================================
-// 1. 預設導出 (避免 Vercel 編譯錯誤)
+// 1. 預設導出 (移至最上方，避免編譯失敗)
 // ==========================================
 export default function PropertiesPage() {
   return (
@@ -23,7 +23,7 @@ export default function PropertiesPage() {
 }
 
 // ==========================================
-// 2. 隱私遮罩與工具函數 (Privacy Masking Helpers)
+// 2. 隱私遮罩與工具函數
 // ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -43,7 +43,7 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
-// 根據 ID 計算穩定的樓層描述 (低/中/高層)
+// 根據 ID 計算穩定的樓層描述
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -51,7 +51,7 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// 將精準價格轉換為 2000-3000 幅度的區間
+// 價格隱私遮罩 (動態區間)
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -103,7 +103,7 @@ interface PropertyRoom {
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
-  isSoldOutProperty?: boolean; // 新增狀態，用來準確判定 Sold Out
+  isSoldOutProperty?: boolean;
   displayTitle?: string; 
   displayPrice?: string;
   floorLevel?: string;
@@ -122,9 +122,9 @@ function PropertiesContent() {
   const [loading, setLoading] = useState(true);
   const [allRooms, setAllRooms] = useState<PropertyRoom[]>([]);
   
-  // 無限滾動分頁狀態
+  // ★ 手動分頁載入狀態
   const [displayCount, setDisplayCount] = useState(30);
-  const loaderRef = useRef<HTMLDivElement>(null);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   
   const [activeFilter, setActiveFilter] = useState<string>('all');
 
@@ -161,7 +161,6 @@ function PropertiesContent() {
              primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
           }
           
-          // 判定是否為 Sold Out
           const isSoldOut = String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
 
           return {
@@ -181,7 +180,6 @@ function PropertiesContent() {
         const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
-          // ★ 支援大系統行家盤源的 isSoldOut 開關
           const isSoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
 
           return {
@@ -202,8 +200,6 @@ function PropertiesContent() {
         });
       } catch (error) {}
 
-      // ★ 核心修復：還原 11x 筆盤源！
-      // 只要是 'published' 或者是 '已租出' 的房源，全部顯示，營造熱銷感
       const combined = [...internalRooms, ...competitorRooms]
         .filter(r => r.webStatus === 'published' || r.isSoldOutProperty === true)
         .map(room => {
@@ -229,29 +225,15 @@ function PropertiesContent() {
     fetchData();
   }, []);
 
-  // ★ 修復無限滾動過度觸發的問題
-  useEffect(() => {
-    if (loading) return;
-    
-    const observer = new IntersectionObserver((entries) => {
-      // 當元素進入畫面，穩妥地加 30
-      if (entries[0].isIntersecting) {
-        setDisplayCount(prev => prev + 30);
-      }
-    }, { 
-      rootMargin: '200px', // 提早 200px 觸發
-      threshold: 0.1 
-    });
-
-    const currentLoader = loaderRef.current;
-    if (currentLoader) {
-      observer.observe(currentLoader);
-    }
-
-    return () => {
-      if (currentLoader) observer.unobserve(currentLoader);
-    };
-  }, [loading]);
+  // ★ 載入更多按鈕邏輯 (取代原本的自動無限滾動)
+  const handleLoadMore = () => {
+    setIsLoadingMore(true);
+    // 刻意延遲 1 秒，讓使用者感知到在加載，體驗更好
+    setTimeout(() => {
+      setDisplayCount(prev => prev + 30);
+      setIsLoadingMore(false);
+    }, 1000);
+  };
 
   const handleLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -322,10 +304,21 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
-  // ★ 混合排序：不把 Sold Out 沉到底部，而是按時間與匹配度自然交錯
+  // ★ 打亂排序演算法 (Stable Hash Shuffle)
+  // 將已租出、未租出均勻打亂混合，營造市場真實熱絡感
   filteredAndScoredRooms.sort((a, b) => {
+    // 1. 搜尋分數最高者優先
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
-    if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1; 
+    
+    // 2. 利用房源 ID 進行穩定的隨機打亂 (避免每次 Render 跳動)
+    const hashA = a.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
+    const hashB = b.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
+    
+    if (hashA !== hashB) {
+       return hashB - hashA;
+    }
+    
+    // 3. 保底按照建立時間
     return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0); 
   });
 
@@ -376,7 +369,6 @@ function PropertiesContent() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {displayRooms.map((room) => {
-              // 取得預先算好的 sold out 狀態
               const isSoldOut = room.isSoldOutProperty === true;
 
               const finalImage = room.primaryImage 
@@ -463,11 +455,20 @@ function PropertiesContent() {
           </div>
         )}
 
-        {/* ★ Infinite Scroll Loader */}
+        {/* ★ 改版後的點擊載入按鈕 */}
         {!loading && displayCount < filteredAndScoredRooms.length && (
-          <div ref={loaderRef} className="py-12 flex justify-center items-center text-slate-400">
-            <Loader2 size={24} className="animate-spin text-orange-500 mr-2"/>
-            <span className="text-sm font-bold tracking-widest">正在載入更多盤源...</span>
+          <div className="py-12 flex justify-center items-center">
+            <button 
+              onClick={handleLoadMore} 
+              disabled={isLoadingMore}
+              className="bg-white px-8 py-3.5 rounded-full border border-slate-200 shadow-sm font-black text-slate-600 hover:text-orange-600 hover:border-orange-200 hover:shadow-md transition-all flex items-center gap-2 active:scale-95"
+            >
+              {isLoadingMore ? (
+                <><Loader2 size={18} className="animate-spin text-orange-500"/> 正在獲取更多盤源...</>
+              ) : (
+                '載入更多精選盤源'
+              )}
+            </button>
           </div>
         )}
         
@@ -478,7 +479,7 @@ function PropertiesContent() {
         )}
       </div>
 
-      {/* ★ 預約表單 Modal */}
+      {/* 預約表單 Modal */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white/95 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
@@ -494,7 +495,7 @@ function PropertiesContent() {
             
             <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">預約看房與了解詳情</h3>
             <p className="text-slate-500 mb-8 font-medium text-center text-sm">
-              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供您該屋苑的詳細百科與精確租金。
+              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會為您提供精確租金與詳細資訊。
             </p>
 
             <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
@@ -519,7 +520,6 @@ function PropertiesContent() {
           </div>
         </div>
       )}
-
     </div>
   );
 }
