@@ -31,7 +31,7 @@ const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string
   );
 };
 
-// 根據 ID 計算穩定的樓層描述 (低/中/高層)[cite: 11]
+// 根據 ID 計算穩定的樓層描述 (低/中/高層)
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -39,7 +39,7 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// 將精準價格轉換為 2000-3000 幅度的區間[cite: 11]
+// 將精準價格轉換為 2000-3000 幅度的區間
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -171,7 +171,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     trafficMapUrl: DUMMY_MAP, 
     estateIntro: '南丰广场位于坑口培成路8号，邻近港铁坑口站，由周氏建筑师事务所设计、南丰集团发展及兴建，于1999年落成。屋苑分为5座，提供1,614个住宅单位，设有购物商场、会所及停车场。小区内部直通坑口地铁站和大型商场连理街。',
     estateImages: [DUMMY_ESTATE],
-    facilitiesText: '屋苑实行24小时安保管理。设施包含室内泳池、多用途运动场、桌球室、健身中心、桑拿浴室、宴会厅、缓跑径、户外烧烤场及网球场。',
+    facilitiesText: '屋苑实行24小时安保管理。設施包含室内泳池、多用途运动场、桌球室、健身中心、桑拿浴室、宴会厅、缓跑径、户外烧烤场及网球场。',
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
     roomTypes: [{ name: '四房两厕(含阳台及储藏间)', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
@@ -420,16 +420,16 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
 
         const roomData = await getRelatedRooms(estateData.searchKeyword);
         
-        // ★ 核心升級：對相關盤源進行隱私遮罩處理
+        // 對相關盤源進行隱私遮罩處理
         const processedRooms = roomData.map(room => {
-           const floorLevel = getFloorLevel(room.id);[cite: 11]
+           const floorLevel = getFloorLevel(room.id);
            let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
-           rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();[cite: 11]
+           rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
            return {
              ...room,
              floorLevel,
              displayTitle: `${rawEstateName} | ${floorLevel}精選單位`,
-             displayPrice: getPriceRange(room.baseRent)[cite: 11]
+             displayPrice: getPriceRange(room.baseRent)
            };
         });
 
@@ -721,7 +721,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
 
       </div>
 
-      {/* ★ 相關盤源區塊 */}
       <div id="available-rooms" className="relative z-10 max-w-7xl mx-auto px-4 mt-24 scroll-mt-32">
         <div className="flex justify-between items-end mb-10 border-b border-slate-300/50 pb-4">
           <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
