@@ -3,12 +3,27 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase'; 
-import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Wind, AlertCircle, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
+import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, AlertCircle, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 // ==========================================
-// 1. 隱私遮罩與工具函數 (Privacy Masking Helpers)
+// 1. 預設導出 (移至最上方，避免複製遺漏導致編譯失敗)
+// ==========================================
+export default function PropertiesPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex justify-center items-center bg-slate-50">
+        <Loader2 className="animate-spin text-orange-500" size={40}/>
+      </div>
+    }>
+      <PropertiesContent />
+    </Suspense>
+  );
+}
+
+// ==========================================
+// 2. 隱私遮罩與工具函數 (Privacy Masking Helpers)
 // ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -72,7 +87,7 @@ const findEncyclopediaId = (name: string) => {
 };
 
 // ==========================================
-// 2. 資料介面定義
+// 3. 資料介面定義
 // ==========================================
 interface PropertyRoom {
   id: string;
@@ -96,7 +111,7 @@ interface PropertyRoom {
 }
 
 // ==========================================
-// 3. 核心內容元件
+// 4. 核心內容元件
 // ==========================================
 function PropertiesContent() {
   const router = useRouter();
@@ -160,7 +175,6 @@ function PropertiesContent() {
         const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
-          // ★ 新增支援：大系統行家盤源的 isSoldOut 開關
           const isExplicitlySoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied';
 
           return {
@@ -286,15 +300,9 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
-  // ★ 更新商業邏輯排序：混合 Sold Out 盤源，製造搶手感
   filteredAndScoredRooms.sort((a, b) => {
-    // 1. 優先按匹配分數排序
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
-    
-    // 2. 官方直營優先於行家盤
     if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1; 
-    
-    // 3. 按最新建立/更新時間排序 (將新上架的排前面)
     return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0); 
   });
 
@@ -445,7 +453,7 @@ function PropertiesContent() {
         )}
       </div>
 
-      {/* ★ 表單與百科連動的彈出視窗 */}
+      {/* ★ 預約表單 Modal */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white/95 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
@@ -461,10 +469,10 @@ function PropertiesContent() {
             
             <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">預約看房與了解詳情</h3>
             <p className="text-slate-500 mb-8 font-medium text-center text-sm">
-              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供您該屋苑的詳細百科與精確租金。
+              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會為您提供精確租金與詳細資訊。
             </p>
 
-            <form onSubmit={handleLeadSubmit} className="space-y-4 mb-6">
+            <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">您的稱呼 *</label>
                 <input required type="text" value={leadName} onChange={(e) => setLeadName(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 陳同學"/>
@@ -483,14 +491,6 @@ function PropertiesContent() {
                 </button>
               </div>
             </form>
-
-            {bookingRoom.hasEncyclopedia && (
-               <div className="mt-4 text-center">
-                 <Link href={`/encyclopedia/${bookingRoom.encyclopediaId}`} className="text-xs font-bold text-slate-400 hover:text-orange-500 transition-colors underline underline-offset-4">
-                   不填寫表單，直接查看小區百科
-                 </Link>
-               </div>
-            )}
           </div>
         </div>
       )}
