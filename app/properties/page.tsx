@@ -3,12 +3,12 @@
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase'; 
-import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, AlertCircle, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
+import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 // ==========================================
-// 1. 預設導出 (移至最上方，避免複製遺漏導致編譯失敗)
+// 1. 預設導出 (避免 Vercel 編譯錯誤)
 // ==========================================
 export default function PropertiesPage() {
   return (
@@ -103,6 +103,7 @@ interface PropertyRoom {
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
+  isSoldOutProperty?: boolean; // 新增狀態，用來準確判定 Sold Out
   displayTitle?: string; 
   displayPrice?: string;
   floorLevel?: string;
@@ -159,6 +160,10 @@ function PropertiesContent() {
              const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
              primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
           }
+          
+          // 判定是否為 Sold Out
+          const isSoldOut = String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
+
           return {
             id: doc.id,
             ...data,
@@ -166,6 +171,7 @@ function PropertiesContent() {
             estateName: propMap[data.propertyId] || '',
             primaryImage: primaryImage,
             isCompetitor: false,
+            isSoldOutProperty: isSoldOut,
             createdAt: data.createdAt || { seconds: Date.now() / 1000 }
           } as PropertyRoom;
         });
@@ -175,27 +181,31 @@ function PropertiesContent() {
         const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
-          const isExplicitlySoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied';
+          // ★ 支援大系統行家盤源的 isSoldOut 開關
+          const isSoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
 
           return {
             id: doc.id,
             name: data.name || data.title || '優質合作盤源', 
             propertyId: 'competitor_pool', 
             baseRent: data.price || 0, 
-            status: isExplicitlySoldOut ? 'Occupied' : 'Available',
+            status: isSoldOut ? 'Occupied' : 'Available',
             webStatus: data.webStatus || 'published',
             propertyName: data.district || data.estateName || '合作屋苑',
             estateName: data.estateName || '',
             primaryImage: data.imageUrl || null,
             features: data.features || [],
             isCompetitor: true,
+            isSoldOutProperty: isSoldOut,
             createdAt: data.createdAt || data.updatedAt || { seconds: Date.now() / 1000 }
           } as PropertyRoom;
         });
       } catch (error) {}
 
+      // ★ 核心修復：還原 11x 筆盤源！
+      // 只要是 'published' 或者是 '已租出' 的房源，全部顯示，營造熱銷感
       const combined = [...internalRooms, ...competitorRooms]
-        .filter(r => r.webStatus === 'published')
+        .filter(r => r.webStatus === 'published' || r.isSoldOutProperty === true)
         .map(room => {
            const floorLevel = getFloorLevel(room.id);
            let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
@@ -219,16 +229,28 @@ function PropertiesContent() {
     fetchData();
   }, []);
 
-  // 無限滾動的 Intersection Observer
+  // ★ 修復無限滾動過度觸發的問題
   useEffect(() => {
+    if (loading) return;
+    
     const observer = new IntersectionObserver((entries) => {
+      // 當元素進入畫面，穩妥地加 30
       if (entries[0].isIntersecting) {
         setDisplayCount(prev => prev + 30);
       }
-    }, { threshold: 0.1 });
+    }, { 
+      rootMargin: '200px', // 提早 200px 觸發
+      threshold: 0.1 
+    });
 
-    if (loaderRef.current) observer.observe(loaderRef.current);
-    return () => observer.disconnect();
+    const currentLoader = loaderRef.current;
+    if (currentLoader) {
+      observer.observe(currentLoader);
+    }
+
+    return () => {
+      if (currentLoader) observer.unobserve(currentLoader);
+    };
   }, [loading]);
 
   const handleLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
@@ -300,6 +322,7 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
+  // ★ 混合排序：不把 Sold Out 沉到底部，而是按時間與匹配度自然交錯
   filteredAndScoredRooms.sort((a, b) => {
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
     if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1; 
@@ -353,7 +376,8 @@ function PropertiesContent() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {displayRooms.map((room) => {
-              const isSoldOut = String(room.status).toLowerCase() === 'occupied';
+              // 取得預先算好的 sold out 狀態
+              const isSoldOut = room.isSoldOutProperty === true;
 
               const finalImage = room.primaryImage 
                 ? getProxiedUrl(room.primaryImage) 
@@ -383,7 +407,7 @@ function PropertiesContent() {
                     </div>
 
                     {room.isCompetitor && (
-                      <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10">
+                      <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10 border border-white/20">
                          <Building2 size={12}/> HK港灣之家
                       </div>
                     )}
@@ -439,6 +463,7 @@ function PropertiesContent() {
           </div>
         )}
 
+        {/* ★ Infinite Scroll Loader */}
         {!loading && displayCount < filteredAndScoredRooms.length && (
           <div ref={loaderRef} className="py-12 flex justify-center items-center text-slate-400">
             <Loader2 size={24} className="animate-spin text-orange-500 mr-2"/>
@@ -469,7 +494,7 @@ function PropertiesContent() {
             
             <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">預約看房與了解詳情</h3>
             <p className="text-slate-500 mb-8 font-medium text-center text-sm">
-              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會為您提供精確租金與詳細資訊。
+              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供您該屋苑的詳細百科與精確租金。
             </p>
 
             <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
