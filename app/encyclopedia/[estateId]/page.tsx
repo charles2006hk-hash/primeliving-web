@@ -1,14 +1,14 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star } from 'lucide-react';
+import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, AlertCircle } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 // ==========================================
-// 1. 圖片安全處理元件 (支援 Vercel 代理與點擊放大)
+// 1. 圖片安全處理與隱私遮罩元件
 // ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -29,6 +29,25 @@ const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string
       onClick={onClick}
     />
   );
+};
+
+// 根據 ID 計算穩定的樓層描述 (低/中/高層)[cite: 11]
+const getFloorLevel = (id: string) => {
+  if (!id) return '中層';
+  const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+  const rem = sum % 3;
+  return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
+};
+
+// 將精準價格轉換為 2000-3000 幅度的區間[cite: 11]
+const getPriceRange = (price: number) => {
+  if (!price || price === 0) return '價格待定';
+  const base = Math.floor(price / 1000) * 1000;
+  const range = price < 8000 ? 1000 : (base % 2 === 0 ? 2000 : 3000);
+  let lower = base;
+  if (price - base < 500 && range > 1000) { lower -= 1000; }
+  const upper = lower + range;
+  return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
 };
 
 // ==========================================
@@ -333,20 +352,25 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
   const [loading, setLoading] = useState(true);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
+  // ★ 預約表單 Modal 狀態
+  const [bookingRoom, setBookingRoom] = useState<any>(null);
+  const [leadName, setLeadName] = useState('');
+  const [leadPhone, setLeadPhone] = useState('');
+  const [leadReq, setLeadReq] = useState('');
+  const [submittingLead, setSubmittingLead] = useState(false);
+
   useEffect(() => {
     async function loadData() {
       try {
         const resolvedParams = await Promise.resolve(params);
         const rawId = decodeURIComponent(resolvedParams.estateId);
         
-        // 先找出可能對應的備用 Mock 字典資料 (利用 alias 輔助辨識)
         const defaultMock = mockDatabase[rawId] || Object.values(mockDatabase).find(m => m.aliases.some(alias => rawId.includes(alias)));
         const searchAliases = defaultMock ? defaultMock.aliases : [];
         const searchName = defaultMock ? defaultMock.title : rawId;
         
         let estateData: EncyclopediaData | null = null;
 
-        // ★ 核心升級：跨欄位智能比對 Firebase CMS 資料
         const guidesSnap = await getDocs(collection(db, 'area_guides'));
         let matchedDoc: any = null;
         
@@ -354,7 +378,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
           const d = doc.data();
           if (
             doc.id === rawId || 
-            d.id === rawId ||  // 比對 CMS 初始化寫入的英文 ID
+            d.id === rawId || 
             d.name === rawId || 
             d.name === searchName || 
             searchAliases.some(alias => d.name?.includes(alias)) ||
@@ -386,7 +410,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                roomTypes: matchedDoc.roomTypes || [] 
              };
         } else {
-           // 如果 Firebase 完全找不到，才用回 Mock 資料
            estateData = defaultMock || null;
         }
         
@@ -396,7 +419,21 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         }
 
         const roomData = await getRelatedRooms(estateData.searchKeyword);
-        setData({ estate: estateData, rooms: roomData });
+        
+        // ★ 核心升級：對相關盤源進行隱私遮罩處理
+        const processedRooms = roomData.map(room => {
+           const floorLevel = getFloorLevel(room.id);[cite: 11]
+           let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
+           rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();[cite: 11]
+           return {
+             ...room,
+             floorLevel,
+             displayTitle: `${rawEstateName} | ${floorLevel}精選單位`,
+             displayPrice: getPriceRange(room.baseRent)[cite: 11]
+           };
+        });
+
+        setData({ estate: estateData, rooms: processedRooms });
       } catch (error) {
         console.error("載入百科失敗:", error);
       } finally {
@@ -405,6 +442,35 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
     }
     loadData();
   }, [params]);
+
+  const handleLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    if (!bookingRoom) return;
+    
+    setSubmittingLead(true);
+    try {
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: `visitor_${Date.now()}`,
+        name: leadName,
+        phone: leadPhone,
+        message: `【百科頁面-預約看房】\n意向樓盤：${bookingRoom.displayTitle}\n系統房源ID (參考)：${bookingRoom.id}\n預期入住與預算：${leadReq}`,
+        type: 'official_notice',
+        status: 'New', 
+        createdAt: serverTimestamp(),
+        isExistingTenant: false 
+      });
+      alert('✅ 預約已成功發送給管家團隊！我們將在24小時內與您聯絡安排帶看。');
+      setBookingRoom(null);
+      setLeadName(''); 
+      setLeadPhone(''); 
+      setLeadReq('');
+    } catch (error) {
+      console.error("寫入 CRM 失敗:", error);
+      alert('發送失敗，請稍後再試。');
+    } finally {
+      setSubmittingLead(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -655,6 +721,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
 
       </div>
 
+      {/* ★ 相關盤源區塊 */}
       <div id="available-rooms" className="relative z-10 max-w-7xl mx-auto px-4 mt-24 scroll-mt-32">
         <div className="flex justify-between items-end mb-10 border-b border-slate-300/50 pb-4">
           <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
@@ -672,7 +739,10 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
           ) : (
             relatedRooms.map((room) => {
               const isSoldOut = room.webStatus === 'draft' || String(room.status).toLowerCase() === 'occupied';
-              const hrefUrl = isSoldOut ? '' : (room.isCompetitor ? `/competitor/${room.id}` : `/properties/${room.id}`);
+
+              const finalImage = room.primaryImage 
+                ? getProxiedUrl(room.primaryImage) 
+                : (room.isCompetitor ? getEstateCover(room.propertyName || room.estateName) : null);
 
               const CardContent = (
                 <>
@@ -685,8 +755,8 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                   )}
 
                   <div className="relative h-56 bg-slate-100 overflow-hidden shrink-0">
-                    {room.primaryImage ? (
-                      <SafeImage src={room.primaryImage} alt={room.name} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
+                    {finalImage ? (
+                      <img src={finalImage} alt={room.displayTitle} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 font-black italic"><Home size={32} className="mb-2 opacity-20"/>Prime Living</div>
                     )}
@@ -703,31 +773,80 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                   </div>
                   
                   <div className="p-6 flex flex-col flex-1 relative z-10">
-                    <div className="flex justify-between items-start mb-3">
-                      <h3 className={`text-xl font-black truncate pr-2 mb-1 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.name}</h3>
-                      <span className={`font-black text-2xl shrink-0 ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
-                        ${(room.baseRent || 0).toLocaleString()}
-                      </span>
+                    <div className="flex justify-between items-start mb-3 gap-2">
+                      <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
+                      <div className="text-right shrink-0">
+                        <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
+                          {room.displayPrice}
+                        </span>
+                      </div>
                     </div>
                     <div className="mt-auto pt-4 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-black text-slate-500">
                        <span className={`flex items-center gap-1 px-2 py-1 rounded-md ${isSoldOut ? 'bg-slate-100 text-slate-400' : 'bg-cyan-50 text-cyan-700'}`}>
                          <BedDouble size={14}/> 拎包入住
                        </span>
-                       <span className={`px-4 py-2 rounded-lg transition-colors text-xs ${isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-slate-800'}`}>
-                         {isSoldOut ? '已租出' : '立即查看'}
+                       <span className={`px-4 py-2 rounded-lg transition-colors text-xs flex items-center gap-1 shadow-sm ${isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-orange-500'}`}>
+                         {isSoldOut ? '已租出' : <>預約看房 <ArrowRight size={14}/></>}
                        </span>
                     </div>
                   </div>
                 </>
               );
 
-              const cardClasses = `group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 border border-white/80 transition-all duration-300 flex flex-col relative cursor-pointer ${isSoldOut ? 'opacity-90' : 'hover:shadow-2xl hover:-translate-y-1'}`;
+              const cardClasses = `group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 border border-white/80 transition-all duration-300 flex flex-col relative cursor-pointer ${isSoldOut ? 'opacity-90' : 'hover:shadow-2xl hover:-translate-y-2'}`;
 
-              return isSoldOut ? <div key={room.id} className={cardClasses}>{CardContent}</div> : <Link href={hrefUrl} key={room.id} className={cardClasses}>{CardContent}</Link>;
+              return (
+                <div key={room.id} onClick={() => { if(!isSoldOut) setBookingRoom(room) }} className={cardClasses}>
+                   {CardContent}
+                </div>
+              );
             })
           )}
         </div>
       </div>
+
+      {/* ★ 預約表單 Modal */}
+      {bookingRoom !== null && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="bg-white/95 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
+            
+            <button onClick={() => setBookingRoom(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition">
+              <X size={24}/>
+            </button>
+            <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-rose-400"></div>
+            
+            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-100">
+              <MessageCircle size={32} className="text-blue-500" />
+            </div>
+            
+            <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">預約看房與了解詳情</h3>
+            <p className="text-slate-500 mb-8 font-medium text-center text-sm">
+              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會為您提供精確租金與詳細資訊。
+            </p>
+
+            <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">您的稱呼 *</label>
+                <input required type="text" value={leadName} onChange={(e) => setLeadName(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 陳同學"/>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">聯絡電話 / WeChat *</label>
+                <input required type="text" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="輸入電話或微信號"/>
+              </div>
+              <div>
+                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間</label>
+                <input type="text" value={leadReq} onChange={(e) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住"/>
+              </div>
+              <div className="pt-2">
+                <button type="submit" disabled={submittingLead} className="w-full bg-slate-900 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-500 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
+                  {submittingLead ? <Loader2 className="animate-spin" size={24}/> : '送出預約'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
