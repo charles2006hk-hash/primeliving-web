@@ -31,6 +31,16 @@ const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string
   );
 };
 
+// ★ 修復：補回缺失的行家盤封面生成函數，解決白屏崩潰問題
+const getEstateCover = (estateName?: string) => {
+  if (!estateName) return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800'; 
+  if (estateName.includes('名城')) return 'https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('柏傲莊') || estateName.includes('柏傲庄')) return 'https://images.unsplash.com/photo-1628592102751-ba83b035e07c?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('海濱南岸') || estateName.includes('海滨南岸')) return 'https://images.unsplash.com/photo-1555541492-f04620603099?auto=format&fit=crop&q=80&w=800';
+  if (estateName.includes('康城')) return 'https://images.unsplash.com/photo-1449844908441-8829872d2607?auto=format&fit=crop&q=80&w=800';
+  return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
+};
+
 // 根據 ID 計算穩定的樓層描述 (低/中/高層)
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
@@ -331,11 +341,11 @@ async function getRelatedRooms(searchKeywordStr: string) {
          return keywords.some(kw => targetStr.includes(kw));
       });
 
+    // 隨機混雜排序
     rooms.sort((a, b) => {
-      const aSold = a.webStatus === 'draft' || String(a.status).toLowerCase() === 'occupied';
-      const bSold = b.webStatus === 'draft' || String(b.status).toLowerCase() === 'occupied';
-      if (aSold !== bSold) return aSold ? 1 : -1;
-      if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1;
+      const hashA = a.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
+      const hashB = b.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
+      if (hashA !== hashB) return hashB - hashA;
       return b.createdAt - a.createdAt;
     });
 
@@ -352,7 +362,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
   const [loading, setLoading] = useState(true);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
-  // ★ 預約表單 Modal 狀態
   const [bookingRoom, setBookingRoom] = useState<any>(null);
   const [leadName, setLeadName] = useState('');
   const [leadPhone, setLeadPhone] = useState('');
@@ -420,7 +429,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
 
         const roomData = await getRelatedRooms(estateData.searchKeyword);
         
-        // 對相關盤源進行隱私遮罩處理
         const processedRooms = roomData.map(room => {
            const floorLevel = getFloorLevel(room.id);
            let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
@@ -640,20 +648,25 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                  )}
               </div>
             )}
-
-            {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
-              <div className="mt-8">
-                <h3 className="font-black text-slate-800 mb-4 flex items-center gap-2"><Sparkles className="text-orange-500" size={18}/> 公共區域展示</h3>
-                <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
-                  {estate.publicAreaImages.map((img: string, i: number) => (
-                    <div key={i} className="shrink-0 w-64 md:w-72 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
-                      <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
           </section>
+
+          {/* ★ 新增：公共區域展示 (獨立區塊，在戶型介紹正上方) */}
+          {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
+            <section id="public-areas" className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80 scroll-mt-32">
+              <div className="flex items-center gap-3 mb-6">
+                <Users size={28} className="text-blue-800" />
+                <h2 className="text-2xl font-black text-blue-800">公共區域展示</h2>
+              </div>
+              <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
+                {estate.publicAreaImages.map((img: string, i: number) => (
+                  <div key={i} className="relative shrink-0 w-64 md:w-72 h-72 snap-center cursor-zoom-in rounded-[2rem] overflow-hidden shadow-sm border border-slate-100 group" onClick={() => setLightboxImage(img)}>
+                    <SafeImage src={img} className="w-full h-full object-cover hover:scale-105 transition-transform duration-700" />
+                    <div className="absolute bottom-4 right-4 text-[10px] font-black text-white/90 bg-black/30 px-2 py-1 rounded-lg backdrop-blur-md">HK港灣之家</div>
+                  </div>
+                ))}
+              </div>
+            </section>
+          )}
 
           {estate.roomTypes && estate.roomTypes.length > 0 && (
             <section id="floorplans" className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80 scroll-mt-32">
@@ -721,6 +734,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
 
       </div>
 
+      {/* 相關盤源區塊 */}
       <div id="available-rooms" className="relative z-10 max-w-7xl mx-auto px-4 mt-24 scroll-mt-32">
         <div className="flex justify-between items-end mb-10 border-b border-slate-300/50 pb-4">
           <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
@@ -804,7 +818,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         </div>
       </div>
 
-      {/* ★ 預約表單 Modal */}
+      {/* 預約表單 Modal */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white/95 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
