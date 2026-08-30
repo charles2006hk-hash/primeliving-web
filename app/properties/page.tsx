@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useState, useEffect, Suspense } from 'react';
+import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase'; 
-import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, AlertCircle, Loader2, Filter, X, ArrowRight, MessageCircle } from 'lucide-react';
+import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Loader2, Filter, X, ArrowRight, MessageCircle, Images } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -100,6 +100,7 @@ interface PropertyRoom {
   propertyName?: string;
   estateName?: string; 
   primaryImage?: string;
+  images?: string[]; // ★ 新增多圖支援
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
@@ -122,7 +123,6 @@ function PropertiesContent() {
   const [loading, setLoading] = useState(true);
   const [allRooms, setAllRooms] = useState<PropertyRoom[]>([]);
   
-  // ★ 手動分頁載入狀態
   const [displayCount, setDisplayCount] = useState(30);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   
@@ -152,13 +152,17 @@ function PropertiesContent() {
         internalRooms = roomSnap.docs.map(doc => {
           const data = doc.data();
           let primaryImage = null;
+          let roomImages: string[] = []; // ★ 儲存內部盤源的多圖
+
           if (data.images && data.images.length > 0) {
-             const firstAssigned = mediaDocs.find(m => m.id === data.images[0]);
-             if (firstAssigned) primaryImage = firstAssigned.url;
+             const assigned = mediaDocs.filter(m => data.images.includes(m.id));
+             roomImages = assigned.map(m => m.url);
+             primaryImage = roomImages[0] || null;
           }
           if (!primaryImage) {
-             const roomImages = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
-             primaryImage = roomImages.find(m => m.isPrimary)?.url || roomImages[0]?.url || null;
+             const fallback = mediaDocs.filter(m => m.propertyId === data.propertyId && m.status === 'linked');
+             roomImages = fallback.map(m => m.url);
+             primaryImage = fallback.find(m => m.isPrimary)?.url || roomImages[0] || null;
           }
           
           const isSoldOut = String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
@@ -169,6 +173,7 @@ function PropertiesContent() {
             propertyName: propMap[data.propertyId] || '精選盤源',
             estateName: propMap[data.propertyId] || '',
             primaryImage: primaryImage,
+            images: roomImages, // ★ 傳遞多圖
             isCompetitor: false,
             isSoldOutProperty: isSoldOut,
             createdAt: data.createdAt || { seconds: Date.now() / 1000 }
@@ -181,6 +186,9 @@ function PropertiesContent() {
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
           const isSoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
+          
+          // ★ 抓取 CMS 最新儲存的 images 陣列
+          const compImages = data.images && data.images.length > 0 ? data.images : (data.imageUrl ? [data.imageUrl] : []);
 
           return {
             id: doc.id,
@@ -191,7 +199,8 @@ function PropertiesContent() {
             webStatus: data.webStatus || 'published',
             propertyName: data.district || data.estateName || '合作屋苑',
             estateName: data.estateName || '',
-            primaryImage: data.imageUrl || null,
+            primaryImage: compImages[0] || null,
+            images: compImages, // ★ 傳遞多圖
             features: data.features || [],
             isCompetitor: true,
             isSoldOutProperty: isSoldOut,
@@ -225,10 +234,8 @@ function PropertiesContent() {
     fetchData();
   }, []);
 
-  // ★ 載入更多按鈕邏輯 (取代原本的自動無限滾動)
   const handleLoadMore = () => {
     setIsLoadingMore(true);
-    // 刻意延遲 1 秒，讓使用者感知到在加載，體驗更好
     setTimeout(() => {
       setDisplayCount(prev => prev + 30);
       setIsLoadingMore(false);
@@ -304,21 +311,12 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
-  // ★ 打亂排序演算法 (Stable Hash Shuffle)
-  // 將已租出、未租出均勻打亂混合，營造市場真實熱絡感
+  // 隨機混雜排序
   filteredAndScoredRooms.sort((a, b) => {
-    // 1. 搜尋分數最高者優先
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
-    
-    // 2. 利用房源 ID 進行穩定的隨機打亂 (避免每次 Render 跳動)
     const hashA = a.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
     const hashB = b.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
-    
-    if (hashA !== hashB) {
-       return hashB - hashA;
-    }
-    
-    // 3. 保底按照建立時間
+    if (hashA !== hashB) return hashB - hashA;
     return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0); 
   });
 
@@ -403,6 +401,13 @@ function PropertiesContent() {
                          <Building2 size={12}/> HK港灣之家
                       </div>
                     )}
+
+                    {/* ★ 顯示多圖數量標籤 */}
+                    {!isSoldOut && room.images && room.images.length > 1 && (
+                      <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-2 py-1 rounded-md text-[10px] font-black text-white flex items-center gap-1 z-10">
+                        <Images size={12}/> {room.images.length}
+                      </div>
+                    )}
                   </div>
                   
                   <div className="p-6 flex flex-col flex-1 relative z-10">
@@ -455,7 +460,6 @@ function PropertiesContent() {
           </div>
         )}
 
-        {/* ★ 改版後的點擊載入按鈕 */}
         {!loading && displayCount < filteredAndScoredRooms.length && (
           <div className="py-12 flex justify-center items-center">
             <button 
@@ -489,14 +493,19 @@ function PropertiesContent() {
             </button>
             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-rose-400"></div>
             
-            <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-blue-100">
-              <MessageCircle size={32} className="text-blue-500" />
-            </div>
-            
-            <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">預約看房與了解詳情</h3>
-            <p className="text-slate-500 mb-8 font-medium text-center text-sm">
-              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會為您提供精確租金與詳細資訊。
+            <h3 className="text-2xl font-black text-slate-800 mb-2 mt-4 text-center">預約看房與了解詳情</h3>
+            <p className="text-slate-500 mb-6 font-medium text-center text-sm">
+              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供精確租金與詳細資訊。
             </p>
+
+            {/* ★ 在表單上方加入房間多圖橫向預覽 */}
+            {bookingRoom.images && bookingRoom.images.length > 0 && (
+              <div className="flex overflow-x-auto gap-2 mb-6 custom-scrollbar pb-2">
+                {bookingRoom.images.map((img: string, idx: number) => (
+                  <img key={idx} src={getProxiedUrl(img)} className="w-24 h-24 object-cover rounded-2xl shrink-0 shadow-sm border border-slate-200" alt="房間實景" />
+                ))}
+              </div>
+            )}
 
             <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
               <div>
@@ -520,6 +529,7 @@ function PropertiesContent() {
           </div>
         </div>
       )}
+
     </div>
   );
 }
