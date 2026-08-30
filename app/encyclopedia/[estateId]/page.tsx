@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { collection, getDocs, doc, getDoc, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { MapPin, Search, Home, Building2, BedDouble, ChevronRight, Users, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, AlertCircle } from 'lucide-react';
+import { MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -31,7 +31,6 @@ const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string
   );
 };
 
-// ★ 修復：補回缺失的行家盤封面生成函數，解決白屏崩潰問題
 const getEstateCover = (estateName?: string) => {
   if (!estateName) return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800'; 
   if (estateName.includes('名城')) return 'https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=800';
@@ -41,7 +40,7 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
-// 根據 ID 計算穩定的樓層描述 (低/中/高層)
+// 根據 ID 計算穩定的樓層描述
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -49,7 +48,7 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// 將精準價格轉換為 2000-3000 幅度的區間
+// 將精準價格轉換為動態區間
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -650,13 +649,12 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
             )}
           </section>
 
-          {/* ★ 新增：公共區域展示 (獨立區塊，在戶型介紹正上方) */}
+          {/* ★ 修復：公共區域展示套用佳寓標準樣式 */}
           {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
             <section id="public-areas" className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80 scroll-mt-32">
-              <div className="flex items-center gap-3 mb-6">
-                <Users size={28} className="text-blue-800" />
-                <h2 className="text-2xl font-black text-blue-800">公共區域展示</h2>
-              </div>
+              <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
+                 <div className="w-2 h-8 bg-orange-500 rounded-full"/> 公共區域展示
+              </h2>
               <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
                 {estate.publicAreaImages.map((img: string, i: number) => (
                   <div key={i} className="relative shrink-0 w-64 md:w-72 h-72 snap-center cursor-zoom-in rounded-[2rem] overflow-hidden shadow-sm border border-slate-100 group" onClick={() => setLightboxImage(img)}>
