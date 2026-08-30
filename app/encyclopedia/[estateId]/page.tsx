@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { collection, getDocs, doc, addDoc, serverTimestamp } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
-import { MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle } from 'lucide-react';
+import { MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, ChevronDown, ChevronUp } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
@@ -74,6 +74,7 @@ interface EncyclopediaData {
   estateImages: string[]; 
   facilitiesText?: string; 
   facilities?: string[]; 
+  facilityImages?: string[]; // ★ 修復：加入小區設施圖片的介面宣告
   roomAmenitiesUrl?: string; 
   roomAmenitiesImages?: string[];
   roomAmenities?: string[];
@@ -105,6 +106,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateIntro: '位於香港新界沙田區車公廟路18號，於2022年下半年開始開放入住。小區內部直通大圍地鐵站和大型商場圍方（下雨可不用打傘），坐落於獅子山腳，依傍護城河，山水相依，屋苑園林景觀優美別緻，周邊生活配套齊全。',
     estateImages: [DUMMY_ESTATE, 'https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
+    facilityImages: [DUMMY_FACILITY],
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM, DUMMY_ROOM],
     roomTypes: [
       { name: '三房一廁 陽台大單間A-D', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM, DUMMY_ROOM] },
@@ -122,6 +124,7 @@ const mockDatabase: Record<string, EncyclopediaData> = {
     estateIntro: '大圍名城(Festival City)是香港新界沙田區的大型私人屋苑，坐落於港鐵大圍站上蓋。屋苑分三期發展，共有12座、提供4,264個單位，主打3至4房大戶型，因交通極其便利且鄰近多間大學，深受家庭及學生租客歡迎。',
     estateImages: ['https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
+    facilityImages: [DUMMY_FACILITY],
     roomAmenitiesUrl: DUMMY_FACILITY, highlightsUrl: DUMMY_FACILITY, publicAreaImages: [DUMMY_ROOM],
     roomTypes: [{ name: '四房二廁 獨衛陽台大單間A', floorPlanUrl: DUMMY_FLOORPLAN, roomImages: [DUMMY_ROOM] }]
   },
@@ -367,6 +370,9 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
   const [leadReq, setLeadReq] = useState('');
   const [submittingLead, setSubmittingLead] = useState(false);
 
+  // ★ 房型折疊追蹤 State
+  const [expandedRooms, setExpandedRooms] = useState<number[]>([]);
+
   useEffect(() => {
     async function loadData() {
       try {
@@ -409,6 +415,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                estateImages: matchedDoc.estateImages || (matchedDoc.imageUrl ? [matchedDoc.imageUrl] : []),
                facilitiesText: matchedDoc.facilitiesText || '',
                facilities: matchedDoc.facilities || [],
+               facilityImages: matchedDoc.facilityImages || [], // ★ 修復：CMS 儲存的小區設施多圖映射
                roomAmenitiesUrl: matchedDoc.roomAmenitiesUrl || '',
                roomAmenitiesImages: matchedDoc.roomAmenitiesImages || (matchedDoc.roomAmenitiesUrl ? [matchedDoc.roomAmenitiesUrl] : []),
                roomAmenities: matchedDoc.roomAmenities || [],
@@ -477,6 +484,13 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
     } finally {
       setSubmittingLead(false);
     }
+  };
+
+  // ★ 切換房型折疊狀態函數
+  const toggleRoom = (idx: number) => {
+    setExpandedRooms(prev => 
+      prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx]
+    );
   };
 
   if (loading) {
@@ -604,6 +618,21 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
+            {/* ★ 補回：小區設施多圖展示 */}
+            {estate.facilityImages && estate.facilityImages.length > 0 && (
+              <div className="mb-8">
+                <div className="flex overflow-x-auto gap-4 snap-x snap-mandatory pb-4 custom-scrollbar">
+                  {estate.facilityImages.map((img, i) => (
+                    img && (
+                      <div key={i} className="shrink-0 w-72 md:w-80 h-48 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                        <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                      </div>
+                    )
+                  ))}
+                </div>
+              </div>
+            )}
+
             {estate.roomAmenities && estate.roomAmenities.length > 0 && (
               <div className="mb-8">
                 <h3 className="font-black text-slate-800 mb-3 flex items-center gap-2"><BedDouble className="text-orange-500" size={18}/> 房間標準配置</h3>
@@ -649,7 +678,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
             )}
           </section>
 
-          {/* ★ 修復：公共區域展示套用佳寓標準樣式 */}
           {estate.publicAreaImages && estate.publicAreaImages.length > 0 && (
             <section id="public-areas" className="bg-white/70 backdrop-blur-xl p-8 md:p-10 rounded-[2.5rem] shadow-xl shadow-slate-200/40 border border-white/80 scroll-mt-32">
               <h2 className="text-2xl font-black text-slate-800 mb-6 flex items-center gap-3">
@@ -672,34 +700,47 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                  <div className="w-2 h-8 bg-orange-500 rounded-full"/> 戶型介紹與圖則
               </h2>
               
-              <div className="space-y-12">
+              <div className="space-y-6">
                 {estate.roomTypes.map((rt, idx) => (
-                  <div key={idx} className="border-b border-slate-200/60 pb-10 last:border-0 last:pb-0">
-                    <h3 className="text-lg font-black text-white bg-slate-900 px-5 py-2.5 rounded-2xl w-max mb-6 shadow-md shadow-slate-900/20">
-                      {rt.name}
-                    </h3>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                      <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60">
-                        <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><Map size={16}/> 戶型圖則 (點擊放大)</p>
-                        <div className="h-48 md:h-56 rounded-2xl overflow-hidden bg-white cursor-zoom-in" onClick={() => { if(rt.floorPlanUrl) setLightboxImage(rt.floorPlanUrl); }}>
-                           {rt.floorPlanUrl ? <SafeImage src={rt.floorPlanUrl} className="w-full h-full object-contain" /> : <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">尚無圖則</div>}
+                  <div key={idx} className="border-b border-slate-200/60 pb-6 last:border-0 last:pb-0">
+                    {/* ★ 修復：改為手風琴折疊點擊按鈕 */}
+                    <button 
+                      onClick={() => toggleRoom(idx)} 
+                      className="w-full flex items-center justify-between text-left group"
+                    >
+                      <h3 className="text-lg font-black text-white bg-slate-900 px-5 py-2.5 rounded-2xl w-max shadow-md shadow-slate-900/20 group-hover:bg-orange-500 transition-colors">
+                        {rt.name}
+                      </h3>
+                      <div className="p-2 bg-slate-100 rounded-full text-slate-500 group-hover:text-orange-500 transition-colors">
+                        {expandedRooms.includes(idx) ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                      </div>
+                    </button>
+                    
+                    {/* ★ 折疊展開的內容 */}
+                    {expandedRooms.includes(idx) && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6 animate-in slide-in-from-top-4 fade-in duration-300">
+                        <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60">
+                          <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><Map size={16}/> 戶型圖則 (點擊放大)</p>
+                          <div className="h-48 md:h-56 rounded-2xl overflow-hidden bg-white cursor-zoom-in" onClick={() => { if(rt.floorPlanUrl) setLightboxImage(rt.floorPlanUrl); }}>
+                             {rt.floorPlanUrl ? <SafeImage src={rt.floorPlanUrl} className="w-full h-full object-contain" /> : <div className="w-full h-full flex items-center justify-center text-slate-400 font-bold">尚無圖則</div>}
+                          </div>
+                        </div>
+                        <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60 min-w-0">
+                          <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><BedDouble size={16}/> 房間實景 ({rt.roomImages?.length || 0} 張)</p>
+                          <div className="flex overflow-x-auto gap-3 snap-x snap-mandatory pb-2 custom-scrollbar">
+                            {rt.roomImages && rt.roomImages.length > 0 ? (
+                              rt.roomImages.map((img, i) => (
+                                 <div key={i} className="shrink-0 w-[85%] h-48 md:h-56 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
+                                   <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
+                                 </div>
+                              ))
+                            ) : (
+                              <div className="w-full h-48 md:h-56 flex items-center justify-center text-slate-400 font-bold">尚無實景圖</div>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div className="bg-slate-50 p-4 rounded-3xl border border-slate-200/60 min-w-0">
-                        <p className="text-sm font-black text-slate-500 mb-3 flex items-center gap-2"><BedDouble size={16}/> 房間實景 ({rt.roomImages?.length || 0} 張)</p>
-                        <div className="flex overflow-x-auto gap-3 snap-x snap-mandatory pb-2 custom-scrollbar">
-                          {rt.roomImages && rt.roomImages.length > 0 ? (
-                            rt.roomImages.map((img, i) => (
-                               <div key={i} className="shrink-0 w-[85%] h-48 md:h-56 snap-center cursor-zoom-in" onClick={() => setLightboxImage(img)}>
-                                 <SafeImage src={img} className="w-full h-full rounded-2xl object-cover hover:opacity-90 transition-opacity" />
-                               </div>
-                            ))
-                          ) : (
-                            <div className="w-full h-48 md:h-56 flex items-center justify-center text-slate-400 font-bold">尚無實景圖</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -804,7 +845,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                 </>
               );
 
-              const cardClasses = `group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 border border-white/80 transition-all duration-300 flex flex-col relative cursor-pointer ${isSoldOut ? 'opacity-90' : 'hover:shadow-2xl hover:-translate-y-2'}`;
+              const cardClasses = `group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 border border-white/80 transition-all duration-300 flex flex-col relative cursor-pointer ${isSoldOut ? 'opacity-90' : 'hover:shadow-2xl hover:-translate-y-1'}`;
 
               return (
                 <div key={room.id} onClick={() => { if(!isSoldOut) setBookingRoom(room) }} className={cardClasses}>
