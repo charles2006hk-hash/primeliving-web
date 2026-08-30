@@ -36,25 +36,17 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// ★ 將精準價格轉換為 2000-3000 幅度的區間
+// 將精準價格轉換為 2000-3000 幅度的區間
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
-  
-  // 基準化到最接近的 1000
   const base = Math.floor(price / 1000) * 1000;
-  
-  // 決定區間幅度 (如果價格小於 8000，幅度為 1000；否則為 2000-3000)
   const range = price < 8000 ? 1000 : (base % 2 === 0 ? 2000 : 3000);
-  
-  // 計算下限與上限
   let lower = base;
-  if (price - base < 500 && range > 1000) { lower -= 1000; } // 微調下限使其看起來更合理
+  if (price - base < 500 && range > 1000) { lower -= 1000; }
   const upper = lower + range;
-
   return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
 };
 
-// 用來匹配百科路由的字典
 const ENCYCLOPEDIA_LIST = [
   { id: 'pavilia-farm', aliases: ['柏傲莊', '柏傲庄'] },
   { id: 'festival-city', aliases: ['名城'] },
@@ -96,8 +88,6 @@ interface PropertyRoom {
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
-  
-  // 生成的遮罩與關聯資料
   displayTitle?: string; 
   displayPrice?: string;
   floorLevel?: string;
@@ -120,17 +110,14 @@ function PropertiesContent() {
   const [displayCount, setDisplayCount] = useState(30);
   const loaderRef = useRef<HTMLDivElement>(null);
   
-  // 介紹過濾器狀態
   const [activeFilter, setActiveFilter] = useState<string>('all');
 
-  // ★ 預約表單狀態
   const [bookingRoom, setBookingRoom] = useState<PropertyRoom | null>(null);
   const [leadName, setLeadName] = useState('');
   const [leadPhone, setLeadPhone] = useState('');
   const [leadReq, setLeadReq] = useState('');
   const [submittingLead, setSubmittingLead] = useState(false);
 
-  // 初始化拉取所有資料
   useEffect(() => {
     async function fetchData() {
       let internalRooms: PropertyRoom[] = [];
@@ -173,12 +160,15 @@ function PropertiesContent() {
         const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
+          // ★ 新增支援：大系統行家盤源的 isSoldOut 開關
+          const isExplicitlySoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied';
+
           return {
             id: doc.id,
             name: data.name || data.title || '優質合作盤源', 
             propertyId: 'competitor_pool', 
             baseRent: data.price || 0, 
-            status: data.status || 'Available',
+            status: isExplicitlySoldOut ? 'Occupied' : 'Available',
             webStatus: data.webStatus || 'published',
             propertyName: data.district || data.estateName || '合作屋苑',
             estateName: data.estateName || '',
@@ -191,17 +181,14 @@ function PropertiesContent() {
       } catch (error) {}
 
       const combined = [...internalRooms, ...competitorRooms]
-        .filter(r => r.webStatus === 'published' || String(r.status).toLowerCase() === 'occupied')
+        .filter(r => r.webStatus === 'published')
         .map(room => {
            const floorLevel = getFloorLevel(room.id);
-           // 統一提取屋苑名稱
            let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
-           // 把後面的 1-27A 等去掉
            rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
 
            const eId = findEncyclopediaId(rawEstateName);
 
-           // ★ 隱私處理：覆蓋原始名稱與價格
            return {
              ...room,
              floorLevel,
@@ -218,7 +205,7 @@ function PropertiesContent() {
     fetchData();
   }, []);
 
-  // 設置 Intersection Observer 監聽滾動載入更多
+  // 無限滾動的 Intersection Observer
   useEffect(() => {
     const observer = new IntersectionObserver((entries) => {
       if (entries[0].isIntersecting) {
@@ -230,7 +217,6 @@ function PropertiesContent() {
     return () => observer.disconnect();
   }, [loading]);
 
-  // ★ 處理表單提交寫入 CRM
   const handleLeadSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!bookingRoom) return;
@@ -249,7 +235,6 @@ function PropertiesContent() {
       });
       alert('✅ 預約已成功發送給管家團隊！我們將在24小時內與您聯絡安排帶看。');
       
-      // 表單送出成功後，直接導向該屋苑的百科頁面
       if (bookingRoom.hasEncyclopedia) {
          router.push(`/encyclopedia/${bookingRoom.encyclopediaId}`);
       } else {
@@ -266,7 +251,6 @@ function PropertiesContent() {
     }
   };
 
-  // 處理搜尋與過濾邏輯
   let decodedSearch = '';
   try { decodedSearch = rawSearchQuery ? decodeURIComponent(rawSearchQuery).toLowerCase().trim() : ''; } 
   catch (e) { decodedSearch = rawSearchQuery?.toLowerCase().trim() || ''; }
@@ -278,7 +262,6 @@ function PropertiesContent() {
     const locationText = [room.propertyName, room.estateName].filter(Boolean).join(' ').toLowerCase();
     const fullText = [locationText, room.name, ...(room.features || [])].filter(Boolean).join(' ').toLowerCase();
 
-    // 1. 搜尋字串配對
     if (!decodedSearch) {
       score = 1; 
     } else {
@@ -289,13 +272,12 @@ function PropertiesContent() {
       });
     }
 
-    // 2. 標籤過濾器 (Filter Bar)
     if (activeFilter === 'high') {
       if (room.floorLevel !== '高層') score = -1;
     } else if (activeFilter === 'mid') {
       if (room.floorLevel !== '中層') score = -1;
     } else if (activeFilter === 'budget') {
-      if (room.baseRent > 7000) score = -1; // 預算盤 < 7000
+      if (room.baseRent > 7000) score = -1;
     } else if (activeFilter === 'ensuite') {
       const matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
       if (!matchesType) score = -1;
@@ -304,14 +286,16 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
-  // 商業邏輯排序
+  // ★ 更新商業邏輯排序：混合 Sold Out 盤源，製造搶手感
   filteredAndScoredRooms.sort((a, b) => {
+    // 1. 優先按匹配分數排序
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
-    const aIsSoldOut = a.webStatus === 'draft' || String(a.status).toLowerCase() === 'occupied';
-    const bIsSoldOut = b.webStatus === 'draft' || String(b.status).toLowerCase() === 'occupied';
-    if (aIsSoldOut !== bIsSoldOut) return aIsSoldOut ? 1 : -1; 
+    
+    // 2. 官方直營優先於行家盤
     if (a.isCompetitor !== b.isCompetitor) return a.isCompetitor ? 1 : -1; 
-    return (a.createdAt?.seconds || 0) - (b.createdAt?.seconds || 0); 
+    
+    // 3. 按最新建立/更新時間排序 (將新上架的排前面)
+    return (b.createdAt?.seconds || 0) - (a.createdAt?.seconds || 0); 
   });
 
   const displayRooms = filteredAndScoredRooms.slice(0, displayCount);
@@ -319,7 +303,6 @@ function PropertiesContent() {
   return (
     <div className="min-h-screen bg-slate-50 pb-20">
       
-      {/* 頂部 Header */}
       <div className="bg-white border-b border-slate-200 pt-28 pb-8 px-4 shadow-sm relative z-20">
         <div className="max-w-7xl mx-auto">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-orange-50 text-orange-600 text-[10px] font-black mb-4 uppercase tracking-wider border border-orange-100">
@@ -362,7 +345,7 @@ function PropertiesContent() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {displayRooms.map((room) => {
-              const isSoldOut = room.webStatus === 'draft' || String(room.status).toLowerCase() === 'occupied';
+              const isSoldOut = String(room.status).toLowerCase() === 'occupied';
 
               const finalImage = room.primaryImage 
                 ? getProxiedUrl(room.primaryImage) 
@@ -415,6 +398,11 @@ function PropertiesContent() {
                          <span className={`flex items-center gap-1 ${isSoldOut ? 'text-slate-400' : 'text-slate-600'}`}>
                            <BedDouble size={14}/> 拎包入住
                          </span>
+                         {!room.isCompetitor && !isSoldOut && (
+                           <span className="flex items-center gap-1 text-blue-600 bg-blue-50 px-2 py-0.5 rounded">
+                             <ShieldCheck size={12}/> 官方直營
+                           </span>
+                         )}
                        </div>
                        <span className={`px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1 ${
                          isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-orange-500'
@@ -506,19 +494,7 @@ function PropertiesContent() {
           </div>
         </div>
       )}
-    </div>
-  );
-}
 
-// 導出主頁面
-export default function PropertiesPage() {
-  return (
-    <Suspense fallback={
-      <div className="min-h-screen flex justify-center items-center bg-slate-50">
-        <Loader2 className="animate-spin text-orange-500" size={40}/>
-      </div>
-    }>
-      <PropertiesContent />
-    </Suspense>
+    </div>
   );
 }
