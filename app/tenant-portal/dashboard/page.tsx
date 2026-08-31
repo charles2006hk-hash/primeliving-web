@@ -166,7 +166,6 @@ function DashboardContent() {
       }).catch(() => {});
   }, []);
 
-  // ★ 核心修復：單一正確的資料獲取 useEffect
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
     if (!sessionStr) { 
@@ -205,7 +204,6 @@ function DashboardContent() {
       const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
       const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
 
-      // 【修改區塊 1】約第 198 行
       setTenantData({ 
         id: docSnap.id, 
         email: data.email || '', 
@@ -214,7 +212,7 @@ function DashboardContent() {
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
         
-        // ★ 核心修復：現在只要有電子簽名「或」後台判定實體已簽，就視為已簽約
+        // ★ 核心修復：現在只要有電子簽名「或」後台判定實體已簽，就視為已簽約，徹底消除紅字
         isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
         
         signature: data.signature || '', 
@@ -326,34 +324,29 @@ function DashboardContent() {
       };
     });
 
-    // ★ 關鍵1：強制按到期日「由舊到新」排序 (必須先清舊帳)
     allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
-    // ★ 關鍵2：實作 PayDollar 10萬 HKD 結帳限額拆單邏輯
     const PAYDOLLAR_LIMIT_CENTS = 100000 * 100; // 10萬 HKD 轉 Cents
     let currentCheckoutCents = 0;
     const currentCheckoutBillIds: string[] = [];
     let isSplitNeeded = false;
 
-    // 將本次準備要結帳的所有單據 (必繳 + 勾選的選繳) 組成陣列
     const allPayingBills = [
       ...mandatoryItems,
       ...optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
     ].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
 
-    // 依序加總，直到觸碰 10 萬上限
     for (const bill of allPayingBills) {
       if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
         isSplitNeeded = true;
-        // 防呆：如果連第一筆單據本身就超過 10 萬，強制納入以免系統卡死無法繳費
         if (currentCheckoutBillIds.length === 0) {
           currentCheckoutBillIds.push(bill.id);
           currentCheckoutCents += bill.amountCents;
         }
-        break; // 停止加入後面的單據
+        break; 
       }
       currentCheckoutBillIds.push(bill.id);
       currentCheckoutCents += bill.amountCents;
@@ -362,10 +355,10 @@ function DashboardContent() {
     const grandTotalCents = allPayingBills.reduce((sum, b) => sum + b.amountCents, 0);
 
     return {
-      grandTotal: fromCents(grandTotalCents),         // 真實總欠款
-      checkoutTotal: fromCents(currentCheckoutCents), // ★ 本次被切分的實際結帳金額
-      checkoutBillIds: currentCheckoutBillIds,        // ★ 本次被切分的實際結帳單據 IDs
-      isSplitNeeded,                                  // ★ 標記是否觸發了拆單機制
+      grandTotal: fromCents(grandTotalCents),
+      checkoutTotal: fromCents(currentCheckoutCents), 
+      checkoutBillIds: currentCheckoutBillIds,        
+      isSplitNeeded,                                  
       mandatoryItems,
       optionalItems,
       hasOverdue: mandatoryItems.some(b => b.isOverdue),
@@ -425,9 +418,8 @@ function DashboardContent() {
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
-      // ★ 核心修改：捨棄重新陣列計算，直接使用自動拆單後 (<= 10萬) 的實際請款單據 ID 與金額
       const payingBillIds = billingSummary.checkoutBillIds;
-      const exactPayingTotal = billingSummary.checkoutTotal; // 已透過 fromCents 處理，無浮點數誤差
+      const exactPayingTotal = billingSummary.checkoutTotal; 
 
       const response = await fetch('/api/paydollar/verify', {
         method: 'POST',
@@ -447,7 +439,6 @@ function DashboardContent() {
         throw new Error(data.error || '無法完成核銷手續');
       }
 
-      // 繳費成功後，清空勾選狀態
       setSelectedOptionalBillIds([]);
       if (typeof window !== 'undefined') window.history.replaceState(null, '', '/tenant-portal/dashboard');
       alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
@@ -634,7 +625,6 @@ function DashboardContent() {
       let idUrl = tenantData.idCardUrl || '';
       let passUrl = tenantData.passportUrl || '';
 
-      // 將檔案上傳至 Firebase Storage 的 tenants/{id}/kyc/ 路徑
       if (idCardFile) {
         const idRef = ref(storage, `tenants/${tenantData.id}/kyc/idCard_${Date.now()}_${idCardFile.name}`);
         await uploadBytesResumable(idRef, idCardFile);
@@ -647,7 +637,6 @@ function DashboardContent() {
         passUrl = await getDownloadURL(passRef);
       }
 
-      // 將 URL 寫入 Firestore 供大後台 OCR 與打厘印讀取
       await updateDoc(doc(db, 'tenants', tenantData.id), { 
         emergencyContact, 
         idCardUrl: idUrl, 
@@ -678,7 +667,6 @@ function DashboardContent() {
     if (docData.type === 'Lease') {
       const fd = docData.formData || {};
       return (
-        // ★ 加入 min-h-[1123px] 防止高度塌陷
         <div ref={isSigningMode ? contractRef : undefined} className="w-[794px] min-h-[1123px] bg-white text-slate-900 font-sans relative shadow-lg origin-top mx-auto">
           <ContractTemplate
             data={{
@@ -691,7 +679,6 @@ function DashboardContent() {
               leaseEnd: fd.leaseEnd || tenantData?.leaseEnd || '', 
               monthlyRent: Number(fd.monthlyRent) || 0, 
               securityDeposit: Number(fd.deposit) || 0,
-              // ★ 核心防呆：強制轉為陣列，防止 ContractTemplate 內部 map() 報錯導致白屏
               paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], 
               tenantSignature: fd.tenantSignature || tenantData?.signature || '', 
               signedAt: fd.signedAt || tenantData?.signedAt || ''
@@ -860,7 +847,6 @@ function DashboardContent() {
   if (!tenantData) return null;
 
   return (
-    // ★ 1. 最外層改為 h-screen, flex-col, overflow-hidden (鎖定螢幕、禁止外層滾動)
     <div className={`h-screen flex flex-col selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 overflow-hidden ${weather.bgClass}`}>
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
       <Script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" strategy="lazyOnload" />
@@ -873,11 +859,9 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* Navbar - 設為 flex-none 固定在頂部，並微調 padding 使其更飽滿 */}
       <div className="bg-white/40 backdrop-blur-md border-b border-white/50 px-6 py-4 md:py-5 flex justify-between items-center z-40 shadow-sm flex-none">
         <Link href="/" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
           <img src="/logo.png" alt="Prime Living" className="h-8 md:h-9 object-contain drop-shadow-sm" />
-          {/* ★ 新增：品牌文字，手機版隱藏以節省空間，平板以上顯示 */}
           <span className="font-extrabold text-xl tracking-tight text-slate-800 hidden sm:flex items-baseline gap-1">
             佳寓 <span className="text-orange-500 text-sm font-black">PrimeLiving</span>
           </span>
@@ -887,9 +871,7 @@ function DashboardContent() {
         </button>
       </div>
 
-      {/* ★ 2. 內部內容區塊設為 flex-1 overflow-y-auto (僅內部滾動，宛如原生 App) */}
       <div className="flex-1 overflow-y-auto custom-scrollbar">
-        {/* 微調頂部間距 pt-6 md:pt-10，讓內容自然往上靠，消除空洞感 */}
         <div className="max-w-5xl mx-auto space-y-8 pt-6 md:pt-10 pb-16 px-4 md:px-8 min-h-full flex flex-col">
           <div className="flex flex-col md:flex-row justify-between items-start md:items-end gap-4">
             <div className="animate-in slide-in-from-bottom-4 duration-500">
@@ -1122,7 +1104,6 @@ function DashboardContent() {
                   const isOfficial = log.type === 'official_notice'; 
                   const isMyTicket = !log.type || log.type === 'ticket'; 
                   
-                  // ★ 新增：刪除通知函數
                   const handleDeleteLog = async () => {
                     if (confirm('確定要刪除這條通知紀錄嗎？')) {
                       try {
@@ -1135,7 +1116,6 @@ function DashboardContent() {
 
                   return (
                     <div key={log.id} className="space-y-3 mb-4 group relative">
-                      {/* ★ 新增：刪除按鈕 (Hover 顯示) */}
                       <button onClick={handleDeleteLog} className="absolute -top-2 -right-2 z-10 bg-white border border-slate-200 text-slate-300 hover:text-red-500 hover:border-red-200 p-1.5 rounded-full opacity-0 group-hover:opacity-100 transition-all shadow-sm">
                         <Trash2 size={12} />
                       </button>
@@ -1212,7 +1192,6 @@ function DashboardContent() {
                ))}
                <div ref={chatEndRef} />
             </div>
-            {/* ★ 移除了原有的 WhatsApp / 電話連結區塊 */}
             <div className="p-4 bg-white border-t border-slate-100 flex-none pb-8 sm:pb-4">
               <form onSubmit={(e) => { e.preventDefault(); handleSendChatMessage(chatInput); }} className="flex gap-2">
                 <input type="text" value={chatInput} onChange={e => setChatInput(e.target.value)} placeholder="請輸入您的問題..." className="flex-1 px-4 py-3 bg-slate-100 border-transparent rounded-full text-sm outline-none focus:ring-2 focus:ring-orange-500/20 focus:bg-white transition" />
@@ -1224,7 +1203,8 @@ function DashboardContent() {
           </div>
         </div>
       )}
-{/* 繳費 Modal */}
+
+      {/* 繳費 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -1251,7 +1231,6 @@ function DashboardContent() {
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
                     <div>
                       <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">本次應付總額 (HKD)</p>
-                      {/* ★ 已修改為 checkoutTotal */}
                       <p className="text-3xl font-black text-slate-800">${billingSummary.checkoutTotal.toLocaleString()}</p>
                     </div>
                     <div className="pt-4 border-t border-slate-100 space-y-3">
@@ -1279,7 +1258,6 @@ function DashboardContent() {
                     </div>
                   </div>
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
-                    {/* ★ 以下三個計算欄位皆已修改為 checkoutTotal */}
                     <div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單金額</p><p className="font-mono font-bold text-slate-800">${billingSummary.checkoutTotal.toLocaleString()}</p></div>
                     <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.checkoutTotal) * 0.03)).toLocaleString()}</p></div>
                     <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.checkoutTotal) + Math.round(toCents(billingSummary.checkoutTotal) * 0.03))).toLocaleString()}</p></div>
@@ -1297,6 +1275,7 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* 合約與簽署 Modal */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full max-w-[1000px] rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
@@ -1334,7 +1313,7 @@ function DashboardContent() {
               </div>
             )}
 
-            {/* Modal Header (固定於頂部) */}
+            {/* Modal Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-slate-200 flex-none relative z-20">
               <h3 className="font-black text-lg sm:text-xl text-slate-800 flex items-center">
                 <FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約
@@ -1349,7 +1328,6 @@ function DashboardContent() {
               <div className="flex-1 bg-slate-200 flex justify-center py-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
                 {latestLease ? (
                   <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-max pb-12">
-                    {/* ★ 傳入 true，啟用 ContractTemplate 內部綁定的 ref */}
                     {renderA4Document(latestLease, true)}
                   </div>
                 ) : (
@@ -1360,11 +1338,10 @@ function DashboardContent() {
                 )}
               </div>
               
-              // 【修改區塊 2】約第 688 行 (在右側控制面板內)
               {/* 右側 / 底部 操作控制面板 */}
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none gap-4">
-                  
+
                   {/* ★ 新增：Stamp Duty (印花稅單) 顯示區塊 */}
                   {latestLease.stampDutyUrl && (
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-center animate-in fade-in slide-in-from-top-4">
@@ -1373,17 +1350,17 @@ function DashboardContent() {
                       <p className="text-[11px] text-blue-700 leading-normal mb-4">
                         您的合約已完成政府印花稅 (Stamp Duty) 繳納手續。
                       </p>
-                      <a 
-                        href={latestLease.stampDutyUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer" 
+                      <a
+                        href={latestLease.stampDutyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
                         className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2"
                       >
                         <Download size={16}/> 下載印花稅單
                       </a>
                     </div>
                   )}
-              
+
                   {/* 核心修復：判斷是否有真實簽名圖片或後台已標記簽署 */}
                   {(tenantData?.signature || tenantData?.isContractSigned || tenantData?.isPhysicalSigned) ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
@@ -1409,6 +1386,10 @@ function DashboardContent() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 檔案認證 Modal */}
       {activeModal === 'profile' && (
