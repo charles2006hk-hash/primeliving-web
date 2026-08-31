@@ -680,13 +680,16 @@ function DashboardContent() {
               monthlyRent: Number(fd.monthlyRent) || 0, 
               securityDeposit: Number(fd.deposit) || 0,
               paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], 
-              tenantSignature: fd.tenantSignature || tenantData?.signature || '', 
-              signedAt: fd.signedAt || tenantData?.signedAt || ''
+              
+              // ★ 核心修復：如果沒有手寫簽名，但有實體簽署標記或智能摘要，強制傳入文字，消除合約內的紅字！
+              tenantSignature: fd.tenantSignature || tenantData?.signature || ((tenantData?.isPhysicalSigned || fd.isPhysicalSigned || docData.isSmartSummary) ? "【實體合約已簽署】" : ''), 
+              signedAt: fd.signedAt || tenantData?.signedAt || (docData.isSmartSummary ? fd.docDate : '')
             }}
             isSigningMode={isSigningMode && !tenantData?.isContractSigned} 
             isSigningLoading={isSigning} 
             showStamp={true}
             onSignComplete={async (signatureBase64) => {
+              // ... 保持不變 ...
               setIsSigning(true);
               try {
                 const todayStr = new Date().toISOString().split('T')[0];
