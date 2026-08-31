@@ -1340,37 +1340,77 @@ function DashboardContent() {
                   </div>
                 )}
               </div>
-              
-              {/* 右側 / 底部 操作控制面板 */}
+             {/* 右側 / 底部 操作控制面板 */}
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none gap-4">
 
-                  {/* ★ 新增：Stamp Duty (印花稅單) 顯示區塊 */}
+                  {/* ★ 印花稅單 (Stamp Duty) 縮圖與下載 */}
                   {latestLease.stampDutyUrl && (
-                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-center animate-in fade-in slide-in-from-top-4">
-                      <ShieldCheck size={32} className="mx-auto text-blue-500 mb-2"/>
-                      <p className="text-sm font-black text-blue-900 mb-1">合約具備完全法律效力</p>
-                      <p className="text-[11px] text-blue-700 leading-normal mb-4">
-                        您的合約已完成政府印花稅 (Stamp Duty) 繳納手續。
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center animate-in fade-in slide-in-from-top-4">
+                      {/* 縮圖預覽區塊：利用 iframe scale 技巧完美預覽 PDF/圖片 */}
+                      <div 
+                        onClick={() => window.open(latestLease.stampDutyUrl, '_blank')}
+                        className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-blue-200 relative group shadow-sm cursor-pointer"
+                        title="點擊放大預覽"
+                      >
+                        <iframe 
+                          src={`${latestLease.stampDutyUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} 
+                          className="absolute top-0 left-0 w-[200%] h-[200%] pointer-events-none origin-top-left scale-50" 
+                          frameBorder="0" 
+                        />
+                        {/* 隱形遮罩攔截點擊事件 */}
+                        <div className="absolute inset-0 z-10 bg-transparent" />
+                        {/* Hover 放大預覽提示 */}
+                        <div className="absolute inset-0 bg-blue-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                          <Eye size={24} className="text-white drop-shadow-md" />
+                        </div>
+                      </div>
+
+                      <p className="text-sm font-black text-blue-900 mb-1">合約具法律效力</p>
+                      <p className="text-[10px] text-blue-700 leading-normal mb-3">
+                        已完成政府印花稅繳納手續
                       </p>
                       <a
                         href={latestLease.stampDutyUrl}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2"
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-md flex items-center justify-center gap-1.5"
                       >
-                        <Download size={16}/> 下載印花稅單
+                        <Download size={14}/> 下載印花稅單
                       </a>
                     </div>
                   )}
 
-                  {/* 核心修復：判斷是否有真實簽名圖片或後台已標記簽署 */}
+                  {/* ★ 已簽署合約縮圖與下載 */}
                   {(tenantData?.signature || tenantData?.isContractSigned || tenantData?.isPhysicalSigned) ? (
-                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
-                      <CheckCircle2 size={32} className="mx-auto text-emerald-500 mb-2"/>
-                      <p className="text-sm font-black text-emerald-800">合約已成功簽署</p>
-                      <button onClick={handleDownloadPDF} disabled={isSignDownloading} className="mt-4 w-full py-3 bg-white border border-emerald-200 text-emerald-700 font-bold rounded-lg flex items-center justify-center gap-2 hover:bg-emerald-100 transition-colors shadow-sm disabled:opacity-50">
-                        {isSignDownloading ? <Loader2 size={16} className="animate-spin"/> : <Download size={16}/>} 下載 PDF 副本
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                      {/* 模擬 A4 合約縮圖的 CSS 設計 (避免 Canvas 截圖耗能) */}
+                      <div 
+                        onClick={handleDownloadPDF}
+                        className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-emerald-200 relative group shadow-sm cursor-pointer"
+                        title="點擊下載 PDF"
+                      >
+                         <div className="w-[65%] h-[85%] bg-white shadow-sm border border-slate-200 p-2 flex flex-col gap-1.5 relative overflow-hidden">
+                           <div className="w-1/2 h-1.5 bg-slate-300 rounded-full mx-auto mb-1"></div>
+                           <div className="w-full h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-5/6 h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-full h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-4/5 h-1 bg-slate-200 rounded-full"></div>
+                           <div className="mt-auto flex justify-between items-end">
+                             {/* 模擬公司紅印 */}
+                             <div className="w-6 h-6 rounded-full border border-red-500/50 flex items-center justify-center rotate-12"><div className="w-4 h-4 rounded-full bg-red-500/20"></div></div>
+                             {/* 模擬手寫簽名 */}
+                             <div className="text-[10px] text-emerald-600 font-[cursive] -rotate-12 whitespace-nowrap">Signed</div>
+                           </div>
+                         </div>
+                         <div className="absolute inset-0 bg-emerald-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                           <Download size={24} className="text-white drop-shadow-md" />
+                         </div>
+                      </div>
+
+                      <p className="text-sm font-black text-emerald-800 mb-1">合約已成功簽署</p>
+                      <button onClick={handleDownloadPDF} disabled={isSignDownloading} className="mt-3 w-full py-2.5 bg-white border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition-colors shadow-sm disabled:opacity-50">
+                        {isSignDownloading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} 下載 PDF 副本
                       </button>
                     </div>
                   ) : (
@@ -1389,10 +1429,6 @@ function DashboardContent() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 檔案認證 Modal */}
       {activeModal === 'profile' && (
