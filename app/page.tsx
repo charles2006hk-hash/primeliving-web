@@ -48,6 +48,19 @@ const findEncyclopediaId = (name: string) => {
   return matched ? matched.id : null;
 };
 
+// ★ 常見百家姓氏與穩定 Hash 函數 (根據樓盤 ID 分配固定姓氏)
+const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
+
+const getSurnameForProperty = (propId: string) => {
+  if (!propId) return '陳';
+  let hash = 0;
+  for (let i = 0; i < propId.length; i++) {
+    hash = propId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % COMMON_SURNAMES.length;
+  return COMMON_SURNAMES[index];
+};
+
 // 智能遮罩單位名稱 (e.g., 美豐花園B-7F2 -> 美豐花園B座中層)
 const maskPropertyName = (name: string) => {
   if (!name) return '';
@@ -310,7 +323,6 @@ export default function HomePage(): React.JSX.Element {
               const handlePropClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
                 if (!prop.hasPublishedRooms) {
                   e.preventDefault();
-                  // ★ 修正處：寫入與彈窗統一經過遮罩轉譯，避免洩漏真實單位房號
                   setFullArea(maskPropertyName(prop.name)); 
                 }
               };
@@ -327,10 +339,12 @@ export default function HomePage(): React.JSX.Element {
                   className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative cursor-pointer"
                 >
                   
+                  {/* ★ 替換為動態姓氏的預訂遮罩 */}
                   {!prop.hasPublishedRooms && (
-                    <div className="absolute inset-0 bg-slate-100/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-lg -rotate-12 border-2 border-slate-700">
-                        SOLD OUT
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
+                      <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
+                        <Sparkles size={16} className="text-yellow-200" />
+                        感謝 {getSurnameForProperty(prop.id)}同學 預訂
                       </div>
                     </div>
                   )}
@@ -424,7 +438,7 @@ export default function HomePage(): React.JSX.Element {
 
       {fullArea !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white/95 backdrop-blur-xl border border-white rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
+          <div className="bg-white border border-slate-100 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
             
             <button 
               onClick={() => setFullArea(null)} 
@@ -438,26 +452,46 @@ export default function HomePage(): React.JSX.Element {
               <AlertCircle size={32} className="text-amber-500" />
             </div>
             
-            {/* ★ 修正處：標題輸出二次安全保護，確保不暴露原始房號 */}
-            <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">
+            <h3 className="text-2xl font-black text-slate-900 mb-2 text-center">
               抱歉，【{maskPropertyName(fullArea)}】目前已全數租滿！
             </h3>
             <p className="text-slate-600 mb-8 font-medium max-w-2xl mx-auto text-center">
               佳寓的高性價比房源通常會被迅速預訂。請留下您的需求，若有租客提前退租或新盤上架，專屬管家會為您優先保留。
             </p>
 
-            <form onSubmit={handleAreaLeadSubmit} className="max-w-2xl mx-auto bg-slate-50/80 p-6 rounded-2xl shadow-inner border border-slate-200 text-left grid grid-cols-2 gap-4 mb-8">
+            {/* ★ 修正輸入框樣式：強制設為深色文字與高對比 Placeholder */}
+            <form onSubmit={handleAreaLeadSubmit} className="max-w-2xl mx-auto bg-slate-50 p-6 rounded-2xl shadow-inner border border-slate-200 text-left grid grid-cols-2 gap-4 mb-8">
               <div className="col-span-2 sm:col-span-1">
-                <label className="block text-xs font-bold text-slate-500 mb-1">您的稱呼 *</label>
-                <input required type="text" value={leadName} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadName(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 陳同學"/>
+                <label className="block text-xs font-bold text-slate-700 mb-1">您的稱呼 *</label>
+                <input 
+                  required 
+                  type="text" 
+                  value={leadName} 
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadName(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="例如: 陳同學"
+                />
               </div>
               <div className="col-span-2 sm:col-span-1">
                 <label className="block text-xs font-bold text-slate-500 mb-1">聯絡電話 / WeChat *</label>
-                <input required type="text" value={leadPhone} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="輸入電話或微信號"/>
+                <input 
+                  required 
+                  type="text" 
+                  value={leadPhone} 
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadPhone(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="輸入電話或微信號"
+                />
               </div>
               <div className="col-span-2">
-                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間與預算</label>
-                <input type="text" value={leadReq} onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住，預算 $6000 左右"/>
+                <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間與預算</label>
+                <input 
+                  type="text" 
+                  value={leadReq} 
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadReq(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="例如: 8月中入住，預算 $6000 左右"
+                />
               </div>
               <div className="col-span-2 mt-2">
                 <button type="submit" disabled={submittingLead} className="w-full bg-orange-500 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-600 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
