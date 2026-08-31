@@ -23,20 +23,6 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
-// 常見香港/百家姓氏
-const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
-
-// 根據樓盤 ID 產生一個固定的姓氏 (確保每次重整網頁同一個樓盤的姓氏不會變)
-const getSurnameForProperty = (propId: string) => {
-  if (!propId) return '陳';
-  let hash = 0;
-  for (let i = 0; i < propId.length; i++) {
-    hash = propId.charCodeAt(i) + ((hash << 5) - hash);
-  }
-  const index = Math.abs(hash) % COMMON_SURNAMES.length;
-  return COMMON_SURNAMES[index];
-};
-
 // 支援繁簡體與模糊匹配的百科字典
 const ENCYCLOPEDIA_LIST = [
   { id: 'pavilia-farm', aliases: ['柏傲莊', '柏傲庄'] },
@@ -62,7 +48,7 @@ const findEncyclopediaId = (name: string) => {
   return matched ? matched.id : null;
 };
 
-// ★ 核心工具：智能遮罩具體單位，轉換為「屋苑 + 座號 + 樓層」(e.g., 美豐花園B-7F2 -> 美豐花園B座中層)
+// 智能遮罩單位名稱 (e.g., 美豐花園B-7F2 -> 美豐花園B座中層)
 const maskPropertyName = (name: string) => {
   if (!name) return '';
   const parts = name.split('-');
@@ -70,7 +56,6 @@ const maskPropertyName = (name: string) => {
     const prefix = parts[0].trim();
     const suffix = parts.slice(1).join('-').trim();
     
-    // 從 prefix 中分離出屋苑名和座數 (僅匹配結尾是 1~2 位數字或單個英文字母作為「座號」)
     const prefixMatch = prefix.match(/^(.+?)([A-Za-z]|\d{1,2})$/);
     let estate = prefix;
     let blockStr = '';
@@ -79,7 +64,6 @@ const maskPropertyName = (name: string) => {
       blockStr = `${prefixMatch[2].toUpperCase()}座`;
     }
 
-    // 從 suffix 中提取數字作為樓層，判斷高低層
     const floorMatch = suffix.match(/^(\d+)/);
     let floorLevel = '中層';
     if (floorMatch) {
@@ -90,7 +74,7 @@ const maskPropertyName = (name: string) => {
     
     return `${estate}${blockStr}${floorLevel}`;
   }
-  return name; // 如果沒有 '-' 則返回原名
+  return name;
 };
 
 export default function HomePage(): React.JSX.Element {
@@ -113,7 +97,6 @@ export default function HomePage(): React.JSX.Element {
       try {
         if (!db) return;
         
-        // 1. 拉取區域百科指南
         const qArea = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         
@@ -130,12 +113,10 @@ export default function HomePage(): React.JSX.Element {
         });
         setAreaGuides(guides);
 
-        // 2. 拉取評論
         const qTest = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
         setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })));
 
-        // 3. 拉取最新上架盤源
         const qProp = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
         const roomsSnap = await getDocs(collection(db, 'rooms'));
@@ -148,16 +129,13 @@ export default function HomePage(): React.JSX.Element {
           const propImages = mediaDocs.filter(m => m.propertyId === doc.id);
           const primaryImg = propImages.find(m => m.isPrimary)?.url || propImages[0]?.url || null;
           
-          // 抓取該樓盤所有 published 的房間，不論是否出租，用來計算價格區間
           const allPropRooms = allRooms.filter(r => r.propertyId === doc.id && r.webStatus === 'published');
-          // 判斷是否還有「未出租」的房間 (決定是否顯示 SOLD OUT)
           const availableRooms = allPropRooms.filter(r => String(r.status).toLowerCase() !== 'occupied');
           const hasPublishedRooms = availableRooms.length > 0;
           
           let minPrice = 0, maxPrice = 0;
           let hasHigh = false, hasMid = false, hasLow = false;
 
-          // 計算顯示價格 (處理浮點數以防萬一，儘管租金多為整數)
           if (allPropRooms.length > 0) {
             const prices = allPropRooms.map(r => Number(r.baseRent) || 0).filter(p => p > 0);
             if (prices.length > 0) {
@@ -165,7 +143,6 @@ export default function HomePage(): React.JSX.Element {
               maxPrice = Math.max(...prices);
             }
             
-            // 掃描所有房間名稱推斷樓層特徵
             allPropRooms.forEach(r => {
                const roomStr = String(r.name || '') + String(r.features || '').toLowerCase();
                if (roomStr.includes('高層') || roomStr.includes('high')) hasHigh = true;
@@ -333,7 +310,8 @@ export default function HomePage(): React.JSX.Element {
               const handlePropClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
                 if (!prop.hasPublishedRooms) {
                   e.preventDefault();
-                  setFullArea(prop.name); 
+                  // ★ 修正處：寫入與彈窗統一經過遮罩轉譯，避免洩漏真實單位房號
+                  setFullArea(maskPropertyName(prop.name)); 
                 }
               };
 
@@ -349,18 +327,15 @@ export default function HomePage(): React.JSX.Element {
                   className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative cursor-pointer"
                 >
                   
-                  {/* 動態分配姓氏的預訂遮罩 */}
                   {!prop.hasPublishedRooms && (
-                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
-                        <Sparkles size={16} className="text-yellow-200" />
-                        感謝 {getSurnameForProperty(prop.id)}同學 預訂
+                    <div className="absolute inset-0 bg-slate-100/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
+                      <div className="bg-slate-800 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-lg -rotate-12 border-2 border-slate-700">
+                        SOLD OUT
                       </div>
                     </div>
                   )}
 
                   <div className="h-52 relative overflow-hidden bg-slate-100 shrink-0">
-                    {/* 已移除 grayscale，確保 sold out 時底圖保持原色 */}
                     {prop.primaryImage ? (
                       <img src={getProxiedUrl(prop.primaryImage)} alt={prop.name} className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" />
                     ) : (
@@ -372,12 +347,10 @@ export default function HomePage(): React.JSX.Element {
                   </div>
 
                   <div className="p-6 relative z-10">
-                    {/* ★ 使用 maskPropertyName 隱藏具體單位名稱 */}
                     <h3 className="font-black text-lg mb-2 truncate text-slate-900">
                       {maskPropertyName(prop.name)}
                     </h3>
                     
-                    {/* ★ 價格與樓層區間 (跟隨精選樓盤效果) */}
                     <div className="flex flex-col gap-1 mb-4">
                       {prop.minPrice > 0 ? (
                         <p className="text-xl font-bold text-red-500 tracking-tight">
@@ -465,8 +438,9 @@ export default function HomePage(): React.JSX.Element {
               <AlertCircle size={32} className="text-amber-500" />
             </div>
             
+            {/* ★ 修正處：標題輸出二次安全保護，確保不暴露原始房號 */}
             <h3 className="text-2xl font-black text-slate-800 mb-2 text-center">
-              抱歉，【{fullArea}】目前已全數租滿！
+              抱歉，【{maskPropertyName(fullArea)}】目前已全數租滿！
             </h3>
             <p className="text-slate-600 mb-8 font-medium max-w-2xl mx-auto text-center">
               佳寓的高性價比房源通常會被迅速預訂。請留下您的需求，若有租客提前退租或新盤上架，專屬管家會為您優先保留。
