@@ -297,20 +297,30 @@ function PropertiesContent() {
 
   const filteredAndScoredRooms = allRooms.map(room => {
     let score = 0;
-    const locationText = [room.propertyName, room.estateName].filter(Boolean).join(' ').toLowerCase();
-    const fullText = [locationText, room.name, ...(room.features || [])].filter(Boolean).join(' ').toLowerCase();
+    
+    // ★ 1. 拼接所有可搜尋文字（包含屋苑名、盤源名、地址、標籤及特徵）
+    const fullSearchText = [
+      room.propertyName,
+      room.estateName,
+      (room as any).district,
+      (room as any).region,
+      (room as any).address,
+      room.displayTitle,
+      room.name,
+      ...(room.features || [])
+    ].filter(Boolean).join(' ').toLowerCase();
 
+    // 搜尋框邏輯
     if (!decodedSearch) {
       score = 1; 
     } else {
-      if (locationText.includes(decodedSearch)) score += 100;
+      if (fullSearchText.includes(decodedSearch)) score += 100;
       searchKeywords.forEach(kw => {
-        if (locationText.includes(kw)) score += 30;
-        else if (fullText.includes(kw)) score += 10;
+        if (fullSearchText.includes(kw)) score += 30;
       });
     }
 
-    // ★ 1. 樓層與類型過濾邏輯
+    // ★ 2. 樓層與特色過濾邏輯
     if (activeFilter === 'high') {
       if (room.floorLevel !== '高層') score = -1;
     } else if (activeFilter === 'mid') {
@@ -322,20 +332,31 @@ function PropertiesContent() {
       if (!matchesType) score = -1;
     }
 
-    // ★ 2. 新增：區域篩選邏輯 (Region Filter)
+    // ★ 3. 升級版區域篩選（包含地區關鍵字 + 熱門屋苑名稱）
     if (regionFilter !== 'all') {
-      const propLower = (room.propertyName + room.estateName).toLowerCase();
       if (regionFilter === 'nte') {
-        // 新界東 (沙田、大埔、火炭、大圍、粉嶺等)
-        const isNTE = ['沙田', '大埔', '火炭', '大圍', '大围', '太和', '粉嶺', '粉岭', '馬鞍山'].some(loc => propLower.includes(loc));
+        // 新界東：沙田 / 大埔 / 火炭 / 大圍 / 太和 / 粉嶺 / 上水 / 馬鞍山
+        const nteKeywords = [
+          '沙田', '大埔', '火炭', '大圍', '大围', '太和', '粉嶺', '粉岭', '上水', '馬鞍山', '马鞍山', '烏溪沙', '新界',
+          '柏傲莊', '柏傲庄', '名城', '星凱', '星凯', '御龍山', '御龙山', '美豐', '美丰', '美菱居', '太湖', '翠怡', '大埔中心', '新達', '新达', '第一城', '河畔', '金獅', '雲疊', '銀禧'
+        ];
+        const isNTE = nteKeywords.some(kw => fullSearchText.includes(kw.toLowerCase()));
         if (!isNTE) score = -1;
       } else if (regionFilter === 'kowloon') {
-        // 九龍 (紅磡、旺角、九龍塘、土瓜灣、黃埔等)
-        const isKowloon = ['紅磡', '红磡', '旺角', '九龍', '九龙', '土瓜灣', '黃埔', '黄埔', '尖沙咀'].some(loc => propLower.includes(loc));
+        // 九龍區：紅磡 / 旺角 / 九龍塘 / 土瓜灣 / 黃埔 / 尖沙咀 / 深水埗
+        const kowloonKeywords = [
+          '紅磡', '红磡', '旺角', '九龍', '九龙', '土瓜灣', '土瓜湾', '黃埔', '黄埔', '尖沙咀', '深水埗', '長沙灣', '长沙湾', '佐敦', '油麻地', '大角咀',
+          '海濱南岸', '海滨南岸', '曦匯', '曦汇', '必嘉坊', '利港', '城南', '港灣豪庭', '港湾豪庭', '維港'
+        ];
+        const isKowloon = kowloonKeywords.some(kw => fullSearchText.includes(kw.toLowerCase()));
         if (!isKowloon) score = -1;
       } else if (regionFilter === 'tko') {
         // 將軍澳 / 坑口 / 寶琳 / 康城
-        const isTKO = ['將軍澳', '将军澳', '坑口', '寶琳', '宝琳', '康城'].some(loc => propLower.includes(loc));
+        const tkoKeywords = [
+          '將軍澳', '将军澳', '坑口', '寶琳', '宝琳', '康城', '調景嶺', '调景岭',
+          '蔚藍灣畔', '蔚蓝湾畔', '南豐廣場', '南丰广场', '新都城', '東港城', '都會駅', '領都'
+        ];
+        const isTKO = tkoKeywords.some(kw => fullSearchText.includes(kw.toLowerCase()));
         if (!isTKO) score = -1;
       }
     }
