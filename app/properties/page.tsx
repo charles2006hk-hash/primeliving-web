@@ -8,7 +8,7 @@ import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
 // ==========================================
-// 1. 預設導出 (移至最上方，避免編譯失敗)
+// 1. 預設導出
 // ==========================================
 export default function PropertiesPage() {
   return (
@@ -49,6 +49,19 @@ const getFloorLevel = (id: string) => {
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
   const rem = sum % 3;
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
+};
+
+// ★ 常見百家姓氏與穩定 Hash 函數 (確保同一個樓盤/單位的姓氏永遠保持一致)
+const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
+
+const getSurnameForProperty = (propId: string) => {
+  if (!propId) return '陳';
+  let hash = 0;
+  for (let i = 0; i < propId.length; i++) {
+    hash = propId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % COMMON_SURNAMES.length;
+  return COMMON_SURNAMES[index];
 };
 
 // 價格隱私遮罩 (動態區間)
@@ -100,7 +113,7 @@ interface PropertyRoom {
   propertyName?: string;
   estateName?: string; 
   primaryImage?: string;
-  images?: string[]; // ★ 新增多圖支援
+  images?: string[]; 
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
@@ -126,7 +139,9 @@ function PropertiesContent() {
   const [displayCount, setDisplayCount] = useState(30);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   
+  // ★ 增加區域過濾狀態
   const [activeFilter, setActiveFilter] = useState<string>('all');
+  const [regionFilter, setRegionFilter] = useState<string>('all'); // 新增：區域篩選
 
   const [bookingRoom, setBookingRoom] = useState<PropertyRoom | null>(null);
   const [leadName, setLeadName] = useState('');
@@ -152,7 +167,7 @@ function PropertiesContent() {
         internalRooms = roomSnap.docs.map(doc => {
           const data = doc.data();
           let primaryImage = null;
-          let roomImages: string[] = []; // ★ 儲存內部盤源的多圖
+          let roomImages: string[] = []; 
 
           if (data.images && data.images.length > 0) {
              const assigned = mediaDocs.filter(m => data.images.includes(m.id));
@@ -173,7 +188,7 @@ function PropertiesContent() {
             propertyName: propMap[data.propertyId] || '精選盤源',
             estateName: propMap[data.propertyId] || '',
             primaryImage: primaryImage,
-            images: roomImages, // ★ 傳遞多圖
+            images: roomImages, 
             isCompetitor: false,
             isSoldOutProperty: isSoldOut,
             createdAt: data.createdAt || { seconds: Date.now() / 1000 }
@@ -186,8 +201,6 @@ function PropertiesContent() {
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
           const isSoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
-          
-          // ★ 抓取 CMS 最新儲存的 images 陣列
           const compImages = data.images && data.images.length > 0 ? data.images : (data.imageUrl ? [data.imageUrl] : []);
 
           return {
@@ -200,7 +213,7 @@ function PropertiesContent() {
             propertyName: data.district || data.estateName || '合作屋苑',
             estateName: data.estateName || '',
             primaryImage: compImages[0] || null,
-            images: compImages, // ★ 傳遞多圖
+            images: compImages, 
             features: data.features || [],
             isCompetitor: true,
             isSoldOutProperty: isSoldOut,
@@ -297,6 +310,7 @@ function PropertiesContent() {
       });
     }
 
+    // ★ 1. 樓層與類型過濾邏輯
     if (activeFilter === 'high') {
       if (room.floorLevel !== '高層') score = -1;
     } else if (activeFilter === 'mid') {
@@ -306,6 +320,24 @@ function PropertiesContent() {
     } else if (activeFilter === 'ensuite') {
       const matchesType = room.features?.includes('套廁') || room.name.toLowerCase().includes('ensuite');
       if (!matchesType) score = -1;
+    }
+
+    // ★ 2. 新增：區域篩選邏輯 (Region Filter)
+    if (regionFilter !== 'all') {
+      const propLower = (room.propertyName + room.estateName).toLowerCase();
+      if (regionFilter === 'nte') {
+        // 新界東 (沙田、大埔、火炭、大圍、粉嶺等)
+        const isNTE = ['沙田', '大埔', '火炭', '大圍', '大围', '太和', '粉嶺', '粉岭', '馬鞍山'].some(loc => propLower.includes(loc));
+        if (!isNTE) score = -1;
+      } else if (regionFilter === 'kowloon') {
+        // 九龍 (紅磡、旺角、九龍塘、土瓜灣、黃埔等)
+        const isKowloon = ['紅磡', '红磡', '旺角', '九龍', '九龙', '土瓜灣', '黃埔', '黄埔', '尖沙咀'].some(loc => propLower.includes(loc));
+        if (!isKowloon) score = -1;
+      } else if (regionFilter === 'tko') {
+        // 將軍澳 / 坑口 / 寶琳 / 康城
+        const isTKO = ['將軍澳', '将军澳', '坑口', '寶琳', '宝琳', '康城'].some(loc => propLower.includes(loc));
+        if (!isTKO) score = -1;
+      }
     }
 
     return { ...room, score };
@@ -337,13 +369,26 @@ function PropertiesContent() {
             基於隱私保護，我們已將具體房號替換為樓層級別，並顯示預估租金區間。點擊卡片即可聯絡管家了解精確資訊。
           </p>
 
-          <div className="flex flex-wrap gap-2 items-center">
-            <Filter size={16} className="text-slate-400 mr-2"/>
-            <button onClick={() => setActiveFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全部盤源</button>
-            <button onClick={() => setActiveFilter('high')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'high' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>高層優選</button>
-            <button onClick={() => setActiveFilter('mid')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'mid' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>中層舒適</button>
-            <button onClick={() => setActiveFilter('ensuite')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'ensuite' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>獨立套廁</button>
-            <button onClick={() => setActiveFilter('budget')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'budget' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>高性價比 (&lt;$7K)</button>
+          {/* ★ 過濾器區塊：區域 + 屬性篩選 */}
+          <div className="space-y-4">
+            {/* 區域選項 */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <span className="text-xs font-bold text-slate-400 mr-1">地區區域:</span>
+              <button onClick={() => setRegionFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'all' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全部地區</button>
+              <button onClick={() => setRegionFilter('nte')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'nte' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>新界東 (沙田/大埔/大圍)</button>
+              <button onClick={() => setRegionFilter('kowloon')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'kowloon' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>九龍區 (紅磡/旺角)</button>
+              <button onClick={() => setRegionFilter('tko')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'tko' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>將軍澳 / 坑口</button>
+            </div>
+
+            {/* 屬性選項 */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <Filter size={16} className="text-slate-400 mr-1"/>
+              <button onClick={() => setActiveFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全部特色</button>
+              <button onClick={() => setActiveFilter('high')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'high' ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>高層優選</button>
+              <button onClick={() => setActiveFilter('mid')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'mid' ? 'bg-emerald-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>中層舒適</button>
+              <button onClick={() => setActiveFilter('ensuite')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'ensuite' ? 'bg-purple-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>獨立套廁</button>
+              <button onClick={() => setActiveFilter('budget')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'budget' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>高性價比 (&lt;$7K)</button>
+            </div>
           </div>
         </div>
       </div>
@@ -375,17 +420,19 @@ function PropertiesContent() {
 
               const CardContent = (
                 <>
+                  {/* ★ 修改：SOLD OUT 跟隨主頁的溫暖感謝語（動態綁定姓氏） */}
                   {isSoldOut && (
-                    <div className="absolute inset-0 bg-slate-50/40 backdrop-blur-[1.5px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      <div className="bg-slate-800/90 text-white px-6 py-2 rounded-full font-black tracking-widest shadow-xl -rotate-12 border-2 border-slate-700 backdrop-blur-md scale-110">
-                        SOLD OUT
+                    <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
+                      <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
+                        <Sparkles size={16} className="text-yellow-200" />
+                        感謝 {getSurnameForProperty(room.id)}同學 預訂
                       </div>
                     </div>
                   )}
 
                   <div className="relative h-56 md:h-64 bg-slate-100 overflow-hidden shrink-0">
                     {finalImage ? (
-                      <img src={finalImage} alt={room.displayTitle} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'grayscale-[60%] opacity-80' : 'group-hover:scale-105'}`} />
+                      <img src={finalImage} alt={room.displayTitle} className={`w-full h-full object-cover transition-transform duration-700 ${isSoldOut ? 'opacity-90' : 'group-hover:scale-105'}`} />
                     ) : (
                       <div className="w-full h-full flex flex-col items-center justify-center text-slate-300">
                         <Home size={32} className="mb-2 opacity-50"/>
@@ -402,7 +449,6 @@ function PropertiesContent() {
                       </div>
                     )}
 
-                    {/* ★ 顯示多圖數量標籤 */}
                     {!isSoldOut && room.images && room.images.length > 1 && (
                       <div className="absolute bottom-4 right-4 bg-black/60 backdrop-blur-md px-2 py-1 rounded-md text-[10px] font-black text-white flex items-center gap-1 z-10">
                         <Images size={12}/> {room.images.length}
@@ -412,11 +458,11 @@ function PropertiesContent() {
                   
                   <div className="p-6 flex flex-col flex-1 relative z-10">
                     <div className="flex justify-between items-start mb-3 gap-2">
-                      <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-800'}`}>
+                      <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-500' : 'text-slate-800'}`}>
                         {room.displayTitle}
                       </h3>
                       <div className="text-right shrink-0">
-                        <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
+                        <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-500' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
                           {room.displayPrice}
                         </span>
                       </div>
@@ -434,9 +480,9 @@ function PropertiesContent() {
                          )}
                        </div>
                        <span className={`px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1 ${
-                         isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-orange-500'
+                         isSoldOut ? 'bg-slate-200 text-slate-500' : 'bg-slate-900 text-white hover:bg-orange-500'
                        }`}>
-                         {isSoldOut ? '已租出' : <>預約看房 <ArrowRight size={14}/></>}
+                         {isSoldOut ? '已滿租' : <>預約看房 <ArrowRight size={14}/></>}
                        </span>
                     </div>
                   </div>
@@ -483,22 +529,21 @@ function PropertiesContent() {
         )}
       </div>
 
-      {/* 預約表單 Modal */}
+      {/* ★ 預約表單 Modal (已完全修復文字清晰度與 Placeholder 白底看不到的問題) */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className="bg-white/95 backdrop-blur-xl border border-white rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
+          <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
             
             <button onClick={() => setBookingRoom(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 rounded-full transition">
               <X size={24}/>
             </button>
             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-rose-400"></div>
             
-            <h3 className="text-2xl font-black text-slate-800 mb-2 mt-4 text-center">預約看房與了解詳情</h3>
-            <p className="text-slate-500 mb-6 font-medium text-center text-sm">
+            <h3 className="text-2xl font-black text-slate-900 mb-2 mt-4 text-center">預約看房與了解詳情</h3>
+            <p className="text-slate-600 mb-6 font-medium text-center text-sm">
               對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供精確租金與詳細資訊。
             </p>
 
-            {/* ★ 在表單上方加入房間多圖橫向預覽 */}
             {bookingRoom.images && bookingRoom.images.length > 0 && (
               <div className="flex overflow-x-auto gap-2 mb-6 custom-scrollbar pb-2">
                 {bookingRoom.images.map((img: string, idx: number) => (
@@ -509,16 +554,36 @@ function PropertiesContent() {
 
             <form onSubmit={handleLeadSubmit} className="space-y-4 mb-2">
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">您的稱呼 *</label>
-                <input required type="text" value={leadName} onChange={(e) => setLeadName(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 陳同學"/>
+                <label className="block text-xs font-bold text-slate-700 mb-1">您的稱呼 *</label>
+                <input 
+                  required 
+                  type="text" 
+                  value={leadName} 
+                  onChange={(e) => setLeadName(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="例如: 陳同學"
+                />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">聯絡電話 / WeChat *</label>
-                <input required type="text" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="輸入電話或微信號"/>
+                <label className="block text-xs font-bold text-slate-700 mb-1">聯絡電話 / WeChat *</label>
+                <input 
+                  required 
+                  type="text" 
+                  value={leadPhone} 
+                  onChange={(e) => setLeadPhone(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="輸入電話或微信號"
+                />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間</label>
-                <input type="text" value={leadReq} onChange={(e) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住"/>
+                <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間</label>
+                <input 
+                  type="text" 
+                  value={leadReq} 
+                  onChange={(e) => setLeadReq(e.target.value)} 
+                  className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
+                  placeholder="例如: 8月中入住"
+                />
               </div>
               <div className="pt-2">
                 <button type="submit" disabled={submittingLead} className="w-full bg-slate-900 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-500 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
