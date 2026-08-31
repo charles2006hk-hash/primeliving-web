@@ -205,6 +205,7 @@ function DashboardContent() {
       const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
       const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
 
+      // 【修改區塊 1】約第 198 行
       setTenantData({ 
         id: docSnap.id, 
         email: data.email || '', 
@@ -212,8 +213,10 @@ function DashboardContent() {
         daysRemaining: diffDays > 0 ? diffDays : 0, 
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
-        // ★ 核心修復：強制要求必須有真實的簽名編碼，才算真正簽署
-        isContractSigned: !!data.signature && data.signature.length > 50, 
+        
+        // ★ 核心修復：現在只要有電子簽名「或」後台判定實體已簽，就視為已簽約
+        isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
+        
         signature: data.signature || '', 
         signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
@@ -1357,11 +1360,32 @@ function DashboardContent() {
                 )}
               </div>
               
+              // 【修改區塊 2】約第 688 行 (在右側控制面板內)
               {/* 右側 / 底部 操作控制面板 */}
               {latestLease && (
-                <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none">
-                  {/* ★ 核心修復：判斷是否有真實簽名圖片 */}
-                  {tenantData?.signature ? (
+                <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none gap-4">
+                  
+                  {/* ★ 新增：Stamp Duty (印花稅單) 顯示區塊 */}
+                  {latestLease.stampDutyUrl && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-5 text-center animate-in fade-in slide-in-from-top-4">
+                      <ShieldCheck size={32} className="mx-auto text-blue-500 mb-2"/>
+                      <p className="text-sm font-black text-blue-900 mb-1">合約具備完全法律效力</p>
+                      <p className="text-[11px] text-blue-700 leading-normal mb-4">
+                        您的合約已完成政府印花稅 (Stamp Duty) 繳納手續。
+                      </p>
+                      <a 
+                        href={latestLease.stampDutyUrl} 
+                        target="_blank" 
+                        rel="noopener noreferrer" 
+                        className="w-full py-3 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2"
+                      >
+                        <Download size={16}/> 下載印花稅單
+                      </a>
+                    </div>
+                  )}
+              
+                  {/* 核心修復：判斷是否有真實簽名圖片或後台已標記簽署 */}
+                  {(tenantData?.signature || tenantData?.isContractSigned || tenantData?.isPhysicalSigned) ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-5 text-center">
                       <CheckCircle2 size={32} className="mx-auto text-emerald-500 mb-2"/>
                       <p className="text-sm font-black text-emerald-800">合約已成功簽署</p>
@@ -1385,10 +1409,6 @@ function DashboardContent() {
                   )}
                 </div>
               )}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* 檔案認證 Modal */}
       {activeModal === 'profile' && (
