@@ -23,6 +23,20 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
+// 常見香港/百家姓氏
+const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
+
+// 根據樓盤 ID 產生一個固定的姓氏 (確保每次重整網頁同一個樓盤的姓氏不會變)
+const getSurnameForProperty = (propId: string) => {
+  if (!propId) return '陳';
+  let hash = 0;
+  for (let i = 0; i < propId.length; i++) {
+    hash = propId.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const index = Math.abs(hash) % COMMON_SURNAMES.length;
+  return COMMON_SURNAMES[index];
+};
+
 // 支援繁簡體與模糊匹配的百科字典
 const ENCYCLOPEDIA_LIST = [
   { id: 'pavilia-farm', aliases: ['柏傲莊', '柏傲庄'] },
@@ -335,13 +349,12 @@ export default function HomePage(): React.JSX.Element {
                   className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative cursor-pointer"
                 >
                   
-                  {/* 滿租/已出租 遮罩 */}
+                  {/* 動態分配姓氏的預訂遮罩 */}
                   {!prop.hasPublishedRooms && (
                     <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
-                      {/* 假設 prop.rentedBy 有值，例如 "陳同學"；若無則顯示 "已滿租" */}
                       <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
                         <Sparkles size={16} className="text-yellow-200" />
-                        {prop.rentedBy ? `感謝 ${prop.rentedBy} 預訂` : '本區已滿租'}
+                        感謝 {getSurnameForProperty(prop.id)}同學 預訂
                       </div>
                     </div>
                   )}
