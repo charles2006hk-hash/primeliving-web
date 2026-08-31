@@ -7,9 +7,6 @@ import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Load
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
-// ==========================================
-// 1. 預設導出
-// ==========================================
 export default function PropertiesPage() {
   return (
     <Suspense fallback={
@@ -22,9 +19,6 @@ export default function PropertiesPage() {
   );
 }
 
-// ==========================================
-// 2. 隱私遮罩與工具函數
-// ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
@@ -43,7 +37,6 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
-// 根據 ID 計算穩定的樓層描述
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -51,7 +44,6 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// ★ 常見百家姓氏與穩定 Hash 函數 (確保同一個樓盤/單位的姓氏永遠保持一致)
 const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
 
 const getSurnameForProperty = (propId: string) => {
@@ -64,7 +56,6 @@ const getSurnameForProperty = (propId: string) => {
   return COMMON_SURNAMES[index];
 };
 
-// 價格隱私遮罩 (動態區間)
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -99,9 +90,6 @@ const findEncyclopediaId = (name: string) => {
   return matched ? matched.id : null;
 };
 
-// ==========================================
-// 3. 資料介面定義
-// ==========================================
 interface PropertyRoom {
   id: string;
   name: string;
@@ -125,9 +113,6 @@ interface PropertyRoom {
   hasEncyclopedia?: boolean;
 }
 
-// ==========================================
-// 4. 核心內容元件
-// ==========================================
 function PropertiesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -135,13 +120,11 @@ function PropertiesContent() {
 
   const [loading, setLoading] = useState(true);
   const [allRooms, setAllRooms] = useState<PropertyRoom[]>([]);
-  
   const [displayCount, setDisplayCount] = useState(30);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   
-  // ★ 增加區域過濾狀態
   const [activeFilter, setActiveFilter] = useState<string>('all');
-  const [regionFilter, setRegionFilter] = useState<string>('all'); // 新增：區域篩選
+  const [regionFilter, setRegionFilter] = useState<string>('all');
 
   const [bookingRoom, setBookingRoom] = useState<PropertyRoom | null>(null);
   const [leadName, setLeadName] = useState('');
@@ -261,17 +244,22 @@ function PropertiesContent() {
     
     setSubmittingLead(true);
     try {
+      const isSoldOut = bookingRoom.isSoldOutProperty === true;
       await addDoc(collection(db, 'inquiries'), {
         tenantId: `visitor_${Date.now()}`,
         name: leadName,
         phone: leadPhone,
-        message: `【前台找房-預約看房】\n意向樓盤：${bookingRoom.displayTitle}\n系統房源ID (參考)：${bookingRoom.id}\n預期入住與預算：${leadReq}`,
+        message: `【前台找房-${isSoldOut ? '滿租候補登記' : '預約看房'}】\n意向樓盤：${bookingRoom.displayTitle}\n系統房源ID (參考)：${bookingRoom.id}\n預期入住與預算：${leadReq}`,
         type: 'official_notice',
         status: 'New', 
         createdAt: serverTimestamp(),
         isExistingTenant: false 
       });
-      alert('✅ 預約已成功發送給管家團隊！我們將在24小時內與您聯絡安排帶看。');
+
+      alert(isSoldOut 
+        ? '✅ 候補登記已成功發送給管家團隊！一旦有房源釋出或類似優質單位，我們將第一時間聯絡您。' 
+        : '✅ 預約已成功發送給管家團隊！我們將在24小時內與您聯絡安排帶看。'
+      );
       
       if (bookingRoom.hasEncyclopedia) {
          router.push(`/encyclopedia/${bookingRoom.encyclopediaId}`);
@@ -298,7 +286,6 @@ function PropertiesContent() {
   const filteredAndScoredRooms = allRooms.map(room => {
     let score = 0;
     
-    // ★ 1. 拼接所有可搜尋文字（包含屋苑名、盤源名、地址、標籤及特徵）
     const fullSearchText = [
       room.propertyName,
       room.estateName,
@@ -310,7 +297,6 @@ function PropertiesContent() {
       ...(room.features || [])
     ].filter(Boolean).join(' ').toLowerCase();
 
-    // 搜尋框邏輯
     if (!decodedSearch) {
       score = 1; 
     } else {
@@ -320,7 +306,6 @@ function PropertiesContent() {
       });
     }
 
-    // ★ 2. 樓層與特色過濾邏輯
     if (activeFilter === 'high') {
       if (room.floorLevel !== '高層') score = -1;
     } else if (activeFilter === 'mid') {
@@ -332,10 +317,8 @@ function PropertiesContent() {
       if (!matchesType) score = -1;
     }
 
-    // ★ 3. 升級版區域篩選（包含地區關鍵字 + 熱門屋苑名稱）
     if (regionFilter !== 'all') {
       if (regionFilter === 'nte') {
-        // 新界東：沙田 / 大埔 / 火炭 / 大圍 / 太和 / 粉嶺 / 上水 / 馬鞍山
         const nteKeywords = [
           '沙田', '大埔', '火炭', '大圍', '大围', '太和', '粉嶺', '粉岭', '上水', '馬鞍山', '马鞍山', '烏溪沙', '新界',
           '柏傲莊', '柏傲庄', '名城', '星凱', '星凯', '御龍山', '御龙山', '美豐', '美丰', '美菱居', '太湖', '翠怡', '大埔中心', '新達', '新达', '第一城', '河畔', '金獅', '雲疊', '銀禧'
@@ -343,7 +326,6 @@ function PropertiesContent() {
         const isNTE = nteKeywords.some(kw => fullSearchText.includes(kw.toLowerCase()));
         if (!isNTE) score = -1;
       } else if (regionFilter === 'kowloon') {
-        // 九龍區：紅磡 / 旺角 / 九龍塘 / 土瓜灣 / 黃埔 / 尖沙咀 / 深水埗
         const kowloonKeywords = [
           '紅磡', '红磡', '旺角', '九龍', '九龙', '土瓜灣', '土瓜湾', '黃埔', '黄埔', '尖沙咀', '深水埗', '長沙灣', '长沙湾', '佐敦', '油麻地', '大角咀',
           '海濱南岸', '海滨南岸', '曦匯', '曦汇', '必嘉坊', '利港', '城南', '港灣豪庭', '港湾豪庭', '維港'
@@ -351,7 +333,6 @@ function PropertiesContent() {
         const isKowloon = kowloonKeywords.some(kw => fullSearchText.includes(kw.toLowerCase()));
         if (!isKowloon) score = -1;
       } else if (regionFilter === 'tko') {
-        // 將軍澳 / 坑口 / 寶琳 / 康城
         const tkoKeywords = [
           '將軍澳', '将军澳', '坑口', '寶琳', '宝琳', '康城', '調景嶺', '调景岭',
           '蔚藍灣畔', '蔚蓝湾畔', '南豐廣場', '南丰广场', '新都城', '東港城', '都會駅', '領都'
@@ -364,7 +345,6 @@ function PropertiesContent() {
     return { ...room, score };
   }).filter(r => (r.score ?? 0) > 0);
 
-  // 隨機混雜排序
   filteredAndScoredRooms.sort((a, b) => {
     if (b.score !== a.score) return (b.score ?? 0) - (a.score ?? 0); 
     const hashA = a.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0) % 100;
@@ -390,9 +370,7 @@ function PropertiesContent() {
             基於隱私保護，我們已將具體房號替換為樓層級別，並顯示預估租金區間。點擊卡片即可聯絡管家了解精確資訊。
           </p>
 
-          {/* ★ 過濾器區塊：區域 + 屬性篩選 */}
           <div className="space-y-4">
-            {/* 區域選項 */}
             <div className="flex flex-wrap gap-2 items-center">
               <span className="text-xs font-bold text-slate-400 mr-1">地區區域:</span>
               <button onClick={() => setRegionFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'all' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全部地區</button>
@@ -401,7 +379,6 @@ function PropertiesContent() {
               <button onClick={() => setRegionFilter('tko')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${regionFilter === 'tko' ? 'bg-orange-600 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>將軍澳 / 坑口</button>
             </div>
 
-            {/* 屬性選項 */}
             <div className="flex flex-wrap gap-2 items-center">
               <Filter size={16} className="text-slate-400 mr-1"/>
               <button onClick={() => setActiveFilter('all')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all ${activeFilter === 'all' ? 'bg-slate-900 text-white shadow-md' : 'bg-slate-100 text-slate-600 hover:bg-slate-200'}`}>全部特色</button>
@@ -441,7 +418,6 @@ function PropertiesContent() {
 
               const CardContent = (
                 <>
-                  {/* ★ 修改：SOLD OUT 跟隨主頁的溫暖感謝語（動態綁定姓氏） */}
                   {isSoldOut && (
                     <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
                       <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
@@ -500,24 +476,26 @@ function PropertiesContent() {
                            </span>
                          )}
                        </div>
+                       {/* ★ 修改點：Sold Out 的卡片也改為亮色的「候補登記」按鈕，強調可點擊 */}
                        <span className={`px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1 ${
-                         isSoldOut ? 'bg-slate-200 text-slate-500' : 'bg-slate-900 text-white hover:bg-orange-500'
+                         isSoldOut ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-900 text-white hover:bg-orange-500'
                        }`}>
-                         {isSoldOut ? '已滿租' : <>預約看房 <ArrowRight size={14}/></>}
+                         {isSoldOut ? <>候補登記 <ArrowRight size={14}/></> : <>預約看房 <ArrowRight size={14}/></>}
                        </span>
                     </div>
                   </div>
                 </>
               );
 
-              const cardClasses = `group bg-white rounded-[2rem] shadow-sm border overflow-hidden transition-all duration-300 flex flex-col relative ${
+              // ★ 修改點：允許 Sold Out 卡片具備完整點擊 hover 與手勢效果
+              const cardClasses = `group bg-white rounded-[2rem] shadow-sm border overflow-hidden transition-all duration-300 flex flex-col relative hover:shadow-2xl hover:-translate-y-2 cursor-pointer ${
                 room.isCompetitor ? 'border-purple-100 hover:border-purple-300' : 'border-slate-100 hover:border-orange-200'
-              } ${isSoldOut ? 'cursor-not-allowed opacity-90' : 'hover:shadow-2xl hover:-translate-y-2 cursor-pointer'}`;
+              } ${isSoldOut ? 'opacity-95' : ''}`;
 
               return (
                 <div 
                   key={room.id} 
-                  onClick={() => { if(!isSoldOut) setBookingRoom(room) }} 
+                  onClick={() => setBookingRoom(room)} // ★ 移除 !isSoldOut 限制， SOLD OUT 也可開啟 Modal
                   className={cardClasses}
                 >
                   {CardContent}
@@ -550,7 +528,7 @@ function PropertiesContent() {
         )}
       </div>
 
-      {/* ★ 預約表單 Modal (已完全修復文字清晰度與 Placeholder 白底看不到的問題) */}
+      {/* ★ 預約與候補 Modal (自適應一般預約與滿租候補文案) */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
@@ -560,9 +538,15 @@ function PropertiesContent() {
             </button>
             <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-orange-400 to-rose-400"></div>
             
-            <h3 className="text-2xl font-black text-slate-900 mb-2 mt-4 text-center">預約看房與了解詳情</h3>
+            <h3 className="text-2xl font-black text-slate-900 mb-2 mt-4 text-center">
+              {bookingRoom.isSoldOutProperty ? '該單位熱銷已滿租 (候補登記)' : '預約看房與了解詳情'}
+            </h3>
             <p className="text-slate-600 mb-6 font-medium text-center text-sm">
-              對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供精確租金與詳細資訊。
+              {bookingRoom.isSoldOutProperty ? (
+                <>對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？目前該單位已預訂，留下聯絡方式即可優先登記候補或由管家推薦同款熱門房源。</>
+              ) : (
+                <>對 <span className="text-orange-600 font-bold">{bookingRoom.displayTitle}</span> 感興趣嗎？請留下您的聯絡方式，專屬管家會提供精確租金與詳細資訊。</>
+              )}
             </p>
 
             {bookingRoom.images && bookingRoom.images.length > 0 && (
@@ -597,18 +581,26 @@ function PropertiesContent() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間與預算</label>
                 <input 
                   type="text" 
                   value={leadReq} 
                   onChange={(e) => setLeadReq(e.target.value)} 
                   className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
-                  placeholder="例如: 8月中入住"
+                  placeholder="例如: 8月中入住，預算 $6000 左右"
                 />
               </div>
               <div className="pt-2">
                 <button type="submit" disabled={submittingLead} className="w-full bg-slate-900 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-500 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
-                  {submittingLead ? <Loader2 className="animate-spin" size={24}/> : (bookingRoom.hasEncyclopedia ? '送出並前往查看小區百科' : '送出預約')}
+                  {submittingLead ? (
+                    <Loader2 className="animate-spin" size={24}/>
+                  ) : bookingRoom.isSoldOutProperty ? (
+                    '送出候補優先登記'
+                  ) : bookingRoom.hasEncyclopedia ? (
+                    '送出並前往查看小區百科'
+                  ) : (
+                    '送出預約'
+                  )}
                 </button>
               </div>
             </form>
