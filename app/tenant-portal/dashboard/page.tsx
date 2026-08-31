@@ -19,7 +19,7 @@ import { ref, uploadBytesResumable, getDownloadURL, getStorage } from 'firebase/
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
 
-// 安全時間戳解析器：相容 Firestore Timestamp、ISO String 與 Date 物件
+// 安全時間戳解析器
 const getSafeTime = (val: any): number => {
   if (!val) return 0;
   if (typeof val.toDate === 'function') return val.toDate().getTime();
@@ -77,12 +77,11 @@ function DashboardContent() {
     router.push('/tenant-portal'); 
   };
   
-  // ★ 手寫簽名板專屬 State
+  // ★ 手寫簽名板
   const [showSigPad, setShowSigPad] = useState(false);
   const sigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
 
-  // 繪圖事件
   const startDrawing = (e: any) => {
     setIsDrawing(true);
     const canvas = sigCanvasRef.current;
@@ -109,7 +108,6 @@ function DashboardContent() {
     if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
   };
 
-  // ★ 核心修復：提交簽名並同步更新資料庫 (消除紅字)
   const handleConfirmSignature = async () => {
     const canvas = sigCanvasRef.current;
     if (!canvas) return;
@@ -119,7 +117,6 @@ function DashboardContent() {
     try {
       const todayStr = new Date().toISOString().split('T')[0];
       
-      // 1. 更新 tenants 資料表
       await updateDoc(doc(db, 'tenants', tenantData.id), { 
         signature: base64Image, 
         signedAt: todayStr, 
@@ -128,7 +125,6 @@ function DashboardContent() {
         updatedAt: serverTimestamp() 
       });
 
-      // 2. 同步更新 documents 內的最新租約 (消除合約紅字 Unsigned 狀態)
       if (latestLease?.id) {
         await updateDoc(doc(db, 'documents', latestLease.id), { 
           'formData.tenantSignature': base64Image, 
@@ -148,7 +144,6 @@ function DashboardContent() {
     }
   };
 
-  // 取得天氣資訊
   useEffect(() => {
     fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true')
       .then(res => res.json())
@@ -174,7 +169,6 @@ function DashboardContent() {
     }
     const sessionData = JSON.parse(sessionStr);
 
-    // 1. API 獲取敏感單據資料 (繞過前端 Security Rules)
     const fetchData = async () => {
       try {
         const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
@@ -191,7 +185,6 @@ function DashboardContent() {
       }
     };
 
-    // 2. 監聽租客狀態更新 (即時倒數與合約狀態)
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
       if (!docSnap.exists()) {
         localStorage.removeItem('pm_tenant_session');
@@ -211,10 +204,7 @@ function DashboardContent() {
         daysRemaining: diffDays > 0 ? diffDays : 0, 
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
-        
-        // ★ 核心修復：現在只要有電子簽名「或」後台判定實體已簽，就視為已簽約，徹底消除紅字
         isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
-        
         signature: data.signature || '', 
         signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
@@ -236,7 +226,7 @@ function DashboardContent() {
     });
 
     fetchData(); 
-    const interval = setInterval(fetchData, 30000); // 模擬即時同步
+    const interval = setInterval(fetchData, 30000); 
 
     return () => { 
       unsubTenant(); 
@@ -244,7 +234,6 @@ function DashboardContent() {
     };
   }, [router]);
 
-  // ★ 自動預選：未來 30 天內到期單據
   useEffect(() => {
     if (tenantDocs.length > 0) {
       const today = new Date();
@@ -289,14 +278,12 @@ function DashboardContent() {
     thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
     thirtyDaysLater.setHours(23, 59, 59, 999);
 
-    // 過濾出尚未繳費的單據
     const pendingDocs = tenantDocs.filter(d => {
       const isPaid = d.status === 'Completed' || d.status === 'Paid' || d.paymentStatus === 'Paid';
       const isReview = d.paymentStatus === 'Under Review';
       return !isPaid && !isReview;
     });
 
-    // 解析金額與日期
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
       const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
@@ -329,7 +316,7 @@ function DashboardContent() {
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
 
-    const PAYDOLLAR_LIMIT_CENTS = 100000 * 100; // 10萬 HKD 轉 Cents
+    const PAYDOLLAR_LIMIT_CENTS = 100000 * 100; 
     let currentCheckoutCents = 0;
     const currentCheckoutBillIds: string[] = [];
     let isSplitNeeded = false;
@@ -680,8 +667,6 @@ function DashboardContent() {
               monthlyRent: Number(fd.monthlyRent) || 0, 
               securityDeposit: Number(fd.deposit) || 0,
               paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], 
-              
-              // ★ 核心修復：如果沒有手寫簽名，但有實體簽署標記或智能摘要，強制傳入文字，消除合約內的紅字！
               tenantSignature: fd.tenantSignature || tenantData?.signature || ((tenantData?.isPhysicalSigned || fd.isPhysicalSigned || docData.isSmartSummary) ? "【實體合約已簽署】" : ''), 
               signedAt: fd.signedAt || tenantData?.signedAt || (docData.isSmartSummary ? fd.docDate : '')
             }}
@@ -689,7 +674,6 @@ function DashboardContent() {
             isSigningLoading={isSigning} 
             showStamp={true}
             onSignComplete={async (signatureBase64) => {
-              // ... 保持不變 ...
               setIsSigning(true);
               try {
                 const todayStr = new Date().toISOString().split('T')[0];
@@ -1283,7 +1267,6 @@ function DashboardContent() {
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full max-w-[1000px] rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
             
-            {/* ★ 全螢幕手寫簽名板遮罩 */}
             {showSigPad && (
               <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in zoom-in-95 duration-200">
                 <div className="p-4 bg-slate-900 text-white flex justify-between items-center flex-none">
@@ -1316,7 +1299,6 @@ function DashboardContent() {
               </div>
             )}
 
-            {/* Modal Header */}
             <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-slate-200 flex-none relative z-20">
               <h3 className="font-black text-lg sm:text-xl text-slate-800 flex items-center">
                 <FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約
@@ -1326,7 +1308,6 @@ function DashboardContent() {
               </button>
             </div>
 
-            {/* Modal Body & 合約渲染 */}
             <div className="flex-1 overflow-y-auto flex flex-col md:flex-row relative z-10">
               <div className="flex-1 bg-slate-200 flex justify-center py-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
                 {latestLease ? (
@@ -1340,14 +1321,12 @@ function DashboardContent() {
                   </div>
                 )}
               </div>
-             {/* 右側 / 底部 操作控制面板 */}
+              
               {latestLease && (
                 <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none gap-4">
 
-                  {/* ★ 印花稅單 (Stamp Duty) 縮圖與下載 */}
                   {latestLease.stampDutyUrl && (
                     <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center animate-in fade-in slide-in-from-top-4">
-                      {/* 縮圖預覽區塊：利用 iframe scale 技巧完美預覽 PDF/圖片 */}
                       <div 
                         onClick={() => window.open(latestLease.stampDutyUrl, '_blank')}
                         className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-blue-200 relative group shadow-sm cursor-pointer"
@@ -1358,9 +1337,7 @@ function DashboardContent() {
                           className="absolute top-0 left-0 w-[200%] h-[200%] pointer-events-none origin-top-left scale-50" 
                           frameBorder="0" 
                         />
-                        {/* 隱形遮罩攔截點擊事件 */}
                         <div className="absolute inset-0 z-10 bg-transparent" />
-                        {/* Hover 放大預覽提示 */}
                         <div className="absolute inset-0 bg-blue-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
                           <Eye size={24} className="text-white drop-shadow-md" />
                         </div>
@@ -1381,10 +1358,8 @@ function DashboardContent() {
                     </div>
                   )}
 
-                  {/* ★ 已簽署合約縮圖與下載 */}
                   {(tenantData?.signature || tenantData?.isContractSigned || tenantData?.isPhysicalSigned) ? (
                     <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
-                      {/* 模擬 A4 合約縮圖的 CSS 設計 (避免 Canvas 截圖耗能) */}
                       <div 
                         onClick={handleDownloadPDF}
                         className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-emerald-200 relative group shadow-sm cursor-pointer"
@@ -1397,9 +1372,7 @@ function DashboardContent() {
                            <div className="w-full h-1 bg-slate-200 rounded-full"></div>
                            <div className="w-4/5 h-1 bg-slate-200 rounded-full"></div>
                            <div className="mt-auto flex justify-between items-end">
-                             {/* 模擬公司紅印 */}
                              <div className="w-6 h-6 rounded-full border border-red-500/50 flex items-center justify-center rotate-12"><div className="w-4 h-4 rounded-full bg-red-500/20"></div></div>
-                             {/* 模擬手寫簽名 */}
                              <div className="text-[10px] text-emerald-600 font-[cursive] -rotate-12 whitespace-nowrap">Signed</div>
                            </div>
                          </div>
@@ -1429,6 +1402,10 @@ function DashboardContent() {
                   )}
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* 檔案認證 Modal */}
       {activeModal === 'profile' && (
