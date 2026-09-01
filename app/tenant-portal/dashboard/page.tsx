@@ -20,7 +20,6 @@ const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 
 const fromCents = (cents: number) => cents / 100;
 
 // 安全時間戳解析器
-// 安全時間戳解析器
 const getSafeTime = (val: any): number => {
   if (!val) return 0;
   if (typeof val.toDate === 'function') return val.toDate().getTime();
@@ -28,7 +27,7 @@ const getSafeTime = (val: any): number => {
   return isNaN(t) ? 0 : t;
 };
 
-// ★ 新增：提取中文期數轉為數字以便排序 (第一期 -> 1)
+// ★ 提取中文期數轉為數字以便排序 (第一期 -> 1)
 const getPeriodNumber = (title: string) => {
   const match = title.match(/第([一二三四五六七八九十\d]+)期/);
   if (!match) return 999;
@@ -39,12 +38,10 @@ const getPeriodNumber = (title: string) => {
 // ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB)
 const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   return new Promise((resolve, reject) => {
-    // 如果是 PDF 或是非圖片檔案，直接放行不壓縮
     if (file.type === 'application/pdf' || !file.type.startsWith('image/')) {
       if (file.size > 5 * 1024 * 1024) return reject(new Error("PDF 檔案請勿超過 5MB"));
       return resolve(file);
     }
-
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
@@ -53,19 +50,11 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
       img.onload = () => {
         const canvas = document.createElement('canvas');
         let { width, height } = img;
-        
-        // 限制最大長寬 (1200px)，初步縮小尺寸
         const MAX_DIM = 1200;
-        if (width > height && width > MAX_DIM) {
-          height *= MAX_DIM / width;
-          width = MAX_DIM;
-        } else if (height > MAX_DIM) {
-          width *= MAX_DIM / height;
-          height = MAX_DIM;
-        }
+        if (width > height && width > MAX_DIM) { height *= MAX_DIM / width; width = MAX_DIM; } 
+        else if (height > MAX_DIM) { width *= MAX_DIM / height; height = MAX_DIM; }
         
-        canvas.width = width;
-        canvas.height = height;
+        canvas.width = width; canvas.height = height;
         const ctx = canvas.getContext('2d');
         if (!ctx) return resolve(file);
         ctx.drawImage(img, 0, 0, width, height);
@@ -74,29 +63,20 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
         let dataUrl = canvas.toDataURL('image/jpeg', quality);
         let currentSizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
 
-        // 遞迴降質直到小於指定 KB (保底畫質 0.1)
         while (currentSizeKB > maxSizeKB && quality > 0.1) {
           quality -= 0.1;
           dataUrl = canvas.toDataURL('image/jpeg', quality);
           currentSizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
         }
 
-        // 將 DataURL 轉回 File 物件
-        fetch(dataUrl)
-          .then(res => res.blob())
-          .then(blob => {
-            const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", { 
-              type: 'image/jpeg', 
-              lastModified: Date.now() 
-            });
-            resolve(newFile);
-          }).catch(() => resolve(file)); // 若轉換失敗則回傳原檔
+        fetch(dataUrl).then(res => res.blob()).then(blob => {
+          resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", { type: 'image/jpeg', lastModified: Date.now() }));
+        }).catch(() => resolve(file)); 
       };
     };
-    reader.onerror = () => resolve(file); // 若讀取失敗則回傳原檔
+    reader.onerror = () => resolve(file); 
   });
 };
-
 
 function DashboardContent() {
   const router = useRouter();
@@ -133,7 +113,6 @@ function DashboardContent() {
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  // ★ KYC 新增認證選項
   const [idType, setIdType] = useState('HKID'); 
   const [idFile, setIdFile] = useState<File | null>(null);
 
@@ -144,12 +123,8 @@ function DashboardContent() {
 
   const [weather, setWeather] = useState({ temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> });
 
-  const handleLogout = () => { 
-    localStorage.clear(); 
-    router.push('/tenant-portal'); 
-  };
+  const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
   
-  // 手寫簽名板
   const [showSigPad, setShowSigPad] = useState(false);
   const sigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -188,32 +163,14 @@ function DashboardContent() {
     setIsSigning(true);
     try {
       const todayStr = new Date().toISOString().split('T')[0];
-      
-      await updateDoc(doc(db, 'tenants', tenantData.id), { 
-        signature: base64Image, 
-        signedAt: todayStr, 
-        isContractSigned: true, 
-        status: 'Active', 
-        updatedAt: serverTimestamp() 
-      });
-
+      await updateDoc(doc(db, 'tenants', tenantData.id), { signature: base64Image, signedAt: todayStr, isContractSigned: true, status: 'Active', updatedAt: serverTimestamp() });
       if (latestLease?.id) {
-        await updateDoc(doc(db, 'documents', latestLease.id), { 
-          'formData.tenantSignature': base64Image, 
-          'formData.signedAt': todayStr, 
-          status: 'Signed', 
-          updatedAt: serverTimestamp() 
-        });
+        await updateDoc(doc(db, 'documents', latestLease.id), { 'formData.tenantSignature': base64Image, 'formData.signedAt': todayStr, status: 'Signed', updatedAt: serverTimestamp() });
       }
-
       setTenantData((prev: any) => ({ ...prev, isContractSigned: true, signature: base64Image, signedAt: todayStr }));
       setShowSigPad(false);
       alert("✅ 合約手寫簽署成功！已生成法定簽名印於合約，並同步至大後台。");
-    } catch (error) {
-      alert("❌ 簽署失敗，請檢查網路狀態。");
-    } finally {
-      setIsSigning(false);
-    }
+    } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態。"); } finally { setIsSigning(false); }
   };
 
   useEffect(() => {
@@ -223,22 +180,14 @@ function DashboardContent() {
         const t = data.current_weather.temperature;
         const code = data.current_weather.weathercode;
         let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', icon = <Sun size={28} className="text-amber-500" />;
-        if (code >= 50 && code <= 69) { 
-          desc = '下雨'; 
-          bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; 
-          suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; 
-          icon = <CloudRain size={28} className="text-blue-500" />; 
-        }
+        if (code >= 50 && code <= 69) { desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; icon = <CloudRain size={28} className="text-blue-500" />; }
         setWeather({ temp: t, desc, suggestion, bgClass, icon });
       }).catch(() => {});
   }, []);
 
   useEffect(() => {
     const sessionStr = localStorage.getItem('pm_tenant_session');
-    if (!sessionStr) { 
-      router.push('/tenant-portal'); 
-      return; 
-    }
+    if (!sessionStr) { router.push('/tenant-portal'); return; }
     const sessionData = JSON.parse(sessionStr);
 
     const fetchData = async () => {
@@ -246,30 +195,25 @@ function DashboardContent() {
         const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
         if (res.ok) {
           const { documents, inquiries } = await res.json();
-          // ★ 帳單排序：強制按時間先後排序 (升冪：舊的在前，新的在後，方便看清期數順序)
-          const sortedDocs = documents.sort((a: any, b: any) => getSafeTime(a.formData?.dueDate || a.createdAt) - getSafeTime(b.formData?.dueDate || b.createdAt));
+          // ★ 強制優先讀取 docDate (單據日期)，並加上期數排序
+          const sortedDocs = documents.sort((a: any, b: any) => {
+             const timeA = getSafeTime(a.formData?.docDate || a.formData?.dueDate || a.createdAt);
+             const timeB = getSafeTime(b.formData?.docDate || b.formData?.dueDate || b.createdAt);
+             if (timeA !== timeB) return timeA - timeB;
+             return getPeriodNumber(a.formData?.items?.[0]?.description || '') - getPeriodNumber(b.formData?.items?.[0]?.description || '');
+          });
           setTenantDocs(sortedDocs);
-
-          const sortedInqs = inquiries.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
-          setMyInquiries(sortedInqs);
+          setMyInquiries(inquiries.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt)));
         }
-      } catch (error) {
-        console.error("資料加載失敗:", error);
-      }
+      } catch (error) { console.error("資料加載失敗:", error); }
     };
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
-      if (!docSnap.exists()) {
-        localStorage.removeItem('pm_tenant_session');
-        router.push('/tenant-portal');
-        return;
-      }
-
+      if (!docSnap.exists()) { localStorage.removeItem('pm_tenant_session'); router.push('/tenant-portal'); return; }
       const data = docSnap.data();
       const end = new Date(data.leaseEnd || new Date());
       const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
-
+      
       setTenantData({ 
         id: docSnap.id, 
         email: data.email || '', 
@@ -278,71 +222,39 @@ function DashboardContent() {
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
         isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
-        signature: data.signature || '', 
-        signedAt: data.signedAt || '',
-        propertyName: data.propertyName || '', 
-        roomId: data.roomId || '', 
-        roomName: data.roomName || data.roomId || '', 
-        leaseStart: data.leaseStart || '', 
-        leaseEnd: data.leaseEnd || '', 
-        deposit: data.deposit || 0, 
-        phone: data.phone || '', 
-        identityNumber: resolvedIdNumber,
-        isPhysicalSigned: data.isPhysicalSigned || false 
+        signature: data.signature || '', signedAt: data.signedAt || '', propertyName: data.propertyName || '', roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', 
+        leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0, phone: data.phone || '', 
+        identityNumber: data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供', isPhysicalSigned: data.isPhysicalSigned || false 
       });
 
       if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
       if (data.idUploaded || data.isIdVerified || data.idCardUrl) setIsIdUploaded(true);
       if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified || data.idCardUrl)) setIsProfileComplete(true);
-      
       setLoading(false);
     });
 
     fetchData(); 
     const interval = setInterval(fetchData, 30000); 
-
-    return () => { 
-      unsubTenant(); 
-      clearInterval(interval); 
-    };
+    return () => { unsubTenant(); clearInterval(interval); };
   }, [router]);
 
   useEffect(() => {
     if (tenantDocs.length > 0) {
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-
-      const thirtyDaysLater = new Date(today);
-      thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
-      thirtyDaysLater.setHours(23, 59, 59, 999);
-
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      const thirtyDaysLater = new Date(today); thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30); thirtyDaysLater.setHours(23, 59, 59, 999);
       const autoSelectIds: string[] = [];
 
       tenantDocs.forEach(item => {
-        const isPaid = item.status === 'Completed' || item.status === 'Paid' || item.paymentStatus === 'Paid';
-        const isReview = item.paymentStatus === 'Under Review';
-        if (isPaid || isReview) return;
-
-        const fd = item.formData || {};
-        let dueDateStr = fd.dueDate || fd.docDate;
-        if (!dueDateStr) {
-          if (typeof item.createdAt?.toDate === 'function') dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
-          else if (typeof item.createdAt === 'string') dueDateStr = item.createdAt.split('T')[0];
-          else dueDateStr = new Date().toISOString().split('T')[0];
-        }
-
-        const dueDate = new Date(dueDateStr);
-        dueDate.setHours(0, 0, 0, 0);
-
-        if (dueDate > today && dueDate <= thirtyDaysLater) {
-          autoSelectIds.push(item.id);
-        }
+        if (item.status === 'Completed' || item.status === 'Paid' || item.paymentStatus === 'Paid' || item.paymentStatus === 'Under Review') return;
+        let dueDateStr = item.formData?.docDate || item.formData?.dueDate || new Date().toISOString().split('T')[0];
+        const dueDate = new Date(dueDateStr); dueDate.setHours(0, 0, 0, 0);
+        if (dueDate > today && dueDate <= thirtyDaysLater) autoSelectIds.push(item.id);
       });
-
       setSelectedOptionalBillIds(autoSelectIds);
     }
   }, [tenantDocs]);
 
+  // ★ 核心結算邏輯：排序、逾期附加費、拆單打勾
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -353,14 +265,16 @@ function DashboardContent() {
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
       let baseAmount = Number(fd.totalAmount) || Number(fd.amount) || 0;
-      let dueDateStr = fd.dueDate || fd.docDate || new Date().toISOString().split('T')[0];
+      
+      // 優先讀取單據日期 (docDate)
+      let dueDateStr = fd.docDate || fd.dueDate || new Date().toISOString().split('T')[0];
       const dueDate = new Date(dueDateStr); dueDate.setHours(0, 0, 0, 0);
       
       const isOverdue = dueDate < today;
       let lateFee = 0;
       let isOverdue30 = false;
       
-      // ★ 逾期超過 30 天，系統自動收取 5% 滯納金 (精確計算避免浮點數誤差)
+      // 逾期超過 30 天，收取 5% 滯納金
       if (isOverdue) {
          const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
          if (daysOverdue >= 30) {
@@ -375,281 +289,150 @@ function DashboardContent() {
         id: item.id, 
         title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳帳單'), 
         amount: totalAmount, 
-        baseAmount,
-        lateFee,
-        isOverdue30,
         amountCents: toCents(totalAmount), 
         dueDateStr, 
         dueDate, 
-        isOverdue, 
+        isOverdue,
+        isOverdue30,
         isDueToday: dueDate.getTime() === today.getTime() 
       };
     });
 
-    // ★ 智能排序：先比日期，日期相同再比「第 X 期」
+    // 智能排序：日期 -> 期數
     allBills.sort((a, b) => {
       const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
       if (timeDiff !== 0) return timeDiff;
       return getPeriodNumber(a.title) - getPeriodNumber(b.title);
     });
 
-    const mandatoryItems = allBills.filter(b => b.dueDate <= today);
-    const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
-
     const PAYDOLLAR_LIMIT_CENTS = 100000 * 100; 
     let currentCheckoutCents = 0;
     const currentCheckoutBillIds: string[] = [];
     let isSplitNeeded = false;
 
-    const allPayingBills = [
-      ...mandatoryItems,
-      ...optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
-    ].sort((a, b) => {
-      const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
-      if (timeDiff !== 0) return timeDiff;
-      return getPeriodNumber(a.title) - getPeriodNumber(b.title);
-    });
+    // ★ 嚴格過濾限額：只將放得下的帳單加入結帳列表 (UI 才跟著打勾)
+    for (const bill of allBills) {
+      const isMandatory = bill.isOverdue || bill.isDueToday;
+      const isSelected = isMandatory || selectedOptionalBillIds.includes(bill.id);
 
-    for (const bill of allPayingBills) {
-      if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
-        isSplitNeeded = true;
-        if (currentCheckoutBillIds.length === 0) { currentCheckoutBillIds.push(bill.id); currentCheckoutCents += bill.amountCents; }
-        break; 
+      if (isSelected) {
+        if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
+          isSplitNeeded = true;
+          continue; // 放不下，跳過不加入打勾名單
+        }
+        currentCheckoutBillIds.push(bill.id);
+        currentCheckoutCents += bill.amountCents;
       }
-      currentCheckoutBillIds.push(bill.id);
-      currentCheckoutCents += bill.amountCents;
     }
 
     return {
-      grandTotal: fromCents(allPayingBills.reduce((sum, b) => sum + b.amountCents, 0)),
+      grandTotal: fromCents(allBills.reduce((sum, b) => sum + b.amountCents, 0)),
       checkoutTotal: fromCents(currentCheckoutCents), 
       checkoutBillIds: currentCheckoutBillIds,        
       isSplitNeeded,                                  
-      mandatoryItems,
-      optionalItems,
-      allPayingBills, 
-      hasOverdue: mandatoryItems.some(b => b.isOverdue)
+      allPendingBills: allBills, 
+      hasOverdue: allBills.some(b => b.isOverdue)
     };
   }, [tenantDocs, selectedOptionalBillIds]);
 
   const initChat = () => { 
-    setChatMessages([
-      { sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }
-    ]); 
-    setChatCategory(''); 
-    setChatInput(''); 
+    setChatMessages([{ sender: 'bot', text: `尊貴的 ${tenantData?.name || ''} 您好！\n我是佳寓的智能專屬管家。請問今天有什麼可以為您效勞？`, options: ['報修與設備問題', '合約與續租查詢', '帳務與繳費問題', '其他投訴或建議'] }]); 
+    setChatCategory(''); setChatInput(''); 
   };
 
   const handleChatOption = (opt: string) => { 
     setChatCategory(opt); 
-    setChatMessages(prev => [
-      ...prev.map(m => ({...m, options: undefined})), 
-      { sender: 'user', text: opt }, 
-      { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }
-    ]); 
+    setChatMessages(prev => [...prev.map(m => ({...m, options: undefined})), { sender: 'user', text: opt }, { sender: 'bot', text: `好的，關於「${opt}」，請在下方簡述您的問題，我會為您記錄並由專人盡快回覆。` }]); 
   };
 
   const handleSendChatMessage = async (text: string) => {
     if (!text.trim()) return;
-    setChatMessages(prev => [...prev, { sender: 'user', text }]); 
-    setChatInput(''); 
-    setIsSubmittingTicket(true);
+    setChatMessages(prev => [...prev, { sender: 'user', text }]); setChatInput(''); setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), { 
-        tenantId: tenantData.id, 
-        name: tenantData.name, 
-        phone: tenantData.phone, 
-        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, 
-        category: chatCategory || '一般客服', 
-        message: text, 
-        type: 'ticket', 
-        source: 'Tenant Portal Chat', 
-        isExistingTenant: true, 
-        status: 'New', 
-        createdAt: serverTimestamp() 
-      });
-      setTimeout(() => { 
-        setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您建立專屬服務單。管家核對後會在此系統通知您，或透過 WhatsApp 聯繫。' }]); 
-        setIsSubmittingTicket(false); 
-      }, 1000);
-    } catch (e) { 
-      setIsSubmittingTicket(false); 
-    }
+      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name, phone: tenantData.phone, roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: chatCategory || '一般客服', message: text, type: 'ticket', source: 'Tenant Portal Chat', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
+      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您建立專屬服務單。管家核對後會在此系統通知您，或透過 WhatsApp 聯繫。' }]); setIsSubmittingTicket(false); }, 1000);
+    } catch (e) { setIsSubmittingTicket(false); }
   };
 
-  useEffect(() => { 
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); 
-  }, [chatMessages]);
+  useEffect(() => { chatEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [chatMessages]);
 
   const verifyPayDollarPayment = async (orderRef: string) => {
     setIsVerifying(true);
     try {
       const payingBillIds = billingSummary.checkoutBillIds;
       const exactPayingTotal = billingSummary.checkoutTotal; 
-
       const response = await fetch('/api/paydollar/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          orderRef,
-          tenantId: tenantData?.id,
-          tenantName: tenantData?.name,
-          roomInfo: tenantData?.roomInfo,
-          fallbackAmount: exactPayingTotal > 0 ? exactPayingTotal : undefined,
-          billIds: payingBillIds.length > 0 ? payingBillIds : undefined
-        }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ orderRef, tenantId: tenantData?.id, tenantName: tenantData?.name, roomInfo: tenantData?.roomInfo, fallbackAmount: exactPayingTotal > 0 ? exactPayingTotal : undefined, billIds: payingBillIds.length > 0 ? payingBillIds : undefined }),
       });
-
       const data = await response.json();
-      if (!response.ok || !data.success) {
-        throw new Error(data.error || '無法完成核銷手續');
-      }
-
+      if (!response.ok || !data.success) throw new Error(data.error || '無法完成核銷手續');
       setSelectedOptionalBillIds([]);
       if (typeof window !== 'undefined') window.history.replaceState(null, '', '/tenant-portal/dashboard');
       alert("🎉 付款成功！系統已自動為您核銷帳單並開立收據，財務系統與後台皆已同步。");
     } catch (error: any) {
-      console.error("[Verification Error]:", error);
       alert(`⚠️ 核銷異常: ${error.message}。請保留付款明細並聯繫管家。`);
       router.replace('/tenant-portal/dashboard');
-    } finally {
-      setIsVerifying(false);
-    }
+    } finally { setIsVerifying(false); }
   };
 
   useEffect(() => { 
-    const orderRef = searchParams?.get('orderRef'); 
-    const success = searchParams?.get('success'); 
-    const failed = searchParams?.get('failed');
+    const orderRef = searchParams?.get('orderRef'); const success = searchParams?.get('success'); const failed = searchParams?.get('failed');
     if (success === 'true' && orderRef) verifyPayDollarPayment(orderRef); 
-    if (failed === 'true') {
-      alert("❌ 支付失敗或已取消，請確認您的信用卡狀態後重試。");
-      router.replace('/tenant-portal/dashboard');
-    }
+    if (failed === 'true') { alert("❌ 支付失敗或已取消，請確認您的信用卡狀態後重試。"); router.replace('/tenant-portal/dashboard'); }
   }, [searchParams]);
 
   const latestLease = tenantDocs.find(d => d.type === 'Lease');
   const otherBills = tenantDocs.filter(d => ['Receipt', 'Statement'].includes(d.type));
-  const formatCurrency = (val: number | string) => new Intl.NumberFormat('zh-HK', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
 
   const handleUploadReceipt = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !tenantData) return;
-
+    const file = e.target.files?.[0]; if (!file || !tenantData) return;
     setIsUploading(true);
     try {
       const payingBillIds = billingSummary.checkoutBillIds;
       const amount = billingSummary.checkoutTotal;
-
-      await addDoc(collection(db, 'inquiries'), {
-        tenantId: tenantData.id,
-        name: tenantData.name || '',
-        phone: tenantData.phone || '',
-        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`,
-        category: '轉帳付款核對',
-        message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${amount.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`,
-        type: 'ticket',
-        status: 'In Progress',
-        amount: amount,
-        billIds: payingBillIds,
-        createdAt: serverTimestamp()
-      });
-
-      for (const billId of payingBillIds) {
-        await updateDoc(doc(db, 'documents', billId), { paymentStatus: 'Under Review', updatedAt: serverTimestamp() });
-      }
-
-      alert("✅ 入數紙已成功送出！管家將於 24 小時內確認銀行進帳並開立收據。");
-      setActiveModal('none');
-    } catch (error: any) {
-      alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。");
-    } finally {
-      setIsUploading(false);
-    }
+      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name || '', phone: tenantData.phone || '', roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: '轉帳付款核對', message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${amount.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`, type: 'ticket', status: 'In Progress', amount: amount, billIds: payingBillIds, createdAt: serverTimestamp() });
+      for (const billId of payingBillIds) { await updateDoc(doc(db, 'documents', billId), { paymentStatus: 'Under Review', updatedAt: serverTimestamp() }); }
+      alert("✅ 入數紙已成功送出！管家將於 24 小時內確認銀行進帳並開立收據。"); setActiveModal('none');
+    } catch (error: any) { alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。"); } finally { setIsUploading(false); }
   };
 
   const handlePayDollarCheckout = async () => {
     if (!tenantData || billingSummary.checkoutTotal <= 0) return alert("目前沒有需要繳納的金額。");
     setIsPayDollarLoading(true);
-
     const payingBillIds = billingSummary.checkoutBillIds;
     const amount = billingSummary.checkoutTotal;
     const orderRef = `ORD-${tenantData.id.substring(0, 5).toUpperCase()}-${Date.now()}`;
-
     try {
-      await setDoc(doc(db, 'transactions', orderRef), {
-        orderRef, 
-        tenantId: tenantData.id, 
-        tenantName: tenantData.name,
-        roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
-        amount: amount, 
-        billIds: payingBillIds,
-        status: 'Pending', 
-        gateway: 'PayDollar', 
-        createdAt: serverTimestamp()
-      });
-
+      await setDoc(doc(db, 'transactions', orderRef), { orderRef, tenantId: tenantData.id, tenantName: tenantData.name, roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, amount: amount, billIds: payingBillIds, status: 'Pending', gateway: 'PayDollar', createdAt: serverTimestamp() });
       const response = await fetch('/api/paydollar/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          amountDue: amount, 
-          tenantId: tenantData.id, 
-          tenantName: tenantData.name,
-          roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`,
-          returnUrl: window.location.origin, 
-          orderRef, 
-          payMethod: 'ALL' 
-        })
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountDue: amount, tenantId: tenantData.id, tenantName: tenantData.name, roomInfo: `${tenantData.propertyName} - ${tenantData.roomName}`, returnUrl: window.location.origin, orderRef, payMethod: 'ALL' })
       });
-
       const data = await response.json();
       if (!response.ok || !data.success) throw new Error(data.error || '無法生成支付請求');
-
-      const { paymentPayload } = data;
-      const form = document.createElement('form');
-      form.method = 'POST';
-      form.action = paymentPayload.endpoint;
-      
-      Object.entries(paymentPayload).forEach(([key, value]) => {
+      const form = document.createElement('form'); form.method = 'POST'; form.action = data.paymentPayload.endpoint;
+      Object.entries(data.paymentPayload).forEach(([key, value]) => {
         if (key !== 'endpoint' && key !== 'pMethod' && value !== undefined && value !== null) {
-          const input = document.createElement('input');
-          input.type = 'hidden'; 
-          input.name = key; 
-          input.value = String(value);
-          form.appendChild(input);
+          const input = document.createElement('input'); input.type = 'hidden'; input.name = key; input.value = String(value); form.appendChild(input);
         }
       });
-      document.body.appendChild(form);
-      form.submit();
-    } catch (error: any) {
-      alert("連線金流系統出錯：" + error.message);
-      setIsPayDollarLoading(false);
-    }
+      document.body.appendChild(form); form.submit();
+    } catch (error: any) { alert("連線金流系統出錯：" + error.message); setIsPayDollarLoading(false); }
   };
 
   const handleDownloadPDF = async () => {
     if (!contractRef.current) return;
-    const htmlToImage = (window as any).htmlToImage;
-    const jspdfObj = (window as any).jspdf;
+    const htmlToImage = (window as any).htmlToImage; const jspdfObj = (window as any).jspdf;
     if (!htmlToImage || !jspdfObj) return alert("⚠️ 系統準備中，請稍後再試！");
-    
     setIsSignDownloading(true);
     try {
       const element = contractRef.current;
-      const imgData = await htmlToImage.toPng(element, { 
-        quality: 1.0, pixelRatio: 2, backgroundColor: '#ffffff', width: 794, height: 1123, cacheBust: true,
-        filter: (node: HTMLElement) => (node instanceof HTMLImageElement ? node.complete && node.naturalWidth > 0 : true),
-        style: { transform: 'none', transformOrigin: 'top left', margin: '0', position: 'relative' }
-      });
+      const imgData = await htmlToImage.toPng(element, { quality: 1.0, pixelRatio: 2, backgroundColor: '#ffffff', width: 794, height: 1123, cacheBust: true, filter: (node: HTMLElement) => (node instanceof HTMLImageElement ? node.complete && node.naturalWidth > 0 : true), style: { transform: 'none', transformOrigin: 'top left', margin: '0', position: 'relative' } });
       const pdf = new jspdfObj.jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
       pdf.addImage(imgData, 'PNG', 0, 0, pdf.internal.pageSize.getWidth(), pdf.internal.pageSize.getHeight());
       pdf.save(`Contract_${tenantData.name}.pdf`);
-    } catch (error) { 
-      alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); 
-    } finally { 
-      setIsSignDownloading(false); 
-    }
+    } catch (error) { alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); } finally { setIsSignDownloading(false); }
   };
 
   const handleSubmitTicket = async (e: React.FormEvent) => {
@@ -657,67 +440,25 @@ function DashboardContent() {
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
     setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), {
-        tenantId: tenantData.id, 
-        name: tenantData.name || '', 
-        phone: tenantData.phone || '',
-        roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, 
-        category: ticketCategory, 
-        message: ticketDesc, 
-        type: 'ticket', 
-        isExistingTenant: true, 
-        status: 'New', 
-        createdAt: serverTimestamp()
-      });
-      alert("✅ 報修單已送出！進度將會顯示於右上角小鈴鐺通知。"); 
-      setActiveModal('none'); 
-      setTicketDesc(''); 
-      setIsPhotoUploaded(false); 
-      setTicketCategory('冷氣水電');
-    } catch (error) { 
-      alert("報修失敗。"); 
-    } finally { 
-      setIsSubmittingTicket(false); 
-    }
+      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name || '', phone: tenantData.phone || '', roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: ticketCategory, message: ticketDesc, type: 'ticket', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
+      alert("✅ 報修單已送出！進度將會顯示於右上角小鈴鐺通知。"); setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
+    } catch (error) { alert("報修失敗。"); } finally { setIsSubmittingTicket(false); }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emergencyContact.name || !emergencyContact.phone) return alert("請填寫緊急聯絡人！");
     if (!idFile) return alert("請上傳證件圖檔或PDF！");
-
     setIsSavingProfile(true);
     try {
       const storage = getStorage();
-      
       const compressedFile = await compressImage(idFile);
-      
       const idRef = ref(storage, `tenants/${tenantData.id}/kyc/${idType}_${Date.now()}_${compressedFile.name}`);
       await uploadBytesResumable(idRef, compressedFile);
       const fileUrl = await getDownloadURL(idRef);
-
-      await updateDoc(doc(db, 'tenants', tenantData.id), { 
-        emergencyContact, 
-        idCardUrl: fileUrl, 
-        idUploaded: true, 
-        isIdVerified: true, 
-        kycUpdatedAt: serverTimestamp() 
-      });
-
-      setIsProfileComplete(true);
-      alert("✅ KYC 檔案已成功上傳！系統已自動壓縮處理並安全存檔。");
-      setActiveModal('none');
-    } catch (error: any) {
-      alert(`上傳失敗: ${error.message}`);
-    } finally {
-      setIsSavingProfile(false);
-    }
-  };
-
-  const formatDetailAddress = (fullAddr: string, shortName: string) => {
-    if (!fullAddr) return '';
-    if (!shortName) return fullAddr;
-    return fullAddr.replace(new RegExp(`^${shortName}\\s*`, 'i'), '').trim();
+      await updateDoc(doc(db, 'tenants', tenantData.id), { emergencyContact, idCardUrl: fileUrl, idUploaded: true, isIdVerified: true, kycUpdatedAt: serverTimestamp() });
+      setIsProfileComplete(true); alert("✅ KYC 檔案已成功上傳！系統已自動處理並安全存檔。"); setActiveModal('none');
+    } catch (error: any) { alert(`上傳失敗: ${error.message}`); } finally { setIsSavingProfile(false); }
   };
 
   const renderA4Document = (docData: any, isSigningMode = false) => {
@@ -727,176 +468,46 @@ function DashboardContent() {
       return (
         <div ref={isSigningMode ? contractRef : undefined} className="w-[794px] min-h-[1123px] bg-white text-slate-900 font-sans relative shadow-lg origin-top mx-auto">
           <ContractTemplate
-            data={{
-              tenantName: fd.tenantName || tenantData?.name || '未填寫租客', 
-              tenantPhone: fd.tenantPhone || tenantData?.phone || '未提供',
-              tenantIdNumber: fd.tenantIdNumber || tenantData?.identityNumber || '未提供', 
-              propertyAddress: fd.propertyAddress || tenantData?.propertyName || '',
-              roomName: fd.roomName || tenantData?.roomName || '', 
-              leaseStart: fd.leaseStart || tenantData?.leaseStart || '',
-              leaseEnd: fd.leaseEnd || tenantData?.leaseEnd || '', 
-              monthlyRent: Number(fd.monthlyRent) || 0, 
-              securityDeposit: Number(fd.deposit) || 0,
-              paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], 
-              tenantSignature: fd.tenantSignature || tenantData?.signature || ((tenantData?.isPhysicalSigned || fd.isPhysicalSigned || docData.isSmartSummary) ? "【實體合約已簽署】" : ''), 
-              signedAt: fd.signedAt || tenantData?.signedAt || (docData.isSmartSummary ? fd.docDate : '')
-            }}
-            isSigningMode={isSigningMode && !tenantData?.isContractSigned} 
-            isSigningLoading={isSigning} 
-            showStamp={true}
+            data={{ tenantName: fd.tenantName || tenantData?.name || '未填寫租客', tenantPhone: fd.tenantPhone || tenantData?.phone || '未提供', tenantIdNumber: fd.tenantIdNumber || tenantData?.identityNumber || '未提供', propertyAddress: fd.propertyAddress || tenantData?.propertyName || '', roomName: fd.roomName || tenantData?.roomName || '', leaseStart: fd.leaseStart || tenantData?.leaseStart || '', leaseEnd: fd.leaseEnd || tenantData?.leaseEnd || '', monthlyRent: Number(fd.monthlyRent) || 0, securityDeposit: Number(fd.deposit) || 0, paymentSchedule: Array.isArray(fd.paymentSchedule) ? fd.paymentSchedule : [], tenantSignature: fd.tenantSignature || tenantData?.signature || ((tenantData?.isPhysicalSigned || fd.isPhysicalSigned || docData.isSmartSummary) ? "【實體合約已簽署】" : ''), signedAt: fd.signedAt || tenantData?.signedAt || (docData.isSmartSummary ? fd.docDate : '') }}
+            isSigningMode={isSigningMode && !tenantData?.isContractSigned} isSigningLoading={isSigning} showStamp={true}
             onSignComplete={async (signatureBase64) => {
               setIsSigning(true);
               try {
                 const todayStr = new Date().toISOString().split('T')[0];
-                await updateDoc(doc(db, 'tenants', tenantData.id), { 
-                  signature: signatureBase64, 
-                  signedAt: todayStr, 
-                  isContractSigned: true, 
-                  status: 'Active', 
-                  updatedAt: serverTimestamp() 
-                });
-                if (latestLease?.id) {
-                  await updateDoc(doc(db, 'documents', latestLease.id), { 
-                    'formData.tenantSignature': signatureBase64, 
-                    'formData.signedAt': todayStr, 
-                    status: 'Signed', 
-                    updatedAt: serverTimestamp() 
-                  });
-                }
+                await updateDoc(doc(db, 'tenants', tenantData.id), { signature: signatureBase64, signedAt: todayStr, isContractSigned: true, status: 'Active', updatedAt: serverTimestamp() });
+                if (latestLease?.id) await updateDoc(doc(db, 'documents', latestLease.id), { 'formData.tenantSignature': signatureBase64, 'formData.signedAt': todayStr, status: 'Signed', updatedAt: serverTimestamp() });
                 alert("✅ 合約手寫簽署成功！此法定簽名筆跡已同步至您的專屬後台。");
-              } catch (error) { 
-                alert("❌ 簽署失敗，請檢查網路狀態或稍後再試。"); 
-              } finally { 
-                setIsSigning(false); 
-              }
+              } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態或稍後再試。"); } finally { setIsSigning(false); }
             }}
           />
         </div>
       );
     }
-    const fd = docData.formData || {}; 
-    const items = docData.items || [];
-    const baseRent = Number(fd.monthlyRent) || 0; 
-    const deposit = Number(fd.deposit) || 0;
+    const fd = docData.formData || {}; const items = docData.items || [];
+    const baseRent = Number(fd.monthlyRent) || 0; const deposit = Number(fd.deposit) || 0;
     const extraTotal = items.reduce((sum: number, item: any) => sum + Number(item.amount), 0);
     const receiptTotal = baseRent + deposit + extraTotal;
     const statementBalance = (Number(fd.totalReceived)||0) - (Number(fd.totalReceivable)||0) - (Number(fd.reservedDamages)||0);
     const formatCurrencyStr = (val: number | string) => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'HKD' }).format(Number(val) || 0);
-    const displayAddress = formatDetailAddress(fd.propertyAddress || tenantData?.propertyName, tenantData?.propertyName);
+    const displayAddress = (fd.propertyAddress || tenantData?.propertyName).replace(new RegExp(`^${tenantData?.propertyName}\\s*`, 'i'), '').trim();
     const activeTenantSignature = fd.tenantSignature || tenantData.signature || ((tenantData.isPhysicalSigned || fd.isPhysicalSigned) ? tenantData.name : '');
 
     return (
       <div className="w-[794px] h-[1123px] bg-white px-[75px] py-[56px] text-slate-900 font-sans relative shadow-lg origin-top mx-auto" style={{ boxSizing: 'border-box' }}>
-        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4">
-          <img src="/PrimelivingLetterhead.jpg" alt="Logo" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
-          <div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div>
-        </div>
-        <div className="text-right mb-6">
-          <h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2>
-          <p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p>
-          <p className="text-xs font-mono mt-3">Date: {fd.docDate}</p>
-        </div>
+        <div className="flex flex-col items-center mb-5 border-b-[3px] border-[#1e293b] pb-4"><img src="/PrimelivingLetterhead.jpg" alt="Logo" className="h-16 object-contain mb-2" onError={(e) => { e.currentTarget.style.display = 'none'; }}/><div className="text-[11px] font-bold text-slate-600 tracking-wide text-center">地址：新界沙田石門新貿中心B座22樓11室 | 電話：3996 9796 | 電郵：info@primelivinghk.com</div></div>
+        <div className="text-right mb-6"><h2 className="text-xl font-black uppercase tracking-widest text-slate-800">{docData.type === 'Receipt' ? 'OFFICIAL RECEIPT' : docData.type === 'Statement' ? 'ACCOUNT STATEMENT' : 'TERMINATION AGREEMENT'}</h2><p className="text-sm font-bold text-slate-600 tracking-[0.5em] mt-1">{docData.type === 'Receipt' ? '正 式 收 據' : docData.type === 'Statement' ? '對 數 結 算 單' : '退 租 協 議'}</p><p className="text-xs font-mono mt-3">Date: {fd.docDate}</p></div>
         <div className="flex justify-between gap-6 mb-6">
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3>
-            <p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p>
-          </div>
-          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50">
-            <h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3>
-            <p className="font-bold text-sm">{fd.tenantName || tenantData.name || '__________________'}</p>
-            <p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || tenantData.phone || '__________________'}</p>
-            <p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || tenantData.identityNumber || '未提供'}</p>
-          </div>
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Landlord / Manager</h3><p className="font-bold text-sm">PRIME LIVING PROPERTY(HK)<br/>MANAGEMENT</p></div>
+          <div className="flex-1 border border-slate-300 p-4 rounded-sm bg-slate-50/50"><h3 className="text-xs font-bold uppercase text-slate-500 mb-2 border-b border-slate-300 pb-2">Tenant (租客)</h3><p className="font-bold text-sm">{fd.tenantName || tenantData.name || '__________________'}</p><p className="text-xs mt-1 font-mono">Phone: {fd.tenantPhone || tenantData.phone || '__________________'}</p><p className="text-xs mt-1 font-mono">ID: {fd.tenantIdNumber || tenantData.identityNumber || '未提供'}</p></div>
         </div>
-        <div className="mb-6">
-          <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div>
-          <table className="w-full text-sm border-collapse border border-slate-300 table-fixed">
-            <tbody>
-              <tr>
-                <td className="border border-slate-300 p-3 font-bold w-1/4 break-words">Property Address</td>
-                <td colSpan={3} className="border border-slate-300 p-3 font-bold break-words">{displayAddress}</td>
-              </tr>
-              <tr>
-                <td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td>
-                <td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4 break-words">{fd.roomName || tenantData.roomName}</td>
-                <td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td>
-                <td className="border border-slate-300 p-3 font-mono text-xs w-1/4 break-words">{fd.leaseStart || tenantData.leaseStart} to {fd.leaseEnd || tenantData.leaseEnd}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
+        <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Premises Details (物業詳情)</div><table className="w-full text-sm border-collapse border border-slate-300 table-fixed"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-1/4 break-words">Property Address</td><td colSpan={3} className="border border-slate-300 p-3 font-bold break-words">{displayAddress}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-1/4">Room No.</td><td className="border border-slate-300 p-3 font-bold text-blue-700 w-1/4 break-words">{fd.roomName || tenantData.roomName}</td><td className="border border-slate-300 p-3 font-bold w-1/4">Lease Term</td><td className="border border-slate-300 p-3 font-mono text-xs w-1/4 break-words">{fd.leaseStart || tenantData.leaseStart} to {fd.leaseEnd || tenantData.leaseEnd}</td></tr></tbody></table></div>
         {docData.type === 'Statement' ? (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <tbody>
-                <tr>
-                  <td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td>
-                  <td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td>
-                </tr>
-                <tr>
-                  <td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td>
-                  <td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td>
-                </tr>
-                <tr>
-                  <td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td>
-                  <td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td>
-                </tr>
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-50 font-black">
-                  <td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td>
-                  <td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td>
-                </tr>
-                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
-              </tfoot>
-            </table>
-          </div>
+          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Account Reconciliation (結算明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><tbody><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Receivable (應收總額)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(fd.totalReceivable)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4">Total Received / Deposit (已收總額/押金)</td><td className="border border-slate-300 p-3 text-right font-mono text-emerald-700">{formatCurrencyStr(fd.totalReceived)}</td></tr><tr><td className="border border-slate-300 p-3 font-bold w-3/4 text-red-600">Reserved Deductions / Damages (預留損耗及扣款)</td><td className="border border-slate-300 p-3 text-right font-mono text-red-600">- {formatCurrencyStr(fd.reservedDamages)}</td></tr></tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">FINAL BALANCE (最終結餘):<br/><span className="text-[10px] font-normal text-slate-500">(正數為需退還租客 / 負數為租客需補繳)</span></td><td className={`border border-slate-300 p-3 text-right font-mono text-xl ${statementBalance >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{statementBalance >= 0 ? '+' : ''}{formatCurrencyStr(statementBalance)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
         ) : docData.type === 'Receipt' ? (
-          <div className="mb-6">
-            <div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div>
-            <table className="w-full text-sm border-collapse border border-slate-300">
-              <thead>
-                <tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr>
-              </thead>
-              <tbody>
-                {baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}
-                {deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}
-                {items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}
-              </tbody>
-              <tfoot>
-                <tr className="bg-slate-50 font-black">
-                  <td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td>
-                  <td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td>
-                </tr>
-                <tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr>
-              </tfoot>
-            </table>
-          </div>
+          <div className="mb-6"><div className="bg-[#1e293b] text-white px-3 py-2 text-xs font-bold uppercase">Payment Received (收款明細)</div><table className="w-full text-sm border-collapse border border-slate-300"><thead><tr className="bg-slate-50"><th className="border border-slate-300 p-3 text-left">Description</th><th className="border border-slate-300 p-3 text-right w-32">Amount</th></tr></thead><tbody>{baseRent > 0 && <tr><td className="border border-slate-300 p-3">Monthly Rent (租金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(baseRent)}</td></tr>}{deposit > 0 && <tr><td className="border border-slate-300 p-3">Security Deposit (按金)</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(deposit)}</td></tr>}{items.map((item:any, i:number) => <tr key={i}><td className="border border-slate-300 p-3 text-slate-600">+ {item.desc}</td><td className="border border-slate-300 p-3 text-right font-mono">{formatCurrencyStr(item.amount)}</td></tr>)}</tbody><tfoot><tr className="bg-slate-50 font-black"><td className="border border-slate-300 p-3 text-right">TOTAL RECEIVED (總共收取):</td><td className="border border-slate-300 p-3 text-right font-mono text-lg">{formatCurrencyStr(receiptTotal)}</td></tr><tr><td colSpan={2} className="border border-slate-300 p-2 text-xs">Payment Method: <span className="font-bold">{fd.paymentMethod}</span></td></tr></tfoot></table></div>
         ) : null}
         {fd.remarks && <div className="mb-8 p-3 border-b border-slate-300 text-xs leading-relaxed"><span className="font-bold block mb-1">Remarks (備註):</span><span className="whitespace-pre-wrap">{fd.remarks}</span></div>}
-        <div className="absolute bottom-[60px] left-[75px] right-[75px] grid grid-cols-2 gap-16">
-           <div className="border-t border-slate-800 text-center relative pt-2">
-             <p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>
-             {(docData.isCompanyChopApplied || docData.stampPos) && (
-               <div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '20px', top: docData.stampPos?.y || '-60px', width: '120px', height: '120px' }}>
-                 <img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" style={{ filter: 'invert(16%) sepia(85%) saturate(3661%) hue-rotate(216deg) brightness(91%) contrast(103%)' }} onError={(e) => { e.currentTarget.style.display = 'none'; }}/>
-               </div>
-             )}
-           </div>
-           <div className="border-t border-slate-800 text-center relative pt-2">
-             {activeTenantSignature && (
-               <div className="absolute bottom-[100%] left-0 w-full text-center z-20 print:opacity-100 opacity-80 mb-[-12px] pointer-events-none">
-                 <p className="text-[40px] text-slate-800 leading-none whitespace-nowrap" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>
-                   {activeTenantSignature}
-                 </p>
-               </div>
-             )}
-             <p className="font-bold text-xs uppercase relative z-10">Tenant</p>
-             <p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p>
-           </div>
-        </div>
+        <div className="absolute bottom-[60px] left-[75px] right-[75px] grid grid-cols-2 gap-16"><div className="border-t border-slate-800 text-center relative pt-2"><p className="font-bold text-xs uppercase relative z-10">Landlord / Authorized Agent</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">業主 / 授權代理人</p>{(docData.isCompanyChopApplied || docData.stampPos) && (<div className="absolute z-0 pointer-events-none" style={{ left: docData.stampPos?.x || '20px', top: docData.stampPos?.y || '-60px', width: '120px', height: '120px' }}><img src="/stamp.png" alt="Company Stamp" className="w-full h-full object-contain mix-blend-multiply" style={{ filter: 'invert(16%) sepia(85%) saturate(3661%) hue-rotate(216deg) brightness(91%) contrast(103%)' }} onError={(e) => { e.currentTarget.style.display = 'none'; }}/></div>)}</div><div className="border-t border-slate-800 text-center relative pt-2">{activeTenantSignature && (<div className="absolute bottom-[100%] left-0 w-full text-center z-20 print:opacity-100 opacity-80 mb-[-12px] pointer-events-none"><p className="text-[40px] text-slate-800 leading-none whitespace-nowrap" style={{ fontFamily: "'Brush Script MT', 'Cedarville Cursive', cursive" }}>{activeTenantSignature}</p></div>)}<p className="font-bold text-xs uppercase relative z-10">Tenant</p><p className="text-[10px] text-slate-500 mt-1 relative z-10">租客簽署</p></div></div>
       </div>
     );
   };
@@ -947,9 +558,11 @@ function DashboardContent() {
                 </div>
               </div>
             </div>
-            <button onClick={() => setActiveModal('notifications')} className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' : 'bg-white/60 border-white/60 hover:shadow-md'}`}>
-              <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') ? 'text-red-600' : 'text-slate-600'} />
-              {myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') && (
+            
+            {/* ★ 逾期帳單通知鈴鐺邏輯 */}
+            <button onClick={() => setActiveModal('notifications')} className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' : 'bg-white/60 border-white/60 hover:shadow-md'}`}>
+              <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue ? 'text-red-600' : 'text-slate-600'} />
+              {(myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue) && (
                 <span className="absolute top-1.5 right-1.5 flex h-3.5 w-3.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-red-500 border-2 border-white"></span>
@@ -966,13 +579,13 @@ function DashboardContent() {
                 {billingSummary.hasOverdue && !billingSummary.isSplitNeeded && (
                   <div className="bg-red-500/20 border border-red-500/40 text-red-300 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 animate-pulse relative z-10">
                     <AlertCircle size={16} className="text-red-400 shrink-0"/>
-                    <span>注意：您有已逾期的帳單，請儘速完成繳付！</span>
+                    <span>注意：您有逾期的帳單尚未繳付，系統已為您自動加收 5% 逾期附加費，請儘速繳付！</span>
                   </div>
                 )}
                 {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
                   <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
                     <Clock size={16} className="text-amber-400 shrink-0"/>
-                    <span>提示：您有即將於到期的帳單，已為您預設勾選可一併結算。</span>
+                    <span>提示：您有即將到期的帳單，已為您預設勾選可一併結算。</span>
                   </div>
                 )}
                 {billingSummary.isSplitNeeded && (
@@ -1005,30 +618,39 @@ function DashboardContent() {
                   {showBillDetails && (
                     <div className="bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
                       <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本次結帳金額明細：</p>
-                      {billingSummary.allPayingBills.length === 0 ? (
+                      {billingSummary.allPendingBills.length === 0 ? (
                         <p className="text-slate-400 py-1">目前無任何待繳單據</p>
                       ) : (
-                        billingSummary.allPayingBills.map(item => (
-                          <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
-                            <div className="flex items-center gap-2">
-                              {/* 只有未來的帳單可以點擊取消勾選，逾期或今天的強制鎖定打勾 */}
-                              {item.dueDate > new Date(new Date().setHours(0,0,0,0)) ? (
-                                <button onClick={() => setSelectedOptionalBillIds(prev => selectedOptionalBillIds.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="text-orange-400 hover:text-orange-300">
-                                  {selectedOptionalBillIds.includes(item.id) ? <CheckSquare size={14} className="shrink-0"/> : <Square size={14} className="shrink-0 text-slate-400"/>}
+                        billingSummary.allPendingBills.map(item => {
+                          const isChecked = billingSummary.checkoutBillIds.includes(item.id);
+                          const isMandatory = item.isOverdue || item.isDueToday;
+
+                          return (
+                            <div key={item.id} className={`flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10 ${!isChecked ? 'opacity-50' : ''}`}>
+                              <div className="flex items-center gap-2">
+                                <button 
+                                  disabled={isMandatory && isChecked} 
+                                  onClick={() => {
+                                    if (isMandatory) return;
+                                    setSelectedOptionalBillIds(prev => 
+                                      prev.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id]
+                                    );
+                                  }}
+                                  className={`flex items-center justify-center transition-colors ${isMandatory ? 'cursor-not-allowed opacity-70' : 'cursor-pointer hover:opacity-100'}`}
+                                >
+                                  {isChecked ? <CheckSquare size={14} className="text-orange-500 shrink-0"/> : <Square size={14} className="text-slate-500 shrink-0"/>}
                                 </button>
-                              ) : (
-                                <CheckSquare size={14} className="text-orange-500 opacity-50 shrink-0 cursor-not-allowed"/>
-                              )}
-                              
-                              <span className="flex items-center gap-1.5 flex-wrap">
-                                {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
-                                {item.isOverdue30 && <span className="bg-rose-500/30 text-rose-200 text-[9px] px-1.5 py-0.5 rounded font-black border border-rose-500/30 animate-pulse">包含 5% 滯納金</span>}
-                                {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                              </span>
+                                
+                                <span className={`flex items-center gap-1.5 flex-wrap ${!isChecked ? 'line-through' : ''}`}>
+                                  {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                                  {item.isOverdue30 && <span className="bg-rose-500/30 text-rose-200 text-[9px] px-1.5 py-0.5 rounded font-black border border-rose-500/30 animate-pulse">包含 5% 滯納金</span>}
+                                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                                </span>
+                              </div>
+                              <span className={`font-mono font-bold ${item.isOverdue30 ? 'text-rose-400' : ''}`}>${item.amount.toLocaleString()}</span>
                             </div>
-                            <span className={`font-mono font-bold ${item.isOverdue30 ? 'text-rose-400' : ''}`}>${item.amount.toLocaleString()}</span>
-                          </div>
-                        ))
+                          )
+                        })
                       )}
                     </div>
                   )}
@@ -1143,10 +765,24 @@ function DashboardContent() {
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-4 custom-scrollbar">
-              {myInquiries.length === 0 ? (
+              {/* ★ 自動生成的逾期通知警告 (置頂) */}
+              {billingSummary.hasOverdue && (
+                <div className="bg-white p-4 rounded-xl border border-red-200 shadow-sm relative overflow-hidden mb-4 animate-in slide-in-from-top-2">
+                  <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
+                  <div className="flex justify-between items-start mb-2 pl-2">
+                    <span className="text-xs font-bold text-red-700 flex items-center"><AlertCircle size={14} className="mr-1"/> 系統自動催繳</span>
+                    <span className="text-[10px] text-slate-400 font-mono">今天</span>
+                  </div>
+                  <p className="text-sm font-bold text-slate-800 pl-2 whitespace-pre-wrap">
+                    您有逾期尚未繳納的帳單。若逾期超過 30 天，系統已為您自動加收 5% 的逾期附加費，請盡速前往繳款以免影響居住權益。
+                  </p>
+                </div>
+              )}
+
+              {myInquiries.length === 0 && !billingSummary.hasOverdue ? (
                 <div className="text-center py-10 text-slate-400">
                   <Bell size={40} className="mx-auto mb-3 opacity-50"/>
-                  <p className="text-sm font-bold">目前沒有任何通知</p>
+                  <p className="text-sm font-bold">目前沒有任何管家通知</p>
                 </div>
               ) : (
                 myInquiries.map(log => {
@@ -1155,11 +791,8 @@ function DashboardContent() {
                   
                   const handleDeleteLog = async () => {
                     if (confirm('確定要刪除這條通知紀錄嗎？')) {
-                      try {
-                        await deleteDoc(doc(db, 'inquiries', log.id));
-                      } catch (e) {
-                        alert('刪除失敗');
-                      }
+                      try { await deleteDoc(doc(db, 'inquiries', log.id)); } 
+                      catch (e) { alert('刪除失敗'); }
                     }
                   };
 
@@ -1635,11 +1268,6 @@ function DashboardContent() {
                 </div>
               ) : (
                 [...otherBills]
-                  .sort((a, b) => {
-                    const dateA = getSafeTime(a.formData?.dueDate || a.createdAt);
-                    const dateB = getSafeTime(b.formData?.dueDate || b.createdAt);
-                    return dateA - dateB;
-                  })
                   .map(doc => {
                     const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
                     const isPending = doc.status === 'Pending' || doc.paymentStatus === 'Unpaid';
@@ -1657,7 +1285,7 @@ function DashboardContent() {
                               {isPending && <span className="bg-amber-100 text-amber-700 text-[9px] px-1.5 py-0.5 rounded font-black border border-amber-200 whitespace-nowrap">待繳費</span>}
                             </p>
                             <p className="text-[10px] text-slate-400 font-mono mt-1">
-                              到期/更新日: {doc.formData?.dueDate || doc.formData?.docDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : (typeof doc.createdAt === 'string' ? doc.createdAt.split('T')[0] : ''))}
+                              到期/更新日: {doc.formData?.docDate || doc.formData?.dueDate || (doc.createdAt?.toDate ? doc.createdAt.toDate().toLocaleDateString() : (typeof doc.createdAt === 'string' ? doc.createdAt.split('T')[0] : ''))}
                             </p>
                           </div>
                         </div>
@@ -1694,9 +1322,6 @@ function DashboardContent() {
   );
 } 
 
-// ==========================================
-// Default Export
-// ==========================================
 export default function DashboardPage() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>}>
