@@ -113,6 +113,18 @@ function DashboardContent() {
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
+// ★ 評價模塊狀態
+  const [rating, setRating] = useState(5);
+  const [reviewText, setReviewText] = useState('');
+  const [isSubmittingReview, setIsSubmittingReview] = useState(false);
+
+  // ★ 退租管理模塊狀態
+  const [surrenderStep, setSurrenderStep] = useState<1 | 2>(1);
+  const [moveOutDate, setMoveOutDate] = useState('');
+  const [surrenderReason, setSurrenderReason] = useState('');
+  const [surrenderFiles, setSurrenderFiles] = useState<File[]>([]);
+  const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
+  const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [idType, setIdType] = useState('HKID'); 
   const [idFile, setIdFile] = useState<File | null>(null);
 
@@ -461,6 +473,75 @@ function DashboardContent() {
     } catch (error: any) { alert(`上傳失敗: ${error.message}`); } finally { setIsSavingProfile(false); }
   };
 
+  // ★ 處理好評送出
+  const handleSubmitReview = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!reviewText.trim()) return alert("請寫下您的評價建議！");
+    setIsSubmittingReview(true);
+    try {
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
+        category: '服務評價與建議', message: `【租客評價：${rating} 顆星 ⭐】\n${reviewText}`,
+        type: 'review', status: 'Resolved', createdAt: serverTimestamp()
+      });
+      alert("💖 感謝您的寶貴評價！我們將持續提供更優質的服務。");
+      setActiveModal('none'); setReviewText(''); setRating(5);
+    } catch (error) { alert("送出失敗，請重試。"); } 
+    finally { setIsSubmittingReview(false); }
+  };
+
+  // ★ 處理退租申請與簽署
+  const handleConfirmSurrender = async () => {
+    const canvas = surrenderSigCanvasRef.current;
+    if (!canvas || !moveOutDate) return alert("請確保日期已填寫並完成簽名！");
+    
+    setIsSubmittingSurrender(true);
+    try {
+      const storage = getStorage();
+      const uploadedFileUrls: string[] = [];
+      const base64Signature = canvas.toDataURL('image/png');
+      const todayStr = new Date().toISOString().split('T')[0];
+
+      // 1. 上傳還原照片/影片 (支援圖片壓縮)
+      for (const file of surrenderFiles) {
+        const isImage = file.type.startsWith('image/');
+        const fileToUpload = isImage ? await compressImage(file) : file;
+        const fileRef = ref(storage, `tenants/${tenantData.id}/surrender/${Date.now()}_${fileToUpload.name}`);
+        await uploadBytesResumable(fileRef, fileToUpload);
+        uploadedFileUrls.push(await getDownloadURL(fileRef));
+      }
+
+      // 2. 生成具有香港法律效力的退租單據紀錄 (Termination Agreement)
+      await addDoc(collection(db, 'documents'), {
+        type: 'Termination',
+        status: 'Signed',
+        formData: {
+          tenantId: tenantData.id, tenantName: tenantData.name,
+          propertyAddress: tenantData.propertyName, roomNo: tenantData.roomName,
+          docDate: todayStr, dueDate: moveOutDate,
+          moveOutDate: moveOutDate, reason: surrenderReason,
+          evidenceUrls: uploadedFileUrls,
+          tenantSignature: base64Signature,
+          signedAt: todayStr,
+          remarks: '租客已簽署退租交吉確認書，同意於交吉日騰空交還物業。'
+        },
+        createdAt: serverTimestamp(), updatedAt: serverTimestamp()
+      });
+
+      // 3. 發送管家通知單 (Ticket)
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
+        category: '退租與交吉申請', 
+        message: `【退租交吉通知】\n預計遷出日：${moveOutDate}\n原因：${surrenderReason || '無'}\n*租客已完成線上退租協議簽署並上傳交吉照片/影片，請管家安排退租點交與按金結算事宜。`,
+        type: 'ticket', status: 'New', createdAt: serverTimestamp()
+      });
+
+      alert("✅ 退租協議簽署成功！管家已收到您的交吉通知，後續將與您結算按金。");
+      setActiveModal('none'); setSurrenderStep(1); setSurrenderFiles([]);
+    } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態。"); } 
+    finally { setIsSubmittingSurrender(false); }
+  };
+
   const renderA4Document = (docData: any, isSigningMode = false) => {
     if (!docData) return null;
     if (docData.type === 'Lease') {
@@ -741,6 +822,34 @@ function DashboardContent() {
                   </div>
                   <ChevronRight size={18} className="text-orange-400 group-hover:text-orange-500 transition-colors" />
                 </button>
+
+                {/* ★ 新增：退租管理模塊按鈕 */}
+                <button onClick={() => { setActiveModal('surrender'); setSurrenderStep(1); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <LogOut size={20} className="text-rose-500"/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-rose-900 mb-0.5">退租與交吉管理</p>
+                      <p className="text-[10px] text-rose-600 font-bold">上傳交還證明並簽署退租書</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-rose-400 group-hover:text-rose-500 transition-colors" />
+                </button>
+
+                {/* ★ 新增：好評與建議按鈕 */}
+                <button onClick={() => setActiveModal('review')} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
+                      <Sun size={20} className="text-amber-500"/>
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-amber-900 mb-0.5">服務評價與建議</p>
+                      <p className="text-[10px] text-amber-600 font-bold">您的五星好評是我們的動力</p>
+                    </div>
+                  </div>
+                  <ChevronRight size={18} className="text-amber-400 group-hover:text-amber-500 transition-colors" />
+                </button>
               </div>
             </div>
           </div>
@@ -881,6 +990,173 @@ function DashboardContent() {
                    {isSubmittingTicket ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
                 </button>
               </form>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 好評與建議 Modal */}
+      {activeModal === 'review' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Sun className="mr-2 text-amber-500" size={24}/> 服務評價與建議</h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+            <form onSubmit={handleSubmitReview} className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-6">
+              <div className="text-center">
+                <p className="text-sm font-bold text-slate-600 mb-4">請問您對佳寓的居住體驗滿意嗎？</p>
+                <div className="flex justify-center gap-2 mb-2">
+                  {[1, 2, 3, 4, 5].map(star => (
+                    <button key={star} type="button" onClick={() => setRating(star)} className="focus:outline-none hover:scale-110 transition-transform">
+                      <Sun size={40} className={star <= rating ? "text-amber-400 fill-amber-400 drop-shadow-md" : "text-slate-300"} />
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs font-black text-amber-600">{rating === 5 ? '非常滿意，極力推薦！' : rating >= 4 ? '很滿意，住得很舒適！' : '還有進步空間'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-black text-slate-800 mb-2">想對管家說的話或建議 (選填)：</p>
+                <textarea rows={4} value={reviewText} onChange={e => setReviewText(e.target.value)} placeholder="感謝管家的照顧..." className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-amber-500 focus:ring-4 focus:ring-amber-500/10 transition-all resize-none font-medium shadow-sm" />
+              </div>
+              <button type="submit" disabled={isSubmittingReview} className="w-full py-4 bg-amber-500 text-white rounded-2xl font-black text-md hover:bg-amber-600 transition-all active:scale-95 shadow-xl shadow-amber-500/20 disabled:opacity-50">
+                {isSubmittingReview ? <><Loader2 size={18} className="animate-spin inline mr-2"/> 送出中...</> : '確認送出評價'}
+              </button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 退租與交吉管理 Modal (具香港法律效力流程) */}
+      {activeModal === 'surrender' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full max-w-2xl rounded-2xl sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
+            <div className="flex justify-between items-center px-6 py-4 bg-slate-900 text-white flex-none z-20">
+              <div>
+                <h3 className="font-black text-lg sm:text-xl flex items-center"><LogOut className="mr-2 text-rose-400" size={24}/> 退租暨交吉管理</h3>
+                <p className="text-[10px] text-slate-400 mt-1">Surrender of Tenancy & Handover Confirmation</p>
+              </div>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"><X size={20} /></button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col relative custom-scrollbar">
+              {surrenderStep === 1 ? (
+                <div className="p-6 space-y-6 animate-in slide-in-from-left-4">
+                  <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl">
+                    <p className="text-sm font-black text-rose-900 mb-1 flex items-center gap-2"><AlertCircle size={16}/> 辦理退租須知</p>
+                    <p className="text-xs text-rose-700 leading-relaxed font-medium">依據合約與香港租賃法例，租客需於交吉日將物業以<strong className="text-rose-900">空置及清潔狀態</strong>交還。請確實填寫遷出日期並上傳屋況與鎖匙留存證明照。</p>
+                  </div>
+                  
+                  <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 mb-2">預計遷出交吉日 *</label>
+                      <input type="date" required value={moveOutDate} onChange={e => setMoveOutDate(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 mb-2">退租原因 (選填)</label>
+                      <input type="text" value={surrenderReason} onChange={e => setSurrenderReason(e.target.value)} placeholder="例如：畢業回國、工作調職..." className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-black text-slate-700 mb-2 flex justify-between">
+                        <span>上傳交還證明 (相片或影片) *</span>
+                        <span className="text-[10px] text-slate-400 font-normal">可多選，例如清潔後的房間、冷氣遙控、門匙</span>
+                      </label>
+                      <div className="relative">
+                        <input type="file" multiple accept="image/*,video/mp4,video/quicktime" onChange={e => { if (e.target.files) setSurrenderFiles(Array.from(e.target.files)); }} className="hidden" id="surrender-files" />
+                        <label htmlFor="surrender-files" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${surrenderFiles.length > 0 ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50'}`}>
+                          {surrenderFiles.length > 0 ? <><CheckCircle2 size={28} className="mb-2"/><span className="text-sm font-black">已選取 {surrenderFiles.length} 個檔案</span></> : <><UploadCloud size={28} className="mb-2"/><span className="text-sm font-bold">點擊上傳圖檔或影片</span></>}
+                        </label>
+                      </div>
+                    </div>
+                  </div>
+
+                  <button onClick={() => { if (!moveOutDate || surrenderFiles.length === 0) return alert("請填寫遷出日期並上傳至少一張證明照片！"); setSurrenderStep(2); }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl">
+                    下一步：檢閱並簽署退租書 <ChevronRight size={18}/>
+                  </button>
+                </div>
+              ) : (
+                <div className="flex flex-col h-full animate-in slide-in-from-right-4">
+                  <div className="flex-1 p-6 overflow-y-auto bg-slate-200 flex justify-center custom-scrollbar">
+                    {/* A4 法律退租書預覽 */}
+                    <div className="w-[794px] min-h-max bg-white p-10 sm:p-16 shadow-lg text-slate-900 origin-top scale-[0.45] sm:scale-75 md:scale-90 transition-transform border border-slate-300">
+                      <h2 className="text-2xl font-black text-center mb-1 uppercase tracking-widest">Notice of Surrender & Handover</h2>
+                      <h3 className="text-lg font-bold text-center mb-8 tracking-[0.5em]">退租通知暨交吉確認書</h3>
+                      
+                      <div className="space-y-4 text-sm leading-relaxed font-medium">
+                        <p><strong>This Agreement is made between (立約雙方) :</strong></p>
+                        <p>Landlord / Authorized Agent (業主/授權代理人)：<br/><span className="font-bold border-b border-slate-400 inline-block min-w-[300px]">PRIME LIVING PROPERTY (HK) MANAGEMENT</span></p>
+                        <p>Tenant (租客)：<br/><span className="font-bold border-b border-slate-400 inline-block min-w-[300px]">{tenantData?.name} ({tenantData?.identityNumber})</span></p>
+                        
+                        <p className="pt-4"><strong>Premises (物業地址) :</strong><br/><span className="font-bold">{tenantData?.propertyName} - {tenantData?.roomName}</span></p>
+                        
+                        <div className="border border-slate-800 p-4 mt-6 bg-slate-50 text-xs text-justify">
+                          <p className="mb-2">1. The Tenant hereby gives notice and confirms to surrender the Tenancy and deliver vacant possession of the Premises to the Landlord on <strong className="text-rose-600 text-sm border-b border-rose-600">{moveOutDate}</strong> (the "Handover Date").</p>
+                          <p className="mb-2">租客特此發出通知並確認，將於 <strong className="text-rose-600">{moveOutDate}</strong>（「交吉日」）退回上述物業之租賃權，並將物業以空置狀態交還予業主。</p>
+                          
+                          <p className="mb-2">2. The Tenant agrees to deliver the Premises in good, clean and tenantable condition (fair wear and tear excepted), and return all keys/access cards.</p>
+                          <p className="mb-2">租客同意將物業以良好、清潔及可租用的狀態（自然損耗除外）交還，並歸還所有鑰匙與門禁卡。</p>
+                          
+                          <p className="mb-2">3. The Security Deposit shall be refunded to the Tenant within the legally or contractually agreed period after the Handover Date, subject to deductions for any outstanding rent, damages, cleaning fees, or unpaid utilities.</p>
+                          <p>按金將於交吉日後，依據合約約定之期限內退還予租客；唯業主有權從中扣除任何未繳租金、維修清潔費或結欠之水電煤費用。</p>
+                        </div>
+                      </div>
+                      
+                      <div className="mt-16 grid grid-cols-2 gap-12">
+                        <div className="border-t border-slate-800 pt-2 text-center text-xs">
+                           <p className="font-bold uppercase">Landlord / Authorized Agent</p>
+                           <p className="text-slate-500">業主 / 授權代理人</p>
+                        </div>
+                        <div className="border-t border-slate-800 pt-2 text-center text-xs relative">
+                           {/* 簽名預覽區 */}
+                           <p className="font-bold uppercase relative z-10">Tenant (租客簽署)</p>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 電子簽名板區塊 */}
+                  <div className="bg-white border-t border-slate-200 p-0 flex-none shadow-[0_-10px_30px_rgba(0,0,0,0.1)] z-30">
+                    <div className="p-3 bg-slate-900 text-white flex justify-between items-center text-xs font-bold">
+                      <span>請在下方電子簽名板簽署：</span>
+                      <button onClick={() => { const canvas = surrenderSigCanvasRef.current; if (canvas) canvas.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height); }} className="text-rose-400 hover:text-white transition">清除重簽</button>
+                    </div>
+                    <canvas 
+                      ref={surrenderSigCanvasRef} 
+                      className="w-full h-40 bg-slate-50 cursor-crosshair touch-none" 
+                      width={800} height={200}
+                      onMouseDown={(e) => {
+                        setIsDrawing(true); const canvas = surrenderSigCanvasRef.current; if (!canvas) return;
+                        const rect = canvas.getBoundingClientRect(); const ctx = canvas.getContext('2d');
+                        if (ctx) { ctx.beginPath(); ctx.moveTo(e.clientX - rect.left, e.clientY - rect.top); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 3; ctx.lineCap = 'round'; }
+                      }}
+                      onMouseMove={(e) => {
+                        if (!isDrawing || !surrenderSigCanvasRef.current) return;
+                        const rect = surrenderSigCanvasRef.current.getBoundingClientRect(); const ctx = surrenderSigCanvasRef.current.getContext('2d');
+                        if (ctx) { ctx.lineTo(e.clientX - rect.left, e.clientY - rect.top); ctx.stroke(); }
+                      }}
+                      onMouseUp={() => setIsDrawing(false)} onMouseLeave={() => setIsDrawing(false)}
+                      onTouchStart={(e) => {
+                        setIsDrawing(true); const canvas = surrenderSigCanvasRef.current; if (!canvas) return;
+                        const rect = canvas.getBoundingClientRect(); const ctx = canvas.getContext('2d');
+                        if (ctx) { ctx.beginPath(); ctx.moveTo(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top); ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 3; ctx.lineCap = 'round'; }
+                      }}
+                      onTouchMove={(e) => {
+                        if (!isDrawing || !surrenderSigCanvasRef.current) return;
+                        const rect = surrenderSigCanvasRef.current.getBoundingClientRect(); const ctx = surrenderSigCanvasRef.current.getContext('2d');
+                        if (ctx) { ctx.lineTo(e.touches[0].clientX - rect.left, e.touches[0].clientY - rect.top); ctx.stroke(); }
+                      }}
+                      onTouchEnd={() => setIsDrawing(false)}
+                    />
+                    <div className="flex p-3 gap-3">
+                      <button onClick={() => setSurrenderStep(1)} className="px-6 py-3 font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition">上一步</button>
+                      <button onClick={handleConfirmSurrender} disabled={isSubmittingSurrender} className="flex-1 font-bold text-white bg-rose-600 hover:bg-rose-700 rounded-xl shadow-md transition flex items-center justify-center gap-2 disabled:opacity-50">
+                        {isSubmittingSurrender ? <><Loader2 className="animate-spin" size={18}/> 上傳建檔中...</> : <><CheckCircle2 size={18}/> 確認簽署並申請退租</>}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
