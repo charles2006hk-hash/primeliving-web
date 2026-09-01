@@ -20,11 +20,20 @@ const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 
 const fromCents = (cents: number) => cents / 100;
 
 // 安全時間戳解析器
+// 安全時間戳解析器
 const getSafeTime = (val: any): number => {
   if (!val) return 0;
   if (typeof val.toDate === 'function') return val.toDate().getTime();
   const t = new Date(val).getTime();
   return isNaN(t) ? 0 : t;
+};
+
+// ★ 新增：提取中文期數轉為數字以便排序 (第一期 -> 1)
+const getPeriodNumber = (title: string) => {
+  const match = title.match(/第([一二三四五六七八九十\d]+)期/);
+  if (!match) return 999;
+  const numMap: Record<string, number> = { '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10 };
+  return numMap[match[1]] || parseInt(match[1]) || 999;
 };
 
 // ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB)
@@ -337,55 +346,51 @@ function DashboardContent() {
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
+    const thirtyDaysLater = new Date(today); thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30); thirtyDaysLater.setHours(23, 59, 59, 999);
 
-    const thirtyDaysLater = new Date(today);
-    thirtyDaysLater.setDate(thirtyDaysLater.getDate() + 30);
-    thirtyDaysLater.setHours(23, 59, 59, 999);
-
-    const pendingDocs = tenantDocs.filter(d => {
-      const isPaid = d.status === 'Completed' || d.status === 'Paid' || d.paymentStatus === 'Paid';
-      const isReview = d.paymentStatus === 'Under Review';
-      return !isPaid && !isReview;
-    });
+    const pendingDocs = tenantDocs.filter(d => !['Completed', 'Paid'].includes(d.status) && !['Paid', 'Under Review'].includes(d.paymentStatus));
 
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
-      const amount = Number(fd.totalAmount) || Number(fd.amount) || 0;
-      const amountCents = toCents(amount);
-
-      let dueDateStr = fd.dueDate || fd.docDate;
-      if (!dueDateStr) {
-        if (typeof item.createdAt?.toDate === 'function') dueDateStr = item.createdAt.toDate().toISOString().split('T')[0];
-        else if (typeof item.createdAt === 'string') dueDateStr = item.createdAt.split('T')[0];
-        else dueDateStr = new Date().toISOString().split('T')[0];
+      let baseAmount = Number(fd.totalAmount) || Number(fd.amount) || 0;
+      let dueDateStr = fd.dueDate || fd.docDate || new Date().toISOString().split('T')[0];
+      const dueDate = new Date(dueDateStr); dueDate.setHours(0, 0, 0, 0);
+      
+      const isOverdue = dueDate < today;
+      let lateFee = 0;
+      let isOverdue30 = false;
+      
+      // ★ 逾期超過 30 天，系統自動收取 5% 滯納金 (精確計算避免浮點數誤差)
+      if (isOverdue) {
+         const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
+         if (daysOverdue >= 30) {
+            lateFee = Math.round(baseAmount * 0.05);
+            isOverdue30 = true;
+         }
       }
 
-      const dueDate = new Date(dueDateStr);
-      dueDate.setHours(0, 0, 0, 0);
+      const totalAmount = baseAmount + lateFee;
 
       return { 
         id: item.id, 
-        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), 
-        amount, 
-        amountCents, 
+        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳帳單'), 
+        amount: totalAmount, 
+        baseAmount,
+        lateFee,
+        isOverdue30,
+        amountCents: toCents(totalAmount), 
         dueDateStr, 
         dueDate, 
-        isOverdue: dueDate < today, 
+        isOverdue, 
         isDueToday: dueDate.getTime() === today.getTime() 
       };
     });
 
-    const numMap: Record<string, number> = { '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10 };
+    // ★ 智能排序：先比日期，日期相同再比「第 X 期」
     allBills.sort((a, b) => {
       const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
       if (timeDiff !== 0) return timeDiff;
-      
-      const getPeriod = (title: string) => {
-        const match = title.match(/第([一二三四五六七八九十\d]+)期/);
-        if (!match) return 999;
-        return numMap[match[1]] || parseInt(match[1]) || 999;
-      };
-      return getPeriod(a.title) - getPeriod(b.title);
+      return getPeriodNumber(a.title) - getPeriodNumber(b.title);
     });
 
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
@@ -402,40 +407,28 @@ function DashboardContent() {
     ].sort((a, b) => {
       const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
       if (timeDiff !== 0) return timeDiff;
-      
-      const getPeriod = (title: string) => {
-        const match = title.match(/第([一二三四五六七八九十\d]+)期/);
-        if (!match) return 999;
-        return numMap[match[1]] || parseInt(match[1]) || 999;
-      };
-      return getPeriod(a.title) - getPeriod(b.title);
+      return getPeriodNumber(a.title) - getPeriodNumber(b.title);
     });
 
     for (const bill of allPayingBills) {
       if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
         isSplitNeeded = true;
-        if (currentCheckoutBillIds.length === 0) {
-          currentCheckoutBillIds.push(bill.id);
-          currentCheckoutCents += bill.amountCents;
-        }
+        if (currentCheckoutBillIds.length === 0) { currentCheckoutBillIds.push(bill.id); currentCheckoutCents += bill.amountCents; }
         break; 
       }
       currentCheckoutBillIds.push(bill.id);
       currentCheckoutCents += bill.amountCents;
     }
 
-    const grandTotalCents = allPayingBills.reduce((sum, b) => sum + b.amountCents, 0);
-
     return {
-      grandTotal: fromCents(grandTotalCents),
+      grandTotal: fromCents(allPayingBills.reduce((sum, b) => sum + b.amountCents, 0)),
       checkoutTotal: fromCents(currentCheckoutCents), 
       checkoutBillIds: currentCheckoutBillIds,        
       isSplitNeeded,                                  
       mandatoryItems,
       optionalItems,
-      allPayingBills,
-      hasOverdue: mandatoryItems.some(b => b.isOverdue),
-      hasUpcoming: optionalItems.length > 0
+      allPayingBills, 
+      hasOverdue: mandatoryItems.some(b => b.isOverdue)
     };
   }, [tenantDocs, selectedOptionalBillIds]);
 
@@ -1002,7 +995,7 @@ function DashboardContent() {
                   </span>
                 </div>
 
-                {/* ★ 加入隱藏/展開的 Toggle 按鈕 */}
+                {/* ★ 隱藏/展開的 Toggle 按鈕與明細 */}
                 <div className="mb-6 relative z-10">
                   <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition mb-2">
                     {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
@@ -1018,13 +1011,22 @@ function DashboardContent() {
                         billingSummary.allPayingBills.map(item => (
                           <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
                             <div className="flex items-center gap-2">
-                              <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
+                              {/* 只有未來的帳單可以點擊取消勾選，逾期或今天的強制鎖定打勾 */}
+                              {item.dueDate > new Date(new Date().setHours(0,0,0,0)) ? (
+                                <button onClick={() => setSelectedOptionalBillIds(prev => selectedOptionalBillIds.includes(item.id) ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="text-orange-400 hover:text-orange-300">
+                                  {selectedOptionalBillIds.includes(item.id) ? <CheckSquare size={14} className="shrink-0"/> : <Square size={14} className="shrink-0 text-slate-400"/>}
+                                </button>
+                              ) : (
+                                <CheckSquare size={14} className="text-orange-500 opacity-50 shrink-0 cursor-not-allowed"/>
+                              )}
+                              
                               <span className="flex items-center gap-1.5 flex-wrap">
                                 {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                                {item.isOverdue30 && <span className="bg-rose-500/30 text-rose-200 text-[9px] px-1.5 py-0.5 rounded font-black border border-rose-500/30 animate-pulse">包含 5% 滯納金</span>}
                                 {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
                               </span>
                             </div>
-                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                            <span className={`font-mono font-bold ${item.isOverdue30 ? 'text-rose-400' : ''}`}>${item.amount.toLocaleString()}</span>
                           </div>
                         ))
                       )}
@@ -1300,14 +1302,14 @@ function DashboardContent() {
                   <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl flex items-start gap-3">
                     <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/>
                     <div>
-                      <p className="text-sm font-black text-amber-900 mb-1">注意：將收取 3% 處理費</p>
+                      <p className="text-sm font-black text-amber-900 mb-1">注意：將收取 2% 處理費</p>
                       <p className="text-xs text-amber-700 font-medium">線上刷卡由 PayDollar (AsiaPay) 提供安全支付支援，費用包含金流平台手續費。</p>
                     </div>
                   </div>
                   <div className="border border-slate-200 rounded-2xl p-5 space-y-4 bg-white">
                     <div className="flex justify-between items-center"><p className="text-sm font-bold text-slate-600">本期帳單金額</p><p className="font-mono font-bold text-slate-800">${billingSummary.checkoutTotal.toLocaleString()}</p></div>
-                    <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (3%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.checkoutTotal) * 0.03)).toLocaleString()}</p></div>
-                    <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.checkoutTotal) + Math.round(toCents(billingSummary.checkoutTotal) * 0.03))).toLocaleString()}</p></div>
+                    <div className="flex justify-between items-center pb-4 border-b border-slate-100"><p className="text-sm font-bold text-slate-600">系統處理費 (2%)</p><p className="font-mono font-bold text-amber-600">+ ${fromCents(Math.round(toCents(billingSummary.checkoutTotal) * 0.02)).toLocaleString()}</p></div>
+                    <div className="flex justify-between items-end pt-1"><p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">結帳總額</p><p className="text-3xl font-black text-purple-700">${(fromCents(toCents(billingSummary.checkoutTotal) + Math.round(toCents(billingSummary.checkoutTotal) * 0.02))).toLocaleString()}</p></div>
                   </div>
                   <button onClick={handlePayDollarCheckout} disabled={isPayDollarLoading} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black flex justify-center items-center gap-2 hover:bg-slate-800 transition-all shadow-xl shadow-slate-900/20 disabled:opacity-70">
                     {isPayDollarLoading ? <><Loader2 size={18} className="animate-spin"/> 連線安全金流...</> : <>前往安全結帳 <ChevronRight size={18}/></>}
