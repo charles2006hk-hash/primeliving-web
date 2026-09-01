@@ -37,6 +37,12 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
+// 提取純淨屋苑名稱 (剔除尾部房號英文數字，確保隱私)
+const getCleanEstateName = (name?: string) => {
+  if (!name) return '精選屋苑';
+  return name.replace(/[A-Za-z0-9\-\s]+$/, '').trim() || name;
+};
+
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -209,15 +215,13 @@ function PropertiesContent() {
         .filter(r => r.webStatus === 'published' || r.isSoldOutProperty === true)
         .map(room => {
            const floorLevel = getFloorLevel(room.id);
-           let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
-           rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
-
-           const eId = findEncyclopediaId(rawEstateName);
+           const cleanEstateName = getCleanEstateName(room.estateName || room.propertyName);
+           const eId = findEncyclopediaId(cleanEstateName);
 
            return {
              ...room,
              floorLevel,
-             displayTitle: `${rawEstateName} | ${floorLevel}精選單位`,
+             displayTitle: `${cleanEstateName} | ${floorLevel}精選單位`,
              displayPrice: getPriceRange(room.baseRent),
              encyclopediaId: eId || '',
              hasEncyclopedia: !!eId
@@ -436,8 +440,9 @@ function PropertiesContent() {
                       </div>
                     )}
                     
+                    {/* ★ 修正點 1：地圖圖釘標籤隱藏真實房號 */}
                     <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20 z-10">
-                       <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.estateName || room.propertyName}
+                       <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {getCleanEstateName(room.estateName || room.propertyName)}
                     </div>
 
                     {room.isCompetitor && (
@@ -476,7 +481,6 @@ function PropertiesContent() {
                            </span>
                          )}
                        </div>
-                       {/* ★ 修改點：Sold Out 的卡片也改為亮色的「候補登記」按鈕，強調可點擊 */}
                        <span className={`px-4 py-2 rounded-lg transition-colors shadow-sm flex items-center gap-1 ${
                          isSoldOut ? 'bg-orange-500 text-white hover:bg-orange-600' : 'bg-slate-900 text-white hover:bg-orange-500'
                        }`}>
@@ -487,7 +491,6 @@ function PropertiesContent() {
                 </>
               );
 
-              // ★ 修改點：允許 Sold Out 卡片具備完整點擊 hover 與手勢效果
               const cardClasses = `group bg-white rounded-[2rem] shadow-sm border overflow-hidden transition-all duration-300 flex flex-col relative hover:shadow-2xl hover:-translate-y-2 cursor-pointer ${
                 room.isCompetitor ? 'border-purple-100 hover:border-purple-300' : 'border-slate-100 hover:border-orange-200'
               } ${isSoldOut ? 'opacity-95' : ''}`;
@@ -495,7 +498,7 @@ function PropertiesContent() {
               return (
                 <div 
                   key={room.id} 
-                  onClick={() => setBookingRoom(room)} // ★ 移除 !isSoldOut 限制， SOLD OUT 也可開啟 Modal
+                  onClick={() => setBookingRoom(room)} 
                   className={cardClasses}
                 >
                   {CardContent}
@@ -528,7 +531,6 @@ function PropertiesContent() {
         )}
       </div>
 
-      {/* ★ 預約與候補 Modal (自適應一般預約與滿租候補文案) */}
       {bookingRoom !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white border border-slate-100 rounded-[2.5rem] p-8 w-full max-w-lg shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300">
