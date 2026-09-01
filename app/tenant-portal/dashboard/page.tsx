@@ -221,11 +221,17 @@ function DashboardContent() {
     };
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
-      if (!docSnap.exists()) { localStorage.removeItem('pm_tenant_session'); router.push('/tenant-portal'); return; }
+      if (!docSnap.exists()) {
+        localStorage.removeItem('pm_tenant_session');
+        router.push('/tenant-portal');
+        return;
+      }
+
       const data = docSnap.data();
       const end = new Date(data.leaseEnd || new Date());
       const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-      
+      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+
       setTenantData({ 
         id: docSnap.id, 
         email: data.email || '', 
@@ -234,9 +240,21 @@ function DashboardContent() {
         status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
         roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
         isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
-        signature: data.signature || '', signedAt: data.signedAt || '', propertyName: data.propertyName || '', roomId: data.roomId || '', roomName: data.roomName || data.roomId || '', 
-        leaseStart: data.leaseStart || '', leaseEnd: data.leaseEnd || '', deposit: data.deposit || 0, phone: data.phone || '', 
-        identityNumber: data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供', isPhysicalSigned: data.isPhysicalSigned || false 
+        signature: data.signature || '', 
+        signedAt: data.signedAt || '',
+        propertyName: data.propertyName || '', 
+        roomId: data.roomId || '', 
+        roomName: data.roomName || data.roomId || '', 
+        leaseStart: data.leaseStart || '', 
+        leaseEnd: data.leaseEnd || '', 
+        deposit: data.deposit || 0, 
+        phone: data.phone || '', 
+        identityNumber: resolvedIdNumber,
+        isPhysicalSigned: data.isPhysicalSigned || false,
+        // ★ 新增抓取學校與學位/職業資訊
+        university: data.university || data.school || '',
+        degree: data.degree || data.studyLevel || data.program || '',
+        occupation: data.occupation || ''
       });
 
       if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
@@ -473,43 +491,55 @@ function DashboardContent() {
     } catch (error: any) { alert(`上傳失敗: ${error.message}`); } finally { setIsSavingProfile(false); }
   };
 
-  // ★ 處理好評送出 (雙向寫入：官網待審核庫 + 後台提醒)
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reviewText.trim()) return alert("請寫下您的評價建議！");
     setIsSubmittingReview(true);
     
     try {
-      // 1. 寫入到官網專用的 testimonials 集合 (預設隱藏 pending)
+      // 1. 自動組合匿名名稱 (例如：曾敏 -> 曾同學)
+      const lastName = tenantData.name ? tenantData.name.charAt(0) : '某';
+      const displayAliasName = `${lastName}同學`;
+
+      // 2. 自動組合身分標籤 (例如：香港城市大學研究生)
+      let identityStr = '佳寓認證租客';
+      if (tenantData.university) {
+        identityStr = `${tenantData.university}${tenantData.degree || '學生'}`;
+      } else if (tenantData.occupation) {
+        identityStr = tenantData.occupation;
+      }
+
+      // 3. 寫入到 CMS 專用的 testimonials 集合 (預設待審核)
       await addDoc(collection(db, 'testimonials'), {
         tenantId: tenantData.id,
-        name: tenantData.name, // 官網顯示的租客稱呼
-        identity: '佳寓認證租客', // 官網顯示的次要標籤
+        name: displayAliasName,     // 寫入 "X同學"
+        identity: identityStr,      // 寫入 "XX大學XX生" 或 "認證租客"
         text: reviewText.trim(),
         rating: rating,
-        status: 'pending', // ★ 關鍵：管理員在大系統按下「通過」後才會改成 'published'
+        status: 'pending', 
         createdAt: serverTimestamp()
       });
 
-      // 2. 同步發送一個 Ticket 給大系統，觸發管理員首頁的動態卡片提醒
+      // 4. 寫入 inquiries 觸發大系統小鈴鐺與工單提醒
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id, 
-        name: tenantData.name, 
-        roomInfo: tenantData.roomInfo,
+        name: tenantData.name, // 後台 Ticket 依然保留真實姓名，方便管家追蹤
+        phone: tenantData.phone || '',
+        roomInfo: tenantData.roomInfo || '',
         category: '⭐ 收到新租客評價', 
-        message: `租客給予了 ${rating} 星評價：\n「${reviewText}」\n\n👉 請前往大系統的【官網評價管理】模塊進行審核。若通過，將自動顯示於官網首頁。`,
+        message: `真實租客 (${tenantData.name}) 給予了 ${rating} 星評價：\n「${reviewText}」\n\n👉 官網預覽名稱將自動轉換為：【${displayAliasName} / ${identityStr}】\n請前往大系統 CMS 進行審核。`,
         type: 'ticket', 
-        status: 'New', // 讓大系統亮紅燈
+        status: 'New', 
         createdAt: serverTimestamp()
       });
 
-      alert("💖 感謝您的寶貴評價！您的鼓勵是我們前進的最大動力。");
+      alert("💖 感謝您的寶貴評價！");
       setActiveModal('none'); 
       setReviewText(''); 
       setRating(5);
-    } catch (error) { 
-      console.error(error);
-      alert("送出失敗，請重試。"); 
+    } catch (error: any) { 
+      console.error("提交評價失敗:", error);
+      alert(`送出失敗，請重試！錯誤訊息: ${error.message}`); 
     } finally { 
       setIsSubmittingReview(false); 
     }
