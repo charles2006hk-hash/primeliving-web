@@ -27,6 +27,68 @@ const getSafeTime = (val: any): number => {
   return isNaN(t) ? 0 : t;
 };
 
+// ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB)
+const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
+  return new Promise((resolve, reject) => {
+    // 如果是 PDF 或是非圖片檔案，直接放行不壓縮
+    if (file.type === 'application/pdf' || !file.type.startsWith('image/')) {
+      if (file.size > 5 * 1024 * 1024) return reject(new Error("PDF 檔案請勿超過 5MB"));
+      return resolve(file);
+    }
+
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = (event) => {
+      const img = new Image();
+      img.src = event.target?.result as string;
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        let { width, height } = img;
+        
+        // 限制最大長寬 (1200px)，初步縮小尺寸
+        const MAX_DIM = 1200;
+        if (width > height && width > MAX_DIM) {
+          height *= MAX_DIM / width;
+          width = MAX_DIM;
+        } else if (height > MAX_DIM) {
+          width *= MAX_DIM / height;
+          height = MAX_DIM;
+        }
+        
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext('2d');
+        if (!ctx) return resolve(file);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        let quality = 0.9;
+        let dataUrl = canvas.toDataURL('image/jpeg', quality);
+        let currentSizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
+
+        // 遞迴降質直到小於指定 KB (保底畫質 0.1)
+        while (currentSizeKB > maxSizeKB && quality > 0.1) {
+          quality -= 0.1;
+          dataUrl = canvas.toDataURL('image/jpeg', quality);
+          currentSizeKB = Math.round((dataUrl.length * 3) / 4 / 1024);
+        }
+
+        // 將 DataURL 轉回 File 物件
+        fetch(dataUrl)
+          .then(res => res.blob())
+          .then(blob => {
+            const newFile = new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", { 
+              type: 'image/jpeg', 
+              lastModified: Date.now() 
+            });
+            resolve(newFile);
+          }).catch(() => resolve(file)); // 若轉換失敗則回傳原檔
+      };
+    };
+    reader.onerror = () => resolve(file); // 若讀取失敗則回傳原檔
+  });
+};
+
+
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -45,7 +107,6 @@ function DashboardContent() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [selectedOptionalBillIds, setSelectedOptionalBillIds] = useState<string[]>([]);
-  const [showBillDetails, setShowBillDetails] = useState(false);
 
   const [signature, setSignature] = useState('');
   const [isSigning, setIsSigning] = useState(false);
@@ -62,8 +123,9 @@ function DashboardContent() {
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-  const [passportFile, setPassportFile] = useState<File | null>(null);
-  const [idCardFile, setIdCardFile] = useState<File | null>(null);
+  // ★ KYC 新增認證選項
+  const [idType, setIdType] = useState('HKID'); 
+  const [idFile, setIdFile] = useState<File | null>(null);
 
   const [chatMessages, setChatMessages] = useState<{sender: 'bot'|'user', text: string, options?: string[]}[]>([]);
   const [chatCategory, setChatCategory] = useState('');
@@ -77,7 +139,7 @@ function DashboardContent() {
     router.push('/tenant-portal'); 
   };
   
-  // ★ 手寫簽名板
+  // 手寫簽名板
   const [showSigPad, setShowSigPad] = useState(false);
   const sigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -174,7 +236,8 @@ function DashboardContent() {
         const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
         if (res.ok) {
           const { documents, inquiries } = await res.json();
-          const sortedDocs = documents.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
+          // ★ 帳單排序：強制按時間先後排序 (升冪：舊的在前，新的在後，方便看清期數順序)
+          const sortedDocs = documents.sort((a: any, b: any) => getSafeTime(a.formData?.dueDate || a.createdAt) - getSafeTime(b.formData?.dueDate || b.createdAt));
           setTenantDocs(sortedDocs);
 
           const sortedInqs = inquiries.sort((a: any, b: any) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
@@ -219,8 +282,8 @@ function DashboardContent() {
       });
 
       if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
-      if (data.idUploaded || data.isIdVerified) setIsIdUploaded(true);
-      if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified)) setIsProfileComplete(true);
+      if (data.idUploaded || data.isIdVerified || data.idCardUrl) setIsIdUploaded(true);
+      if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified || data.idCardUrl)) setIsProfileComplete(true);
       
       setLoading(false);
     });
@@ -301,7 +364,7 @@ function DashboardContent() {
 
       return { 
         id: item.id, 
-        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), 
+        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳帳單'), 
         amount, 
         amountCents, 
         dueDateStr, 
@@ -348,6 +411,7 @@ function DashboardContent() {
       isSplitNeeded,                                  
       mandatoryItems,
       optionalItems,
+      allPayingBills, // ★ 暴露所有準備繳款的清單，供 UI 展開顯示
       hasOverdue: mandatoryItems.some(b => b.isOverdue),
       hasUpcoming: optionalItems.length > 0
     };
@@ -605,39 +669,32 @@ function DashboardContent() {
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!emergencyContact.name || !emergencyContact.phone) return alert("請填寫緊急聯絡人！");
+    if (!idFile) return alert("請上傳證件圖檔或PDF！");
 
     setIsSavingProfile(true);
     try {
       const storage = getStorage();
-      let idUrl = tenantData.idCardUrl || '';
-      let passUrl = tenantData.passportUrl || '';
-
-      if (idCardFile) {
-        const idRef = ref(storage, `tenants/${tenantData.id}/kyc/idCard_${Date.now()}_${idCardFile.name}`);
-        await uploadBytesResumable(idRef, idCardFile);
-        idUrl = await getDownloadURL(idRef);
-      }
       
-      if (passportFile) {
-        const passRef = ref(storage, `tenants/${tenantData.id}/kyc/passport_${Date.now()}_${passportFile.name}`);
-        await uploadBytesResumable(passRef, passportFile);
-        passUrl = await getDownloadURL(passRef);
-      }
+      // ★ 執行前端圖片壓縮 (<150KB)
+      const compressedFile = await compressImage(idFile);
+      
+      const idRef = ref(storage, `tenants/${tenantData.id}/kyc/${idType}_${Date.now()}_${compressedFile.name}`);
+      await uploadBytesResumable(idRef, compressedFile);
+      const fileUrl = await getDownloadURL(idRef);
 
       await updateDoc(doc(db, 'tenants', tenantData.id), { 
         emergencyContact, 
-        idCardUrl: idUrl, 
-        passportUrl: passUrl, 
+        idCardUrl: fileUrl, 
         idUploaded: true, 
         isIdVerified: true, 
         kycUpdatedAt: serverTimestamp() 
       });
 
       setIsProfileComplete(true);
-      alert("✅ 檔案與護照已成功上傳至雲端！大後台可隨時進行 AI OCR 辨識與打厘印。");
+      alert("✅ KYC 檔案已成功上傳！系統已自動壓縮處理並安全存檔。");
       setActiveModal('none');
-    } catch (error) {
-      alert("上傳失敗，請稍後再試。");
+    } catch (error: any) {
+      alert(`上傳失敗: ${error.message}`);
     } finally {
       setIsSavingProfile(false);
     }
@@ -901,17 +958,17 @@ function DashboardContent() {
                 {!billingSummary.hasOverdue && billingSummary.hasUpcoming && !billingSummary.isSplitNeeded && (
                   <div className="bg-amber-500/20 border border-amber-500/40 text-amber-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-center gap-2 mb-6 relative z-10">
                     <Clock size={16} className="text-amber-400 shrink-0"/>
-                    <span>提示：您有即將於 30 天內到期的帳單，已為您預設勾選可提前繳納。</span>
+                    <span>提示：您有即將於到期的帳單，已為您預設勾選可一併結算。</span>
                   </div>
                 )}
                 {billingSummary.isSplitNeeded && (
                   <div className="bg-purple-500/20 border border-purple-500/40 text-purple-200 px-4 py-2.5 rounded-xl text-xs font-bold flex items-start sm:items-center gap-2 mb-6 animate-pulse relative z-10">
                     <AlertCircle size={16} className="text-purple-400 shrink-0 mt-0.5 sm:mt-0"/>
-                    <span>金流限額 10 萬元，系統已為您自動按期數拆單。本次將優先結算前 {billingSummary.checkoutBillIds.length} 筆舊單，餘額請於本次完成後再次繳付。</span>
+                    <span>金流限額 10 萬元，系統已為您自動按期數拆單。本次將優先結算前 {billingSummary.checkoutBillIds.length} 筆舊單。</span>
                   </div>
                 )}
                 
-                <div className="flex justify-between items-start mb-4 relative z-10">
+                <div className="flex justify-between items-start mb-6 relative z-10">
                   <div>
                     <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
                     <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
@@ -924,56 +981,27 @@ function DashboardContent() {
                   </span>
                 </div>
 
-                <div className="mb-6 relative z-10">
-                  <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition">
-                    {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
-                    {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
-                  </button>
-                  {showBillDetails && (
-                    <div className="mt-3 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
-                      <div>
-                        <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本期必須繳納單據：</p>
-                        {billingSummary.mandatoryItems.length === 0 ? (
-                          <p className="text-slate-400 py-1">目前無任何逾期/本日到期單據</p>
-                        ) : (
-                          billingSummary.mandatoryItems.map(item => (
-                            <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
-                              <div className="flex items-center gap-2">
-                                <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
-                                <span className="flex items-center gap-1.5 flex-wrap">
-                                  {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
-                                  {item.isDueToday && <span className="bg-orange-500/30 text-orange-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-orange-500/30">今日到期</span>}
-                                  {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                                </span>
-                              </div>
-                              <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                            </div>
-                          ))
-                        )}
-                      </div>
-                      {billingSummary.optionalItems.length > 0 && (
-                        <div className="pt-2 border-t border-white/10">
-                          <p className="text-slate-400 font-bold mb-1.5">🗓️ 未來 30 天內即將到期帳單 (預設已為您勾選，可提前支付)：</p>
-                          {billingSummary.optionalItems.map(item => { 
-                            const isChecked = selectedOptionalBillIds.includes(item.id); 
-                            return (
-                              <div key={item.id} onClick={() => setSelectedOptionalBillIds(prev => isChecked ? prev.filter(id => id !== item.id) : [...prev, item.id])} className="flex justify-between items-center py-1.5 cursor-pointer hover:bg-white/10 px-1 rounded transition text-slate-200">
-                                <div className="flex items-center gap-2">
-                                  {isChecked ? <CheckSquare size={14} className="text-orange-400"/> : <Square size={14} className="text-slate-400"/>}
-                                  <span className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="bg-blue-500/20 text-blue-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-blue-500/30">30天內到期</span>
-                                    {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                                  </span>
-                                </div>
-                                <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                              </div>
-                            ); 
-                          })}
+                {/* ★ 預設展開金額組成 */}
+                <div className="mb-6 relative z-10 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10">
+                  <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本次結帳金額明細：</p>
+                  {billingSummary.allPayingBills.length === 0 ? (
+                    <p className="text-slate-400 py-1">目前無任何待繳單據</p>
+                  ) : (
+                    billingSummary.allPayingBills.map(item => (
+                      <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
+                        <div className="flex items-center gap-2">
+                          <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
+                          <span className="flex items-center gap-1.5 flex-wrap">
+                            {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                            {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                          </span>
                         </div>
-                      )}
-                    </div>
+                        <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                      </div>
+                    ))
                   )}
                 </div>
+
                 <button onClick={() => setActiveModal('payment')} disabled={billingSummary.grandTotal === 0} className="w-full py-4 bg-white text-slate-900 rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-orange-50 transition-all active:scale-95 shadow-xl relative z-10 disabled:opacity-50 disabled:cursor-not-allowed">
                   <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
                 </button>
@@ -1012,7 +1040,7 @@ function DashboardContent() {
                       <ShieldCheck size={20} className={isProfileComplete ? 'text-emerald-600' : 'text-rose-500'}/>
                     </div>
                     <div>
-                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">住客檔案認證 (KYC) {!isProfileComplete && <span className="flex h-2 w-2 rounded-full bg-red-500 animate-pulse"></span>}</p>
                       <p className={`text-[10px] font-bold ${isProfileComplete ? 'text-slate-500' : 'text-rose-500'}`}>{isProfileComplete ? '檔案已完善 (實名認證)' : '上傳證件與緊急聯絡人'}</p>
                     </div>
                   </div>
@@ -1407,13 +1435,13 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 檔案認證 Modal */}
+      {/* 檔案認證 Modal (已升級 KYC) */}
       {activeModal === 'profile' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
             <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><ShieldCheck className="mr-2 text-emerald-600" size={24}/> 住客檔案認證</h3>
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><ShieldCheck className="mr-2 text-emerald-600" size={24}/> 住客檔案認證 (KYC)</h3>
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
             <div className="p-6 overflow-y-auto flex-1">
@@ -1439,15 +1467,56 @@ function DashboardContent() {
                       <p className="text-[10px] text-amber-700 font-bold leading-relaxed">依據管理規範，請上傳有效的身分證明文件並確實填寫緊急聯絡人資料。</p>
                     </div>
                   </div>
+                  
+                  {/* ★ KYC 證件類型與上傳 */}
                   <div>
-                    <p className="text-xs font-black text-slate-800 mb-3 flex justify-between"><span>1. 身分證明文件上傳</span></p>
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-xs font-black text-slate-800">1. 身分證明文件上傳</p>
+                    </div>
+                    
+                    <select 
+                      value={idType} 
+                      onChange={e => setIdType(e.target.value)} 
+                      className="w-full mb-3 p-3 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-emerald-500 bg-white shadow-sm"
+                    >
+                      <option value="HKID">香港身份證 (HKID)</option>
+                      <option value="CNID">內地身份證</option>
+                      <option value="Passport">護照 (Passport)</option>
+                      <option value="ExitEntryPermit">港澳通行證</option>
+                      <option value="StudentCard">學校就讀證明</option>
+                    </select>
+
                     <div className="relative">
-                      <input type="file" id="id-upload" accept="image/*,.pdf" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsIdUploaded(true); alert("📷 證件已暫存，請繼續填寫下方資料！"); } }} />
+                      <input 
+                        type="file" 
+                        id="id-upload" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => { 
+                          if (e.target.files?.[0]) { 
+                            setIdFile(e.target.files[0]);
+                            setIsIdUploaded(true); 
+                          } 
+                        }} 
+                      />
                       <label htmlFor="id-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isIdUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-emerald-400 hover:bg-emerald-50'}`}>
-                        {isIdUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">證件已成功夾帶</span></> : <><IdCard size={28} className="mb-2"/> <span className="text-sm font-bold">點擊上傳證件照片或 PDF</span></>}
+                        {isIdUploaded ? (
+                          <>
+                            <CheckCircle2 size={28} className="mb-2"/> 
+                            <span className="text-sm font-black text-emerald-700 truncate px-4">{idFile?.name || '證件已夾帶'}</span>
+                            <span className="text-[10px] text-emerald-600 mt-1">(支援圖片自動壓縮優化)</span>
+                          </>
+                        ) : (
+                          <>
+                            <IdCard size={28} className="mb-2"/> 
+                            <span className="text-sm font-bold">點擊上傳 {idType === 'Passport' ? '護照' : idType === 'StudentCard' ? '就讀證明' : '證件'}</span>
+                            <span className="text-[10px] text-slate-400 mt-1">支援 PNG / JPG / PDF (自動壓縮)</span>
+                          </>
+                        )}
                       </label>
                     </div>
                   </div>
+
                   <div className="pt-4 border-t border-slate-100">
                     <p className="text-xs font-black text-slate-800 mb-4">2. 緊急聯絡人資訊 (必填)</p>
                     <div className="space-y-3">
@@ -1460,8 +1529,8 @@ function DashboardContent() {
                       </div>
                     </div>
                   </div>
-                  <button type="submit" disabled={isSavingProfile} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-600/20 disabled:opacity-50">
-                    {isSavingProfile ? <><Loader2 size={18} className="animate-spin"/> 儲存中...</> : '確認送出檔案'}
+                  <button type="submit" disabled={isSavingProfile || !isIdUploaded} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-600/20 disabled:opacity-50 disabled:bg-slate-400">
+                    {isSavingProfile ? <><Loader2 size={18} className="animate-spin"/> 安全加密上傳中...</> : '確認送出 KYC 檔案'}
                   </button>
                 </form>
               )}
