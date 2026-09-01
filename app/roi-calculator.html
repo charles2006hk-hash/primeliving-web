@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>佳寓 2026 分租決策分析報告</title>
+
+  <!-- ★ 將密碼驗證腳本放在這裡 (優先阻擋畫面渲染) -->
+  <script>
+    if (prompt("請輸入內部存取密碼:") !== "2026pm") {
+      document.documentElement.innerHTML = "<h1 style='text-align:center;margin-top:20%;font-family:sans-serif;color:#333;'>Access Denied / 存取被拒</h1>";
+      throw new Error("Access Denied"); // 強制終止後續所有腳本與畫面渲染
+    }
+  </script>
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <style>
+    /* 強制設定列印為 A4 尺寸與邊距 */
+    @page {
+      size: A4 portrait;
+      margin: 15mm;
+    }
+    
+    /* 確保列印時背景顏色與圖形能正常顯示 */
+    @media print {
+      body {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+        background-color: white !important;
+      }
+      /* 列印時移除陰影，畫面更乾淨 */
+      .shadow-sm, .shadow-md {
+        box-shadow: none !important;
+      }
+      /* 列印時外框加深，增加閱讀性 */
+      .border {
+        border-color: #e2e8f0 !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-6 font-sans print:bg-white print:p-0">
+  <div id="app" class="max-w-5xl mx-auto space-y-6 print:space-y-4">
+    
+    <!-- 頂部 Header -->
+    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex items-start sm:items-center justify-between flex-col sm:flex-row gap-4 print:border-b-2 print:border-slate-800 print:rounded-none print:px-0 print:py-4">
+      <div>
+        <h1 class="text-2xl font-black text-slate-800">佳寓 2026 租賃策略損益分析報告</h1>
+        <p class="text-sm text-slate-500 font-medium mt-1">「提前簽約硬食空租」與「旺季高價簽約」的利潤差異分析</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <button @click="printReport" class="print:hidden bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold px-4 py-2 rounded-lg flex items-center gap-2 transition-colors active:scale-95 shadow-sm">
+          <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 6 2 18 2 18 9"></polyline><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><rect x="6" y="14" width="12" height="8"></rect></svg>
+          列印 A4 報告
+        </button>
+        <span class="text-[10px] font-black tracking-widest text-orange-500 bg-orange-50 border border-orange-100 px-3 py-1 rounded-full uppercase print:border-slate-300 print:text-slate-600 print:bg-slate-50">Internal Use Only</span>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 print:gap-4 print:block">
+      <!-- 參數調整/顯示區 -->
+      <div class="lg:col-span-4 space-y-6 print:space-y-4 print:mb-6">
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 print:break-inside-avoid">
+          <h2 class="text-sm font-black text-slate-700 mb-4 border-b pb-2">📊 基礎參數設定</h2>
+          <div class="space-y-4 print:space-y-2">
+            <div>
+              <label class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                <span>單位總數量 (間)</span>
+                <span class="text-blue-600 font-black text-sm">{{ units }} 間</span>
+              </label>
+              <!-- 列印時隱藏 input -->
+              <input type="range" v-model.number="units" min="10" max="50" step="1" class="w-full accent-blue-600 print:hidden">
+            </div>
+            <div>
+              <label class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                <span>預估單間分租月收 ($)</span>
+                <span class="text-blue-600 font-black text-sm">${{ formatCurrency(subletRevenue) }}</span>
+              </label>
+              <input type="number" v-model.number="subletRevenue" class="w-full p-2 border rounded-lg text-sm outline-none focus:ring-2 ring-blue-500 font-mono print:hidden">
+            </div>
+            <div>
+              <label class="flex justify-between text-xs font-bold text-slate-500 mb-1">
+                <span>合約年期 (年)</span>
+                <span class="text-blue-600 font-black text-sm">{{ contractYears }} 年 ({{ contractMonths }} 個月)</span>
+              </label>
+              <input type="range" v-model.number="contractYears" min="1" max="10" step="1" class="w-full accent-blue-600 print:hidden">
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1 gap-6 print:grid-cols-2 print:gap-4">
+          <div class="bg-indigo-50 rounded-2xl shadow-sm border border-indigo-100 p-6 print:break-inside-avoid">
+            <h2 class="text-sm font-black text-indigo-800 mb-4 border-b border-indigo-200 pb-2">A. 早簽方案 (1-2月)</h2>
+            <div class="space-y-4 print:space-y-2">
+              <div class="flex justify-between items-center print:block">
+                <label class="block text-xs font-bold text-indigo-600 mb-1">大業主月租金 ($)</label>
+                <span class="hidden print:block font-mono font-black text-indigo-900">${{ formatCurrency(earlyRent) }}</span>
+                <input type="number" v-model.number="earlyRent" class="w-full sm:w-32 lg:w-full p-2 border border-indigo-200 rounded-lg text-sm outline-none focus:ring-2 ring-indigo-500 font-mono print:hidden">
+              </div>
+              <div class="flex justify-between items-center print:block">
+                <label class="block text-xs font-bold text-indigo-600 mb-1">前期空租期 (個月)</label>
+                <span class="hidden print:block font-mono font-black text-indigo-900">{{ earlyVoid }} 個月</span>
+                <input type="number" v-model.number="earlyVoid" class="w-full sm:w-32 lg:w-full p-2 border border-indigo-200 rounded-lg text-sm outline-none focus:ring-2 ring-indigo-500 font-mono print:hidden">
+              </div>
+            </div>
+          </div>
+
+          <div class="bg-rose-50 rounded-2xl shadow-sm border border-rose-100 p-6 print:break-inside-avoid">
+            <h2 class="text-sm font-black text-rose-800 mb-4 border-b border-rose-200 pb-2">B. 晚簽方案 (6月)</h2>
+            <div class="space-y-4 print:space-y-2">
+              <div class="flex justify-between items-center print:block">
+                <label class="block text-xs font-bold text-rose-600 mb-1">大業主月租金 ($)</label>
+                <span class="hidden print:block font-mono font-black text-rose-900">${{ formatCurrency(lateRent) }}</span>
+                <input type="number" v-model.number="lateRent" class="w-full sm:w-32 lg:w-full p-2 border border-rose-200 rounded-lg text-sm outline-none focus:ring-2 ring-rose-500 font-mono print:hidden">
+              </div>
+              <div class="flex justify-between items-center print:block">
+                <label class="block text-xs font-bold text-rose-600 mb-1">前期空租期 (個月)</label>
+                <span class="hidden print:block font-mono font-black text-rose-900">{{ lateVoid }} 個月</span>
+                <input type="number" v-model.number="lateVoid" class="w-full sm:w-32 lg:w-full p-2 border border-rose-200 rounded-lg text-sm outline-none focus:ring-2 ring-rose-500 font-mono print:hidden">
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 分析結果區 -->
+      <div class="lg:col-span-8 space-y-6 print:space-y-4 print:mt-4">
+        
+        <!-- 決策結論 -->
+        <div :class="['rounded-2xl shadow-md p-8 text-white border-2 print:break-inside-avoid', isEarlyBetter ? 'bg-indigo-600 border-indigo-400 print:text-indigo-900 print:bg-indigo-50' : 'bg-rose-600 border-rose-400 print:text-rose-900 print:bg-rose-50']">
+          <h3 class="text-sm font-black tracking-widest opacity-80 mb-2 uppercase print:opacity-100">系統建議決策</h3>
+          <div class="text-4xl font-black mb-4">
+            {{ isEarlyBetter ? '採取【方案 A：早簽約】' : '採取【方案 B：晚簽約】' }}
+          </div>
+          <p class="text-lg font-medium opacity-90 print:opacity-100 print:text-slate-700">
+            在 {{ units }} 個單位的規模下，{{ contractYears }} 年的合約期內，
+            {{ isEarlyBetter ? '早簽' : '晚簽' }}將為公司多帶來
+            <span :class="['font-mono font-black text-2xl', isEarlyBetter ? 'text-yellow-300 print:text-indigo-700' : 'text-yellow-300 print:text-rose-700']">
+              ${{ formatCurrency(Math.abs(totalDifference)) }}
+            </span> 的總利潤。
+          </p>
+        </div>
+
+        <!-- 臨界點洞察 -->
+        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 flex items-center justify-between print:break-inside-avoid">
+          <div>
+            <h4 class="font-black text-slate-800 text-lg">早簽損益平衡點 (Break-even)</h4>
+            <p class="text-sm text-slate-500 mt-1">只要大業主合約大於此月數，提前簽約承受空租即為正收益。</p>
+          </div>
+          <div class="text-right">
+            <div class="text-3xl font-black font-mono text-emerald-600">{{ breakEvenMonths }} <span class="text-sm text-slate-400">個月</span></div>
+            <div class="text-xs font-bold text-slate-400 mt-1">即 {{ (breakEvenMonths / 12).toFixed(1) }} 年</div>
+          </div>
+        </div>
+
+        <!-- 詳細數據比較對比表 -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 print:gap-4 print:break-inside-avoid">
+          <!-- 早簽卡片 -->
+          <div class="bg-white rounded-2xl shadow-sm border-t-4 border-t-indigo-500 border border-slate-200 p-6">
+            <h4 class="font-black text-indigo-900 mb-4 text-center">方案 A：早簽約 (1-2月)</h4>
+            <div class="space-y-3 text-sm">
+              <div class="flex justify-between border-b border-slate-50 pb-2">
+                <span class="text-slate-500 font-bold">總租金支出 (Cost)</span>
+                <span class="font-mono text-rose-600">-${{ formatCurrency(earlyTotalCost) }}</span>
+              </div>
+              <div class="flex justify-between border-b border-slate-50 pb-2">
+                <span class="text-slate-500 font-bold">預估分租總收 (Revenue)</span>
+                <span class="font-mono text-emerald-600">+${{ formatCurrency(earlyTotalRevenue) }}</span>
+              </div>
+              <div class="flex justify-between pt-2">
+                <span class="text-slate-800 font-black">整體總利潤 (Profit)</span>
+                <span class="font-mono font-black text-lg text-slate-800">${{ formatCurrency(earlyTotalProfit) }}</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 晚簽卡片 -->
+          <div class="bg-white rounded-2xl shadow-sm border-t-4 border-t-rose-500 border border-slate-200 p-6">
+            <h4 class="font-black text-rose-900 mb-4 text-center">方案 B：晚簽約 (6月)</h4>
+            <div class="space-y-3 text-sm">
+              <div class="flex justify-between border-b border-slate-50 pb-2">
+                <span class="text-slate-500 font-bold">總租金支出 (Cost)</span>
+                <span class="font-mono text-rose-600">-${{ formatCurrency(lateTotalCost) }}</span>
+              </div>
+              <div class="flex justify-between border-b border-slate-50 pb-2">
+                <span class="text-slate-500 font-bold">預估分租總收 (Revenue)</span>
+                <span class="font-mono text-emerald-600">+${{ formatCurrency(lateTotalRevenue) }}</span>
+              </div>
+              <div class="flex justify-between pt-2">
+                <span class="text-slate-800 font-black">整體總利潤 (Profit)</span>
+                <span class="font-mono font-black text-lg text-slate-800">${{ formatCurrency(lateTotalProfit) }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const { createApp } = Vue
+
+    createApp({
+      data() {
+        return {
+          units: 10,
+          contractYears: 3,
+          subletRevenue: 22000,
+          earlyRent: 12500,
+          earlyVoid: 6,
+          lateRent: 16000,
+          lateVoid: 2
+        }
+      },
+      computed: {
+        contractMonths() {
+          return this.contractYears * 12;
+        },
+        earlyTotalCost() {
+          return Math.round(this.earlyRent * this.contractMonths * this.units);
+        },
+        earlyTotalRevenue() {
+          const activeMonths = Math.max(0, this.contractMonths - this.earlyVoid);
+          return Math.round(this.subletRevenue * activeMonths * this.units);
+        },
+        earlyTotalProfit() {
+          return this.earlyTotalRevenue - this.earlyTotalCost;
+        },
+        lateTotalCost() {
+          return Math.round(this.lateRent * this.contractMonths * this.units);
+        },
+        lateTotalRevenue() {
+          const activeMonths = Math.max(0, this.contractMonths - this.lateVoid);
+          return Math.round(this.subletRevenue * activeMonths * this.units);
+        },
+        lateTotalProfit() {
+          return this.lateTotalRevenue - this.lateTotalCost;
+        },
+        totalDifference() {
+          return this.earlyTotalProfit - this.lateTotalProfit;
+        },
+        isEarlyBetter() {
+          return this.earlyTotalProfit >= this.lateTotalProfit;
+        },
+        breakEvenMonths() {
+          const rentDiff = this.lateRent - this.earlyRent;
+          if (rentDiff <= 0) return 0; 
+          const voidDiff = this.earlyVoid - this.lateVoid;
+          const months = (this.subletRevenue * voidDiff) / rentDiff;
+          return Math.ceil(months); 
+        }
+      },
+      methods: {
+        formatCurrency(value) {
+          return value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+        },
+        printReport() {
+          window.print();
+        }
+      }
+    }).mount('#app')
+  </script>
+</body>
+</html>
