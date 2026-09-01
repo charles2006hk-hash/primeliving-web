@@ -107,6 +107,7 @@ function DashboardContent() {
   const [isVerifying, setIsVerifying] = useState(false);
 
   const [selectedOptionalBillIds, setSelectedOptionalBillIds] = useState<string[]>([]);
+  const [showBillDetails, setShowBillDetails] = useState(true);
 
   const [signature, setSignature] = useState('');
   const [isSigning, setIsSigning] = useState(false);
@@ -364,7 +365,7 @@ function DashboardContent() {
 
       return { 
         id: item.id, 
-        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳帳單'), 
+        title: fd.items?.[0]?.description || (item.type === 'Receipt' ? '繳款正式收據' : '待繳單據'), 
         amount, 
         amountCents, 
         dueDateStr, 
@@ -374,7 +375,18 @@ function DashboardContent() {
       };
     });
 
-    allBills.sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    const numMap: Record<string, number> = { '一':1, '二':2, '三':3, '四':4, '五':5, '六':6, '七':7, '八':8, '九':9, '十':10 };
+    allBills.sort((a, b) => {
+      const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      
+      const getPeriod = (title: string) => {
+        const match = title.match(/第([一二三四五六七八九十\d]+)期/);
+        if (!match) return 999;
+        return numMap[match[1]] || parseInt(match[1]) || 999;
+      };
+      return getPeriod(a.title) - getPeriod(b.title);
+    });
 
     const mandatoryItems = allBills.filter(b => b.dueDate <= today);
     const optionalItems = allBills.filter(b => b.dueDate > today && b.dueDate <= thirtyDaysLater);
@@ -387,7 +399,17 @@ function DashboardContent() {
     const allPayingBills = [
       ...mandatoryItems,
       ...optionalItems.filter(b => selectedOptionalBillIds.includes(b.id))
-    ].sort((a, b) => a.dueDate.getTime() - b.dueDate.getTime());
+    ].sort((a, b) => {
+      const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
+      if (timeDiff !== 0) return timeDiff;
+      
+      const getPeriod = (title: string) => {
+        const match = title.match(/第([一二三四五六七八九十\d]+)期/);
+        if (!match) return 999;
+        return numMap[match[1]] || parseInt(match[1]) || 999;
+      };
+      return getPeriod(a.title) - getPeriod(b.title);
+    });
 
     for (const bill of allPayingBills) {
       if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
@@ -411,7 +433,7 @@ function DashboardContent() {
       isSplitNeeded,                                  
       mandatoryItems,
       optionalItems,
-      allPayingBills, // ★ 暴露所有準備繳款的清單，供 UI 展開顯示
+      allPayingBills,
       hasOverdue: mandatoryItems.some(b => b.isOverdue),
       hasUpcoming: optionalItems.length > 0
     };
@@ -675,7 +697,6 @@ function DashboardContent() {
     try {
       const storage = getStorage();
       
-      // ★ 執行前端圖片壓縮 (<150KB)
       const compressedFile = await compressImage(idFile);
       
       const idRef = ref(storage, `tenants/${tenantData.id}/kyc/${idType}_${Date.now()}_${compressedFile.name}`);
@@ -968,7 +989,7 @@ function DashboardContent() {
                   </div>
                 )}
                 
-                <div className="flex justify-between items-start mb-6 relative z-10">
+                <div className="flex justify-between items-start mb-4 relative z-10">
                   <div>
                     <p className="text-slate-300 text-[10px] font-black uppercase tracking-widest mb-1">本次結帳總額 (HKD)</p>
                     <h2 className="text-5xl md:text-6xl font-black tracking-tighter">${billingSummary.checkoutTotal.toLocaleString()}</h2>
@@ -981,24 +1002,33 @@ function DashboardContent() {
                   </span>
                 </div>
 
-                {/* ★ 預設展開金額組成 */}
-                <div className="mb-6 relative z-10 bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10">
-                  <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本次結帳金額明細：</p>
-                  {billingSummary.allPayingBills.length === 0 ? (
-                    <p className="text-slate-400 py-1">目前無任何待繳單據</p>
-                  ) : (
-                    billingSummary.allPayingBills.map(item => (
-                      <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
-                        <div className="flex items-center gap-2">
-                          <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
-                          <span className="flex items-center gap-1.5 flex-wrap">
-                            {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
-                            {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
-                          </span>
-                        </div>
-                        <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
-                      </div>
-                    ))
+                {/* ★ 加入隱藏/展開的 Toggle 按鈕 */}
+                <div className="mb-6 relative z-10">
+                  <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition mb-2">
+                    {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
+                    {showBillDetails ? '收起帳單明細' : '檢視詳細對數單據明細'}
+                  </button>
+                  
+                  {showBillDetails && (
+                    <div className="bg-white/10 rounded-xl p-4 space-y-3 text-xs border border-white/10 animate-in fade-in duration-200">
+                      <p className="text-slate-400 font-bold mb-1.5 border-b border-white/10 pb-1">📌 本次結帳金額明細：</p>
+                      {billingSummary.allPayingBills.length === 0 ? (
+                        <p className="text-slate-400 py-1">目前無任何待繳單據</p>
+                      ) : (
+                        billingSummary.allPayingBills.map(item => (
+                          <div key={item.id} className="flex justify-between items-center py-1.5 px-1 rounded text-slate-200 bg-white/5 mb-1 border border-white/10">
+                            <div className="flex items-center gap-2">
+                              <CheckSquare size={14} className="text-orange-500 opacity-70 shrink-0"/>
+                              <span className="flex items-center gap-1.5 flex-wrap">
+                                {item.isOverdue && <span className="bg-red-500/30 text-red-300 text-[9px] px-1.5 py-0.5 rounded font-black border border-red-500/30">已逾期</span>}
+                                {item.title} <span className="text-[10px] text-slate-400">({item.dueDateStr})</span>
+                              </span>
+                            </div>
+                            <span className="font-mono font-bold">${item.amount.toLocaleString()}</span>
+                          </div>
+                        ))
+                      )}
+                    </div>
                   )}
                 </div>
 
@@ -1014,7 +1044,9 @@ function DashboardContent() {
                 </div>
                 <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
-                  <p className="text-sm font-black text-slate-800 truncate">{tenantData.roomInfo}</p>
+                  <p className="text-sm font-black text-slate-800 truncate font-mono">
+                    {tenantData.roomInfo?.length > 15 ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` : tenantData.roomInfo}
+                  </p>
                 </div>
               </div>
             </div>
