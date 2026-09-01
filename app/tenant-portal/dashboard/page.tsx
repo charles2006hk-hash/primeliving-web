@@ -473,21 +473,46 @@ function DashboardContent() {
     } catch (error: any) { alert(`上傳失敗: ${error.message}`); } finally { setIsSavingProfile(false); }
   };
 
-  // ★ 處理好評送出
+  // ★ 處理好評送出 (雙向寫入：官網待審核庫 + 後台提醒)
   const handleSubmitReview = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!reviewText.trim()) return alert("請寫下您的評價建議！");
     setIsSubmittingReview(true);
+    
     try {
-      await addDoc(collection(db, 'inquiries'), {
-        tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
-        category: '服務評價與建議', message: `【租客評價：${rating} 顆星 ⭐】\n${reviewText}`,
-        type: 'review', status: 'Resolved', createdAt: serverTimestamp()
+      // 1. 寫入到官網專用的 testimonials 集合 (預設隱藏 pending)
+      await addDoc(collection(db, 'testimonials'), {
+        tenantId: tenantData.id,
+        name: tenantData.name, // 官網顯示的租客稱呼
+        identity: '佳寓認證租客', // 官網顯示的次要標籤
+        text: reviewText.trim(),
+        rating: rating,
+        status: 'pending', // ★ 關鍵：管理員在大系統按下「通過」後才會改成 'published'
+        createdAt: serverTimestamp()
       });
-      alert("💖 感謝您的寶貴評價！我們將持續提供更優質的服務。");
-      setActiveModal('none'); setReviewText(''); setRating(5);
-    } catch (error) { alert("送出失敗，請重試。"); } 
-    finally { setIsSubmittingReview(false); }
+
+      // 2. 同步發送一個 Ticket 給大系統，觸發管理員首頁的動態卡片提醒
+      await addDoc(collection(db, 'inquiries'), {
+        tenantId: tenantData.id, 
+        name: tenantData.name, 
+        roomInfo: tenantData.roomInfo,
+        category: '⭐ 收到新租客評價', 
+        message: `租客給予了 ${rating} 星評價：\n「${reviewText}」\n\n👉 請前往大系統的【官網評價管理】模塊進行審核。若通過，將自動顯示於官網首頁。`,
+        type: 'ticket', 
+        status: 'New', // 讓大系統亮紅燈
+        createdAt: serverTimestamp()
+      });
+
+      alert("💖 感謝您的寶貴評價！您的鼓勵是我們前進的最大動力。");
+      setActiveModal('none'); 
+      setReviewText(''); 
+      setRating(5);
+    } catch (error) { 
+      console.error(error);
+      alert("送出失敗，請重試。"); 
+    } finally { 
+      setIsSubmittingReview(false); 
+    }
   };
 
   // ★ 處理退租申請與簽署
