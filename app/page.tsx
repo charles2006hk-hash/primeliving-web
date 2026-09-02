@@ -7,39 +7,11 @@ import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp, wh
 import { db } from '@/lib/firebase';
 import { 
   Search, MapPin, Home as HomeIcon, ChevronDown, Sparkles, 
-  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle,
-  // ★ 新增：用於房間標準配置的圖標
-  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, BedDouble, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen
+  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle
 } from 'lucide-react';
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
-
-// ============================================================================
-// ★ 智能圖標匹配器：根據 CMS 填寫的關鍵字，自動渲染對應的 SVG 圖示
-// ============================================================================
-const getAmenityIcon = (name: string) => {
-  const lower = name.toLowerCase();
-  if (lower.includes('冰箱')) return <Refrigerator size={16} />;
-  if (lower.includes('洗') || lower.includes('烘')) return <Waves size={16} />;
-  if (lower.includes('爐') || lower.includes('箱') || lower.includes('鍋')) return <ChefHat size={16} />;
-  if (lower.includes('風')) return <Wind size={16} />;
-  if (lower.includes('空調') || lower.includes('冷氣')) return <Fan size={16} />;
-  if (lower.includes('行李') || lower.includes('置物')) return <Briefcase size={16} />;
-  if (lower.includes('桌') || lower.includes('椅')) return <Coffee size={16} />; 
-  if (lower.includes('櫃')) return <Archive size={16} />;
-  if (lower.includes('馬桶') || lower.includes('浴') || lower.includes('廁')) return <Bath size={16} />;
-  if (lower.includes('床') || lower.includes('被')) return <BedDouble size={16} />;
-  if (lower.includes('書桌') || lower.includes('辦公')) return <Monitor size={16} />;
-  if (lower.includes('衣架') || lower.includes('衣櫃')) return <Shirt size={16} />;
-  if (lower.includes('插') || lower.includes('電')) return <Plug size={16} />;
-  if (lower.includes('燈')) return <LampDesk size={16} />;
-  if (lower.includes('垃圾')) return <Trash2 size={16} />;
-  if (lower.includes('掃') || lower.includes('拖')) return <Sparkles size={16} />;
-  if (lower.includes('抹布') || lower.includes('清潔')) return <Droplets size={16} />;
-  if (lower.includes('書架')) return <BookOpen size={16} />;
-  return <CheckCircle size={16} />; // 預設圖標
-};
 
 // 圖片代理處理
 const getProxiedUrl = (url?: string | null) => {
@@ -121,14 +93,12 @@ const maskPropertyName = (name: string) => {
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
 
-  // ★ 取得當前部署環境的公司專屬 ID (多租戶隔離)[cite: 4]
+  // ★ 取得當前部署環境的公司專屬 ID (多租戶隔離)
   const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
 
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [featuredProps, setFeaturedProps] = useState<any[]>([]);
-  // ★ 動態獲取房間配置資料[cite: 4]
-  const [amenitiesData, setAmenitiesData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   const [loadingArea, setLoadingArea] = useState<string | null>(null);
@@ -143,43 +113,31 @@ export default function HomePage(): React.JSX.Element {
       try {
         if (!db) return;
         
-        // ★ 加入 companyId 過濾條件[cite: 4]
+        // 1. 抓取百科 (加入 companyId 過濾條件)
         const qArea = query(collection(db, 'area_guides'), where('companyId', '==', COMPANY_ID), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
-        
         const guides = snapArea.docs.map(d => {
           const data = d.data();
           const eId = findEncyclopediaId(data.name);
-          return { 
-            id: d.id, 
-            ...data, 
-            encyclopediaId: eId || encodeURIComponent(data.name), 
-            hasEncyclopedia: !!eId, 
-            imageUrl: data.imageUrl || data.img || '' 
-          };
+          return { id: d.id, ...data, encyclopediaId: eId || encodeURIComponent(data.name), hasEncyclopedia: !!eId, imageUrl: data.imageUrl || data.img || '' };
         });
         setAreaGuides(guides);
 
-        // ★ 加入 companyId 過濾條件[cite: 4]
+        // 2. 抓取評價 (加入 companyId 過濾條件)
         const qTest = query(collection(db, 'testimonials'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
-        setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })).filter((t: any) => t.status === 'published'));
+        // ★ 只過濾顯示 status === 'published' 的評價
+        const publishedTests = snapTest.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .filter((t: any) => t.status === 'published');
+        setTestimonials(publishedTests);
 
-        // ★ 抓取房間標準配置設定[cite: 4]
-        const qSettings = query(collection(db, 'settings'), where('companyId', '==', COMPANY_ID), where('type', '==', 'amenities'));
-        const snapSettings = await getDocs(qSettings);
-        if (!snapSettings.empty) {
-          setAmenitiesData(snapSettings.docs[0].data());
-        }
-
-        // ★ 加入 companyId 過濾條件[cite: 4]
+        // 3. 抓取精選盤源 (加入 companyId 過濾條件)
         const qProp = query(collection(db, 'properties'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
-        
         const qRooms = query(collection(db, 'rooms'), where('companyId', '==', COMPANY_ID));
         const roomsSnap = await getDocs(qRooms);
         const allRooms = roomsSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-        
         const qMedia = query(collection(db, 'media_library'), where('companyId', '==', COMPANY_ID));
         const mediaSnap = await getDocs(qMedia);
         const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
@@ -234,7 +192,7 @@ export default function HomePage(): React.JSX.Element {
       }
     }
     fetchAllData();
-  }, []);
+  }, [COMPANY_ID]);
 
   const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, area: any) => {
     e.preventDefault();
@@ -255,7 +213,7 @@ export default function HomePage(): React.JSX.Element {
     setSubmittingLead(true);
     try {
       await addDoc(collection(db, 'inquiries'), {
-        companyId: COMPANY_ID, // ★ 強制綁定該筆名單至當前公司[cite: 4]
+        companyId: COMPANY_ID, 
         tenantId: `visitor_${Date.now()}`,
         name: leadName,
         phone: leadPhone,
@@ -277,22 +235,6 @@ export default function HomePage(): React.JSX.Element {
       setSubmittingLead(false);
     }
   };
-
-  // ★ 處理要渲染的配置資料 (如果 CMS 還沒填過，就用預設值防呆)[cite: 4]
-  const displayAmenities = [
-    {
-      category: "公共區域必備", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-100",
-      items: amenitiesData?.publicArea || ["雙門大冰箱", "洗衣機 / 洗脫烘", "微波爐 / 烤箱 / 氣炸鍋", "Dyson 吹風機", "客廳空調 / 冷風機", "大件行李置物架", "客廳飯桌與座椅", "洗臉池與獨立鞋櫃", "馬桶與浴室冷暖通風"]
-    },
-    {
-      category: "個人房間必備", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100",
-      items: amenitiesData?.privateRoom || ["單人/雙人床及舒適床墊", "專屬書桌與人體工學椅", "獨立衣櫃與衣架", "多國通用延長線插板", "房間獨立變頻空調", "護眼檯燈", "全新被褥 (含被/單/套)", "收納層架與個人垃圾簍"]
-    },
-    {
-      category: "公共易耗品", color: "text-orange-600", bg: "bg-orange-50", border: "border-orange-100",
-      items: amenitiesData?.consumables || ["掃把、簸箕與拖把", "洗碗精與清潔抹布", "空氣清新劑與垃圾袋"]
-    }
-  ];
 
   return (
     <main className="relative min-h-screen bg-gradient-to-br from-orange-50 via-rose-50 to-amber-50 overflow-hidden selection:bg-orange-200">
@@ -319,92 +261,7 @@ export default function HomePage(): React.JSX.Element {
           </div>
         </section>
 
-        {/* ============================================================================ */}
-        {/* ★ 動態渲染：拎包入住配置區塊[cite: 4] */}
-        {/* ============================================================================ */}
-        <section className="max-w-7xl mx-auto px-4">
-          <div className="flex flex-col md:flex-row justify-between items-end mb-12 border-b border-slate-300/50 pb-4 gap-4">
-            <div>
-              <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
-                 <div className="w-2 h-8 bg-orange-500 rounded-full shadow-md shadow-orange-500/50"/> 房間標準配置
-              </h2>
-              <p className="text-sm font-bold text-slate-500 mt-2 ml-5">真・拎包入住，為您準備齊全的家電與生活用品</p>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-            {displayAmenities.map((section, idx) => (
-              <div key={idx} className={`p-6 md:p-8 rounded-[2rem] border ${section.border} bg-white/70 backdrop-blur-xl shadow-xl shadow-slate-200/40 hover:bg-white/90 transition-all duration-300`}>
-                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${section.bg} ${section.color} font-black text-sm tracking-widest mb-6`}>
-                  {section.category}
-                </div>
-                <ul className="space-y-4">
-                  {section.items.map((itemStr: string, itemIdx: number) => (
-                    <li key={itemIdx} className="flex items-start gap-3">
-                      <div className={`mt-0.5 ${section.color} opacity-70`}>{getAmenityIcon(itemStr)}</div>
-                      <span className="text-sm font-bold text-slate-700 leading-snug">{itemStr}</span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ))}
-          </div>
-        </section>
-
-        <section className="max-w-7xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-black text-slate-900 mb-3 drop-shadow-sm">精選生活圈百科</h2>
-            <p className="text-sm text-slate-600 font-bold">深入調研區域優勢，為您匹配最適合的大學/通勤圈</p>
-          </div>
-
-          {loading ? (
-             <div className="py-20 flex justify-center items-center bg-white/40 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-xl">
-               <Loader2 className="animate-spin text-orange-500 mr-2" size={24} />
-               <p className="text-slate-600 font-bold">載入中...</p>
-             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {areaGuides.map((area: any) => (
-                <div key={area.id} className="group bg-white/60 backdrop-blur-xl border border-white/80 rounded-[2.5rem] overflow-hidden flex flex-col transition-all duration-300 hover:shadow-2xl hover:bg-white/80 hover:-translate-y-2 shadow-xl shadow-slate-200/40">
-                  <div className="h-64 relative overflow-hidden bg-slate-200">
-                    {area.imageUrl ? (
-                      <img src={getProxiedUrl(area.imageUrl)} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 font-bold">尚無圖片</div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent flex items-end p-6">
-                      <h3 className="text-xl font-black text-white">{area.name}</h3>
-                    </div>
-                  </div>
-                  <div className="p-8 flex-1 flex flex-col">
-                    <p className="text-sm text-slate-700 leading-relaxed mb-6 font-medium line-clamp-3">{area.desc}</p>
-                    <div className="space-y-4 mb-8">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-blue-500/10 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
-                        <p className="text-xs font-bold text-slate-800">{area.transport}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="bg-emerald-500/10 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
-                        <p className="text-xs font-bold text-slate-800">{area.estates}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={(e) => handleAreaClick(e, area)} 
-                      disabled={loadingArea === area.id} 
-                      className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
-                    >
-                      {loadingArea === area.id ? (
-                        <><Loader2 className="animate-spin" size={18}/> 正在前往百科...</>
-                      ) : (
-                        <>探索百科與房源 <ArrowRight size={18} /></>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
+        {/* 移除原本放在首頁的「房間標準配置」，現在只保留在百科內頁 */}
 
         <section className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between items-end mb-12 border-b border-slate-300/50 pb-4">
@@ -499,6 +356,61 @@ export default function HomePage(): React.JSX.Element {
               );
             })}
           </div>
+        </section>
+
+        <section className="max-w-7xl mx-auto px-4">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-black text-slate-900 mb-3 drop-shadow-sm">精選生活圈百科</h2>
+            <p className="text-sm text-slate-600 font-bold">深入調研區域優勢，為您匹配最適合的大學/通勤圈</p>
+          </div>
+
+          {loading ? (
+             <div className="py-20 flex justify-center items-center bg-white/40 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-xl">
+               <Loader2 className="animate-spin text-orange-500 mr-2" size={24} />
+               <p className="text-slate-600 font-bold">載入中...</p>
+             </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {areaGuides.map((area: any) => (
+                <div key={area.id} className="group bg-white/60 backdrop-blur-xl border border-white/80 rounded-[2.5rem] overflow-hidden flex flex-col transition-all duration-300 hover:shadow-2xl hover:bg-white/80 hover:-translate-y-2 shadow-xl shadow-slate-200/40">
+                  <div className="h-64 relative overflow-hidden bg-slate-200">
+                    {area.imageUrl ? (
+                      <img src={getProxiedUrl(area.imageUrl)} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 font-bold">尚無圖片</div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent flex items-end p-6">
+                      <h3 className="text-xl font-black text-white">{area.name}</h3>
+                    </div>
+                  </div>
+                  <div className="p-8 flex-1 flex flex-col">
+                    <p className="text-sm text-slate-700 leading-relaxed mb-6 font-medium line-clamp-3">{area.desc}</p>
+                    <div className="space-y-4 mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-blue-500/10 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
+                        <p className="text-xs font-bold text-slate-800">{area.transport}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="bg-emerald-500/10 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
+                        <p className="text-xs font-bold text-slate-800">{area.estates}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={(e) => handleAreaClick(e, area)} 
+                      disabled={loadingArea === area.id} 
+                      className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
+                    >
+                      {loadingArea === area.id ? (
+                        <><Loader2 className="animate-spin" size={18}/> 正在前往百科...</>
+                      ) : (
+                        <>探索百科與房源 <ArrowRight size={18} /></>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
         </section>
 
         <section className="max-w-7xl mx-auto px-4">
