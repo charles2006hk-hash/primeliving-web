@@ -60,6 +60,13 @@ const getEstateCover = (estateName?: string) => {
   return 'https://images.unsplash.com/photo-1460317442991-0ec209397118?auto=format&fit=crop&q=80&w=800';
 };
 
+// 清理與淨化屋苑名稱 (移除具體房號與座數，防止洩漏隱私)
+const getBaseEstateName = (rawName: string) => {
+  if (!rawName) return '優質屋苑';
+  const base = rawName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
+  return base || rawName;
+};
+
 const getFloorLevel = (id: string) => {
   if (!id) return '中層';
   const sum = id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
@@ -67,7 +74,6 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
-// 官方盤價格區間
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -78,14 +84,13 @@ const getPriceRange = (price: number) => {
   return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
 };
 
-// ★ 新增：行家盤專屬價格算法 (利用 ID Hash 產生穩定的 +- 500~1000 隨機數)
+// 行家盤專屬價格算法 (利用 ID Hash 產生穩定的 +- 500~1000 隨機區間)
 const getCompetitorPriceRange = (price: number, id: string) => {
   if (!price || price === 0) return '價格待定';
   let hash = 0;
   for (let i = 0; i < id.length; i++) {
     hash = id.charCodeAt(i) + ((hash << 5) - hash);
   }
-  // Math.abs(hash) % 6 會產出 0~5，加上 5 變成 5~10，再乘 100 就是 500 ~ 1000 的固定偏移
   const offset = (Math.abs(hash) % 6 + 5) * 100;
   const lower = price - offset;
   const upper = price + offset;
@@ -259,18 +264,17 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
         
         const processedRooms = roomData.map(room => {
            const floorLevel = getFloorLevel(room.id);
-           let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
-           rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
+           const rawEstateName = getBaseEstateName(room.estateName || room.propertyName || '優質屋苑');
            
-           // ★ 修復：不論是直營還是行家盤，全部統一遮罩名稱，只顯示「樓盤 | 樓層精選單位」
+           // ★ 隱私防護：統一將卡片標題改為 「屋苑 | 樓層精選單位」
            const displayTitle = `${rawEstateName} | ${floorLevel}精選單位`;
            
-           // ★ 修復：行家盤使用固定演算法產生 +- 500~1000 隨機區間，直營盤保持原邏輯
+           // ★ 模糊價格算法：行家盤與直營盤皆採用動態區間
            const displayPrice = room.isCompetitor 
              ? getCompetitorPriceRange(room.baseRent, room.id)
              : getPriceRange(room.baseRent);
 
-           return { ...room, floorLevel, displayTitle, displayPrice };
+           return { ...room, floorLevel, rawEstateName, displayTitle, displayPrice };
         });
 
         setData({ estate: estateData, rooms: processedRooms });
@@ -598,8 +602,10 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                      ) : (
                        <div className="w-full h-full flex flex-col items-center justify-center text-slate-300 font-black italic"><Home size={32} className="mb-2 opacity-20"/>Prime Living</div>
                      )}
+                     
+                     {/* ★ 淨化標籤：僅顯示純粹的屋苑名稱，不帶房號 */}
                      <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 z-10 border border-white/50">
-                        <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {room.estateName || room.propertyName}
+                        <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {getBaseEstateName(room.estateName || room.propertyName)}
                      </div>
                      {room.isCompetitor && (
                        <div className="absolute top-4 right-4 bg-purple-600/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-white shadow-sm flex items-center gap-1 z-10 border border-white/50">
@@ -609,20 +615,23 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                    </div>
                    <div className="p-6 flex flex-col flex-1 relative z-10">
                      <div className="flex justify-between items-start mb-3 gap-2">
+                       {/* ★ 隱私標題：固定為「屋苑 | 樓層精選單位」 */}
                        <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
                        <div className="text-right shrink-0">
+                         {/* ★ 模糊價格：動態計算的 +-500~1000 區間 */}
                          <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>{room.displayPrice}</span>
                        </div>
                      </div>
 
-                     {room.isCompetitor && (room.direction || room.description) && (
+                     {/* ★ 智能資訊展示：只顯示「坐向」，以及「簡短的個人化描述」（長過 40 字的批量介紹會自動隱藏，確保版面乾淨） */}
+                     {room.isCompetitor && (room.direction || (room.description && room.description.length < 40 && !room.description.includes('【'))) && (
                        <div className="flex flex-col gap-1.5 mt-2 mb-3">
                           {room.direction && (
-                            <span className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2 py-1 rounded-md w-fit text-[11px] font-black border border-blue-100/50">
+                            <span className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md w-fit text-[11px] font-black border border-blue-100/50">
                               <Compass size={12} className="text-blue-500"/> {room.direction}
                             </span>
                           )}
-                          {room.description && (
+                          {room.description && room.description.length < 40 && !room.description.includes('【') && (
                             <span className="text-slate-600 text-[11px] leading-relaxed bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100 line-clamp-2">
                               {room.description}
                             </span>
@@ -665,6 +674,7 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間與預算</label>
+                {/* ★ Placeholder 已經改為【預算 $10000】 */}
                 <input type="text" value={leadReq} onChange={(e) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住，【預算 $10000】左右"/>
               </div>
               <div className="pt-2">
