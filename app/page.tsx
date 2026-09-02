@@ -48,7 +48,7 @@ const findEncyclopediaId = (name: string) => {
   return matched ? matched.id : null;
 };
 
-// ★ 常見百家姓氏與穩定 Hash 函數 (根據樓盤 ID 分配固定姓氏)
+// 常見百家姓氏與穩定 Hash 函數
 const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
 
 const getSurnameForProperty = (propId: string) => {
@@ -93,7 +93,7 @@ const maskPropertyName = (name: string) => {
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
 
-  // ★ 取得當前部署環境的公司專屬 ID (多租戶隔離)
+  // 取得當前部署環境的公司專屬 ID (多租戶隔離)
   const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
 
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
@@ -113,7 +113,7 @@ export default function HomePage(): React.JSX.Element {
       try {
         if (!db) return;
         
-        // 1. 抓取百科 (加入 companyId 過濾條件)
+        // 1. 抓取百科
         const qArea = query(collection(db, 'area_guides'), where('companyId', '==', COMPANY_ID), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         const guides = snapArea.docs.map(d => {
@@ -123,16 +123,16 @@ export default function HomePage(): React.JSX.Element {
         });
         setAreaGuides(guides);
 
-        // 2. 抓取評價 (加入 companyId 過濾條件)
+        // 2. 抓取評價
         const qTest = query(collection(db, 'testimonials'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
-        // ★ 只過濾顯示 status === 'published' 的評價
+        // ★ 修復：相容舊資料庫，如果該筆評價沒有 status 欄位 (!t.status)，也默認讓它顯示
         const publishedTests = snapTest.docs
           .map(d => ({ id: d.id, ...d.data() }))
-          .filter((t: any) => t.status === 'published');
+          .filter((t: any) => t.status === 'published' || !t.status);
         setTestimonials(publishedTests);
 
-        // 3. 抓取精選盤源 (加入 companyId 過濾條件)
+        // 3. 抓取精選盤源
         const qProp = query(collection(db, 'properties'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
         const qRooms = query(collection(db, 'rooms'), where('companyId', '==', COMPANY_ID));
@@ -248,6 +248,9 @@ export default function HomePage(): React.JSX.Element {
 
       <div className="relative z-10 pt-24 md:pt-32 pb-24 space-y-32">
         
+        {/* ========================================================= */}
+        {/* Hero Section */}
+        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4 flex flex-col items-center text-center">
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-orange-600 text-xs font-black tracking-widest mb-6 shadow-sm">
             <Sparkles size={14} /> 2026 赴港精英租房首選平台
@@ -261,8 +264,67 @@ export default function HomePage(): React.JSX.Element {
           </div>
         </section>
 
-        {/* 移除原本放在首頁的「房間標準配置」，現在只保留在百科內頁 */}
+        {/* ========================================================= */}
+        {/* ★ 順序調整：精選生活圈百科 移至上方 */}
+        {/* ========================================================= */}
+        <section className="max-w-7xl mx-auto px-4">
+          <div className="text-center mb-16">
+            <h2 className="text-3xl font-black text-slate-900 mb-3 drop-shadow-sm">精選生活圈百科</h2>
+            <p className="text-sm text-slate-600 font-bold">深入調研區域優勢，為您匹配最適合的大學/通勤圈</p>
+          </div>
 
+          {loading ? (
+             <div className="py-20 flex justify-center items-center bg-white/40 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-xl">
+               <Loader2 className="animate-spin text-orange-500 mr-2" size={24} />
+               <p className="text-slate-600 font-bold">載入中...</p>
+             </div>
+          ) : (
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+              {areaGuides.map((area: any) => (
+                <div key={area.id} className="group bg-white/60 backdrop-blur-xl border border-white/80 rounded-[2.5rem] overflow-hidden flex flex-col transition-all duration-300 hover:shadow-2xl hover:bg-white/80 hover:-translate-y-2 shadow-xl shadow-slate-200/40">
+                  <div className="h-64 relative overflow-hidden bg-slate-200">
+                    {area.imageUrl ? (
+                      <img src={getProxiedUrl(area.imageUrl)} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 font-bold">尚無圖片</div>
+                    )}
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent flex items-end p-6">
+                      <h3 className="text-xl font-black text-white">{area.name}</h3>
+                    </div>
+                  </div>
+                  <div className="p-8 flex-1 flex flex-col">
+                    <p className="text-sm text-slate-700 leading-relaxed mb-6 font-medium line-clamp-3">{area.desc}</p>
+                    <div className="space-y-4 mb-8">
+                      <div className="flex items-center gap-3">
+                        <div className="bg-blue-500/10 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
+                        <p className="text-xs font-bold text-slate-800">{area.transport}</p>
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <div className="bg-emerald-500/10 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
+                        <p className="text-xs font-bold text-slate-800">{area.estates}</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={(e) => handleAreaClick(e, area)} 
+                      disabled={loadingArea === area.id} 
+                      className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
+                    >
+                      {loadingArea === area.id ? (
+                        <><Loader2 className="animate-spin" size={18}/> 正在前往百科...</>
+                      ) : (
+                        <>探索百科與房源 <ArrowRight size={18} /></>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* ========================================================= */}
+        {/* ★ 順序調整：最新上架盤源 移至百科下方 */}
+        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between items-end mb-12 border-b border-slate-300/50 pb-4">
             <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
@@ -358,61 +420,9 @@ export default function HomePage(): React.JSX.Element {
           </div>
         </section>
 
-        <section className="max-w-7xl mx-auto px-4">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl font-black text-slate-900 mb-3 drop-shadow-sm">精選生活圈百科</h2>
-            <p className="text-sm text-slate-600 font-bold">深入調研區域優勢，為您匹配最適合的大學/通勤圈</p>
-          </div>
-
-          {loading ? (
-             <div className="py-20 flex justify-center items-center bg-white/40 backdrop-blur-xl rounded-[2.5rem] border border-white/60 shadow-xl">
-               <Loader2 className="animate-spin text-orange-500 mr-2" size={24} />
-               <p className="text-slate-600 font-bold">載入中...</p>
-             </div>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-              {areaGuides.map((area: any) => (
-                <div key={area.id} className="group bg-white/60 backdrop-blur-xl border border-white/80 rounded-[2.5rem] overflow-hidden flex flex-col transition-all duration-300 hover:shadow-2xl hover:bg-white/80 hover:-translate-y-2 shadow-xl shadow-slate-200/40">
-                  <div className="h-64 relative overflow-hidden bg-slate-200">
-                    {area.imageUrl ? (
-                      <img src={getProxiedUrl(area.imageUrl)} alt={area.name} className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center bg-slate-200 text-slate-400 font-bold">尚無圖片</div>
-                    )}
-                    <div className="absolute inset-0 bg-gradient-to-t from-slate-900/80 via-slate-900/20 to-transparent flex items-end p-6">
-                      <h3 className="text-xl font-black text-white">{area.name}</h3>
-                    </div>
-                  </div>
-                  <div className="p-8 flex-1 flex flex-col">
-                    <p className="text-sm text-slate-700 leading-relaxed mb-6 font-medium line-clamp-3">{area.desc}</p>
-                    <div className="space-y-4 mb-8">
-                      <div className="flex items-center gap-3">
-                        <div className="bg-blue-500/10 p-2 rounded-lg text-blue-600"><Train size={16}/></div>
-                        <p className="text-xs font-bold text-slate-800">{area.transport}</p>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="bg-emerald-500/10 p-2 rounded-lg text-emerald-600"><Building2 size={16}/></div>
-                        <p className="text-xs font-bold text-slate-800">{area.estates}</p>
-                      </div>
-                    </div>
-                    <button 
-                      onClick={(e) => handleAreaClick(e, area)} 
-                      disabled={loadingArea === area.id} 
-                      className="w-full mt-auto py-4 bg-white border border-slate-100 rounded-2xl font-black text-slate-700 flex items-center justify-center gap-2 hover:bg-slate-900 hover:text-white transition-all shadow-sm disabled:opacity-70 cursor-pointer"
-                    >
-                      {loadingArea === area.id ? (
-                        <><Loader2 className="animate-spin" size={18}/> 正在前往百科...</>
-                      ) : (
-                        <>探索百科與房源 <ArrowRight size={18} /></>
-                      )}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-
+        {/* ========================================================= */}
+        {/* 聽聽租客怎麼說 */}
+        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4">
           <h2 className="text-3xl font-black text-center text-slate-900 mb-16 tracking-tight drop-shadow-sm">聽聽租客怎麼說</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -443,6 +453,9 @@ export default function HomePage(): React.JSX.Element {
 
       </div>
 
+      {/* ========================================================= */}
+      {/* 滿租候補 Modal */}
+      {/* ========================================================= */}
       {fullArea !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white border border-slate-100 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
