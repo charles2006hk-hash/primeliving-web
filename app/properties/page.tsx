@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useState, useEffect, useRef, Suspense } from 'react';
-import { collection, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, getDocs, addDoc, serverTimestamp, query, where } from 'firebase/firestore';
 import { db } from '@/lib/firebase'; 
-import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Loader2, Filter, X, ArrowRight, MessageCircle, Images } from 'lucide-react';
+import { MapPin, BedDouble, Search, Home, Sparkles, Building2, ShieldCheck, Loader2, Filter, X, ArrowRight, MessageCircle, Images, Compass } from 'lucide-react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
 
@@ -39,7 +39,7 @@ const getEstateCover = (estateName?: string) => {
 
 // 提取純淨屋苑名稱 (剔除尾部房號英文數字，確保隱私)
 const getCleanEstateName = (name?: string) => {
-  if (!name) return '精選屋苑';
+  if (!name) return '優質屋苑';
   return name.replace(/[A-Za-z0-9\-\s]+$/, '').trim() || name;
 };
 
@@ -69,6 +69,19 @@ const getPriceRange = (price: number) => {
   let lower = base;
   if (price - base < 500 && range > 1000) { lower -= 1000; }
   const upper = lower + range;
+  return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
+};
+
+// ★ 新增：行家盤專屬價格算法 (利用 ID Hash 產生穩定的 +- 500~1000 隨機數)
+const getCompetitorPriceRange = (price: number, id: string) => {
+  if (!price || price === 0) return '價格待定';
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const offset = (Math.abs(hash) % 6 + 5) * 100;
+  const lower = price - offset;
+  const upper = price + offset;
   return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
 };
 
@@ -108,6 +121,8 @@ interface PropertyRoom {
   estateName?: string; 
   primaryImage?: string;
   images?: string[]; 
+  direction?: string; // ★ 新增
+  description?: string; // ★ 新增
   isCompetitor?: boolean; 
   createdAt?: any; 
   score?: number;
@@ -123,6 +138,8 @@ function PropertiesContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const rawSearchQuery = searchParams?.get('uni') || searchParams?.get('search') || '';
+
+  const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
 
   const [loading, setLoading] = useState(true);
   const [allRooms, setAllRooms] = useState<PropertyRoom[]>([]);
@@ -145,12 +162,12 @@ function PropertiesContent() {
 
       try {
         if (!db) return;
-        const propSnap = await getDocs(collection(db, 'properties'));
+        const propSnap = await getDocs(query(collection(db, 'properties'), where('companyId', '==', COMPANY_ID)));
         const propMap: Record<string, string> = {};
         propSnap.docs.forEach(doc => { propMap[doc.id] = doc.data().name; });
 
-        const roomSnap = await getDocs(collection(db, 'rooms'));
-        const mediaSnap = await getDocs(collection(db, 'media_library'));
+        const roomSnap = await getDocs(query(collection(db, 'rooms'), where('companyId', '==', COMPANY_ID)));
+        const mediaSnap = await getDocs(query(collection(db, 'media_library'), where('companyId', '==', COMPANY_ID)));
         const mediaDocs = mediaSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
         
         internalRooms = roomSnap.docs.map(doc => {
@@ -186,7 +203,7 @@ function PropertiesContent() {
       } catch (error) { console.error("Fetch internal error:", error); }
 
       try {
-        const competitorSnap = await getDocs(collection(db, 'competitor_listings'));
+        const competitorSnap = await getDocs(query(collection(db, 'competitor_listings'), where('companyId', '==', COMPANY_ID)));
         competitorRooms = competitorSnap.docs.map(doc => {
           const data = doc.data();
           const isSoldOut = data.isSoldOut === true || String(data.status).toLowerCase() === 'occupied' || data.webStatus === 'draft';
@@ -204,6 +221,8 @@ function PropertiesContent() {
             primaryImage: compImages[0] || null,
             images: compImages, 
             features: data.features || [],
+            direction: data.direction || (data.features && data.features.length > 0 ? data.features[0] : ''), // ★ 提取座向
+            description: data.description || '', // ★ 提取描述
             isCompetitor: true,
             isSoldOutProperty: isSoldOut,
             createdAt: data.createdAt || data.updatedAt || { seconds: Date.now() / 1000 }
@@ -218,11 +237,17 @@ function PropertiesContent() {
            const cleanEstateName = getCleanEstateName(room.estateName || room.propertyName);
            const eId = findEncyclopediaId(cleanEstateName);
 
+           // ★ 統一隱私防護標題與價格
+           const displayTitle = `${cleanEstateName} | ${floorLevel}精選單位`;
+           const displayPrice = room.isCompetitor 
+             ? getCompetitorPriceRange(room.baseRent, room.id)
+             : getPriceRange(room.baseRent);
+
            return {
              ...room,
              floorLevel,
-             displayTitle: `${cleanEstateName} | ${floorLevel}精選單位`,
-             displayPrice: getPriceRange(room.baseRent),
+             displayTitle,
+             displayPrice,
              encyclopediaId: eId || '',
              hasEncyclopedia: !!eId
            };
@@ -232,7 +257,7 @@ function PropertiesContent() {
       setLoading(false);
     }
     fetchData();
-  }, []);
+  }, [COMPANY_ID]);
 
   const handleLoadMore = () => {
     setIsLoadingMore(true);
@@ -250,6 +275,7 @@ function PropertiesContent() {
     try {
       const isSoldOut = bookingRoom.isSoldOutProperty === true;
       await addDoc(collection(db, 'inquiries'), {
+        companyId: COMPANY_ID, 
         tenantId: `visitor_${Date.now()}`,
         name: leadName,
         phone: leadPhone,
@@ -440,7 +466,6 @@ function PropertiesContent() {
                       </div>
                     )}
                     
-                    {/* ★ 修正點 1：地圖圖釘標籤隱藏真實房號 */}
                     <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm px-3 py-1 rounded-full text-[10px] font-black text-slate-800 shadow-sm flex items-center gap-1 border border-white/20 z-10">
                        <MapPin size={12} className={room.isCompetitor ? 'text-purple-500' : 'text-orange-500'}/> {getCleanEstateName(room.estateName || room.propertyName)}
                     </div>
@@ -469,6 +494,22 @@ function PropertiesContent() {
                         </span>
                       </div>
                     </div>
+
+                    {/* ★ 視覺升級：微標籤與描述區塊 */}
+                    {room.isCompetitor && (room.direction || (room.description && room.description.length < 40 && !room.description.includes('【'))) && (
+                      <div className="flex flex-col gap-1.5 mt-2 mb-3">
+                         {room.direction && (
+                           <span className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md w-fit text-[11px] font-black border border-blue-100/50">
+                             <Compass size={12} className="text-blue-500"/> {room.direction}
+                           </span>
+                         )}
+                         {room.description && room.description.length < 40 && !room.description.includes('【') && (
+                           <span className="text-slate-600 text-[11px] leading-relaxed bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100 line-clamp-2">
+                             {room.description}
+                           </span>
+                         )}
+                      </div>
+                    )}
                     
                     <div className="mt-auto pt-4 border-t border-slate-100 flex items-center justify-between text-xs font-bold text-slate-500">
                        <div className="flex gap-2">
@@ -584,12 +625,13 @@ function PropertiesContent() {
               </div>
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間與預算</label>
+                {/* ★ 修改 Placeholder 為 10000 */}
                 <input 
                   type="text" 
                   value={leadReq} 
                   onChange={(e) => setLeadReq(e.target.value)} 
                   className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
-                  placeholder="例如: 8月中入住，預算 $6000 左右"
+                  placeholder="例如: 8月中入住，【預算 $10000】左右"
                 />
               </div>
               <div className="pt-2">
