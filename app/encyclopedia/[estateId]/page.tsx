@@ -7,7 +7,7 @@ import {
   MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, 
   CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, ChevronDown, ChevronUp,
   // ★ 已經補上遺漏的 Wind 圖標
-  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen, Wind
+  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen, Wind, Compass
 } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
@@ -182,6 +182,9 @@ async function getRelatedRooms(searchKeywordStr: string, companyId: string) {
         return {
           id: doc.id, name: data.name || data.title, baseRent: data.price || 0, status: data.status || 'Available', webStatus: data.webStatus || 'published',
           propertyName: data.district || data.estateName, estateName: data.estateName || '', primaryImage: data.imageUrl || null,
+          // ★ 新增這兩行：取得方向與描述
+          direction: data.direction || (data.features && data.features.length > 0 ? data.features[0] : ''),
+          description: data.description || '',
           isCompetitor: true, createdAt: data.createdAt?.seconds || Date.now() / 1000
         };
       });
@@ -632,13 +635,32 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                      )}
                    </div>
                    <div className="p-6 flex flex-col flex-1 relative z-10">
-                     <div className="flex justify-between items-start mb-3 gap-2">
-                       <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
-                       <div className="text-right shrink-0">
-                         <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>{room.displayPrice}</span>
-                       </div>
-                     </div>
-                     <div className="mt-auto pt-4 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-black text-slate-500">
+                    <div className="flex justify-between items-start mb-3 gap-2">
+                      <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
+                      <div className="text-right shrink-0">
+                        <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
+                          {room.displayPrice}
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* ★ 新增：動態顯示行家盤的座向與描述 (Graceful Fallback) */}
+                    {room.isCompetitor && (room.direction || room.description) && (
+                      <div className="flex flex-col gap-1.5 mt-1 mb-2">
+                         {room.direction && (
+                           <span className="flex items-center gap-1 text-slate-500 text-[11px] font-bold">
+                             <Compass size={12} className="text-orange-400"/> 座向/景觀：{room.direction}
+                           </span>
+                         )}
+                         {room.description && (
+                           <span className="text-slate-500 text-xs leading-relaxed bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-2 italic">
+                             {room.description}
+                           </span>
+                         )}
+                      </div>
+                    )}
+
+                    <div className="mt-auto pt-4 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-black text-slate-500">
                         <span className={`flex items-center gap-1 px-2 py-1 rounded-md ${isSoldOut ? 'bg-slate-100 text-slate-400' : 'bg-cyan-50 text-cyan-700'}`}><BedDouble size={14}/> 拎包入住</span>
                         <span className={`px-4 py-2 rounded-lg transition-colors text-xs flex items-center gap-1 shadow-sm ${isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-orange-500'}`}>{isSoldOut ? '已租出' : <>預約看房 <ArrowRight size={14}/></>}</span>
                      </div>
