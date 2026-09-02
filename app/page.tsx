@@ -7,13 +7,12 @@ import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp, wh
 import { db } from '@/lib/firebase';
 import { 
   Search, MapPin, Home as HomeIcon, ChevronDown, Sparkles, 
-  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle, Compass
+  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle
 } from 'lucide-react';
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
 
-// 圖片代理處理
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.startsWith('/api/image')) return url;
@@ -23,7 +22,6 @@ const getProxiedUrl = (url?: string | null) => {
   return url;
 };
 
-// 支援繁簡體與模糊匹配的百科字典
 const ENCYCLOPEDIA_LIST = [
   { id: 'pavilia-farm', aliases: ['柏傲莊', '柏傲庄'] },
   { id: 'festival-city', aliases: ['名城'] },
@@ -48,7 +46,6 @@ const findEncyclopediaId = (name: string) => {
   return matched ? matched.id : null;
 };
 
-// 常見百家姓氏與穩定 Hash 函數
 const COMMON_SURNAMES = ['陳', '李', '張', '王', '何', '林', '黃', '劉', '吳', '蔡', '楊', '鄭', '郭', '黎', '周'];
 
 const getSurnameForProperty = (propId: string) => {
@@ -61,7 +58,6 @@ const getSurnameForProperty = (propId: string) => {
   return COMMON_SURNAMES[index];
 };
 
-// 智能遮罩單位名稱 (e.g., 美豐花園B-7F2 -> 美豐花園B座中層)
 const maskPropertyName = (name: string) => {
   if (!name) return '';
   const parts = name.split('-');
@@ -92,8 +88,6 @@ const maskPropertyName = (name: string) => {
 
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
-
-  // 取得當前部署環境的公司專屬 ID (多租戶隔離)
   const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
 
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
@@ -113,7 +107,6 @@ export default function HomePage(): React.JSX.Element {
       try {
         if (!db) return;
         
-        // 1. 抓取百科
         const qArea = query(collection(db, 'area_guides'), where('companyId', '==', COMPANY_ID), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         const guides = snapArea.docs.map(d => {
@@ -123,16 +116,13 @@ export default function HomePage(): React.JSX.Element {
         });
         setAreaGuides(guides);
 
-        // 2. 抓取評價
         const qTest = query(collection(db, 'testimonials'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
-        // ★ 修復：相容舊資料庫，如果該筆評價沒有 status 欄位 (!t.status)，也默認讓它顯示
         const publishedTests = snapTest.docs
           .map(d => ({ id: d.id, ...d.data() }))
           .filter((t: any) => t.status === 'published' || !t.status);
         setTestimonials(publishedTests);
 
-        // 3. 抓取精選盤源
         const qProp = query(collection(db, 'properties'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
         const qRooms = query(collection(db, 'rooms'), where('companyId', '==', COMPANY_ID));
@@ -197,7 +187,6 @@ export default function HomePage(): React.JSX.Element {
   const handleAreaClick = (e: React.MouseEvent<HTMLButtonElement>, area: any) => {
     e.preventDefault();
     setLoadingArea(area.id); 
-    
     setTimeout(() => {
       setLoadingArea(null);
       if (area.hasEncyclopedia) {
@@ -224,16 +213,8 @@ export default function HomePage(): React.JSX.Element {
         isExistingTenant: false 
       });
       alert('✅ 需求已成功發送給管家團隊！若有房源釋出將第一時間通知您。');
-      setFullArea(null); 
-      setLeadName(''); 
-      setLeadPhone(''); 
-      setLeadReq('');
-    } catch (error) {
-      console.error("寫入 CRM 失敗:", error);
-      alert('發送失敗，請稍後再試或直接聯絡客服。');
-    } finally {
-      setSubmittingLead(false);
-    }
+      setFullArea(null); setLeadName(''); setLeadPhone(''); setLeadReq('');
+    } catch (error) { alert('發送失敗，請稍後再試或直接聯絡客服。'); } finally { setSubmittingLead(false); }
   };
 
   return (
@@ -247,10 +228,6 @@ export default function HomePage(): React.JSX.Element {
       </div>
 
       <div className="relative z-10 pt-24 md:pt-32 pb-24 space-y-32">
-        
-        {/* ========================================================= */}
-        {/* Hero Section */}
-        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4 flex flex-col items-center text-center">
           <div className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-white/80 backdrop-blur-md border border-white/50 text-orange-600 text-xs font-black tracking-widest mb-6 shadow-sm">
             <Sparkles size={14} /> 2026 赴港精英租房首選平台
@@ -264,9 +241,6 @@ export default function HomePage(): React.JSX.Element {
           </div>
         </section>
 
-        {/* ========================================================= */}
-        {/* ★ 順序調整：精選生活圈百科 移至上方 */}
-        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4">
           <div className="text-center mb-16">
             <h2 className="text-3xl font-black text-slate-900 mb-3 drop-shadow-sm">精選生活圈百科</h2>
@@ -322,9 +296,6 @@ export default function HomePage(): React.JSX.Element {
           )}
         </section>
 
-        {/* ========================================================= */}
-        {/* ★ 順序調整：最新上架盤源 移至百科下方 */}
-        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4">
           <div className="flex justify-between items-end mb-12 border-b border-slate-300/50 pb-4">
             <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
@@ -420,9 +391,6 @@ export default function HomePage(): React.JSX.Element {
           </div>
         </section>
 
-        {/* ========================================================= */}
-        {/* 聽聽租客怎麼說 */}
-        {/* ========================================================= */}
         <section className="max-w-7xl mx-auto px-4">
           <h2 className="text-3xl font-black text-center text-slate-900 mb-16 tracking-tight drop-shadow-sm">聽聽租客怎麼說</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -453,9 +421,6 @@ export default function HomePage(): React.JSX.Element {
 
       </div>
 
-      {/* ========================================================= */}
-      {/* 滿租候補 Modal */}
-      {/* ========================================================= */}
       {fullArea !== null && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
           <div className="bg-white border border-slate-100 rounded-3xl p-8 w-full max-w-4xl shadow-2xl relative overflow-hidden animate-in zoom-in-95 duration-300 max-h-[95vh] overflow-y-auto custom-scrollbar">
@@ -504,16 +469,17 @@ export default function HomePage(): React.JSX.Element {
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間與預算</label>
+                {/* ★ 更新 Placeholder 為 10000 */}
                 <input 
                   type="text" 
                   value={leadReq} 
                   onChange={(e: React.ChangeEvent<HTMLInputElement>) => setLeadReq(e.target.value)} 
                   className="w-full border border-slate-300 rounded-xl p-3 text-sm font-bold text-slate-900 outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white placeholder:text-slate-400" 
-                  placeholder="例如: 8月中入住，預算 $6000 左右"
+                  placeholder="例如: 8月中入住，【預算 $10000】左右"
                 />
               </div>
               <div className="col-span-2 mt-2">
-                <button type="submit" disabled={submittingLead} className="w-full bg-orange-500 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-600 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
+                <button type="submit" disabled={submittingLead} className="w-full bg-slate-900 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-500 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
                   {submittingLead ? <Loader2 className="animate-spin" size={24}/> : '送出候補優先登記'}
                 </button>
               </div>
