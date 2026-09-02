@@ -7,7 +7,7 @@ import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp, wh
 import { db } from '@/lib/firebase';
 import { 
   Search, MapPin, Home as HomeIcon, ChevronDown, Sparkles, 
-  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle
+  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle, Compass
 } from 'lucide-react';
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
