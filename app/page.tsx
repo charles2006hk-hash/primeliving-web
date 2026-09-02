@@ -3,15 +3,43 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp } from 'firebase/firestore'; 
+import { collection, getDocs, query, limit, orderBy, addDoc, serverTimestamp, where } from 'firebase/firestore'; 
 import { db } from '@/lib/firebase';
 import { 
   Search, MapPin, Home as HomeIcon, ChevronDown, Sparkles, 
-  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle
+  ShieldCheck, Wind, Quote, CheckCircle, Home, Train, Building2, ArrowRight, Loader2, X, AlertCircle,
+  // ★ 新增：用於房間標準配置的圖標
+  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, BedDouble, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen
 } from 'lucide-react';
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
+
+// ============================================================================
+// ★ 智能圖標匹配器：根據 CMS 填寫的關鍵字，自動渲染對應的 SVG 圖示
+// ============================================================================
+const getAmenityIcon = (name: string) => {
+  const lower = name.toLowerCase();
+  if (lower.includes('冰箱')) return <Refrigerator size={16} />;
+  if (lower.includes('洗') || lower.includes('烘')) return <Waves size={16} />;
+  if (lower.includes('爐') || lower.includes('箱') || lower.includes('鍋')) return <ChefHat size={16} />;
+  if (lower.includes('風')) return <Wind size={16} />;
+  if (lower.includes('空調') || lower.includes('冷氣')) return <Fan size={16} />;
+  if (lower.includes('行李') || lower.includes('置物')) return <Briefcase size={16} />;
+  if (lower.includes('桌') || lower.includes('椅')) return <Coffee size={16} />; 
+  if (lower.includes('櫃')) return <Archive size={16} />;
+  if (lower.includes('馬桶') || lower.includes('浴') || lower.includes('廁')) return <Bath size={16} />;
+  if (lower.includes('床') || lower.includes('被')) return <BedDouble size={16} />;
+  if (lower.includes('書桌') || lower.includes('辦公')) return <Monitor size={16} />;
+  if (lower.includes('衣架') || lower.includes('衣櫃')) return <Shirt size={16} />;
+  if (lower.includes('插') || lower.includes('電')) return <Plug size={16} />;
+  if (lower.includes('燈')) return <LampDesk size={16} />;
+  if (lower.includes('垃圾')) return <Trash2 size={16} />;
+  if (lower.includes('掃') || lower.includes('拖')) return <Sparkles size={16} />;
+  if (lower.includes('抹布') || lower.includes('清潔')) return <Droplets size={16} />;
+  if (lower.includes('書架')) return <BookOpen size={16} />;
+  return <CheckCircle size={16} />; // 預設圖標
+};
 
 // 圖片代理處理
 const getProxiedUrl = (url?: string | null) => {
@@ -93,9 +121,14 @@ const maskPropertyName = (name: string) => {
 export default function HomePage(): React.JSX.Element {
   const router = useRouter();
 
+  // ★ 取得當前部署環境的公司專屬 ID (多租戶隔離)[cite: 4]
+  const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
+
   const [areaGuides, setAreaGuides] = useState<any[]>([]);
   const [testimonials, setTestimonials] = useState<any[]>([]);
   const [featuredProps, setFeaturedProps] = useState<any[]>([]);
+  // ★ 動態獲取房間配置資料[cite: 4]
+  const [amenitiesData, setAmenitiesData] = useState<any>(null);
   const [loading, setLoading] = useState<boolean>(true);
 
   const [loadingArea, setLoadingArea] = useState<string | null>(null);
@@ -110,7 +143,8 @@ export default function HomePage(): React.JSX.Element {
       try {
         if (!db) return;
         
-        const qArea = query(collection(db, 'area_guides'), orderBy('sortOrder', 'asc'));
+        // ★ 加入 companyId 過濾條件[cite: 4]
+        const qArea = query(collection(db, 'area_guides'), where('companyId', '==', COMPANY_ID), orderBy('sortOrder', 'asc'));
         const snapArea = await getDocs(qArea);
         
         const guides = snapArea.docs.map(d => {
@@ -126,15 +160,28 @@ export default function HomePage(): React.JSX.Element {
         });
         setAreaGuides(guides);
 
-        const qTest = query(collection(db, 'testimonials'), orderBy('createdAt', 'desc'));
+        // ★ 加入 companyId 過濾條件[cite: 4]
+        const qTest = query(collection(db, 'testimonials'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'));
         const snapTest = await getDocs(qTest);
-        setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })));
+        setTestimonials(snapTest.docs.map(d => ({ id: d.id, ...d.data() })).filter((t: any) => t.status === 'published'));
 
-        const qProp = query(collection(db, 'properties'), orderBy('createdAt', 'desc'), limit(3));
+        // ★ 抓取房間標準配置設定[cite: 4]
+        const qSettings = query(collection(db, 'settings'), where('companyId', '==', COMPANY_ID), where('type', '==', 'amenities'));
+        const snapSettings = await getDocs(qSettings);
+        if (!snapSettings.empty) {
+          setAmenitiesData(snapSettings.docs[0].data());
+        }
+
+        // ★ 加入 companyId 過濾條件[cite: 4]
+        const qProp = query(collection(db, 'properties'), where('companyId', '==', COMPANY_ID), orderBy('createdAt', 'desc'), limit(3));
         const propSnap = await getDocs(qProp);
-        const roomsSnap = await getDocs(collection(db, 'rooms'));
+        
+        const qRooms = query(collection(db, 'rooms'), where('companyId', '==', COMPANY_ID));
+        const roomsSnap = await getDocs(qRooms);
         const allRooms = roomsSnap.docs.map(d => ({ id: d.id, ...d.data() as any }));
-        const mediaSnap = await getDocs(collection(db, 'media_library'));
+        
+        const qMedia = query(collection(db, 'media_library'), where('companyId', '==', COMPANY_ID));
+        const mediaSnap = await getDocs(qMedia);
         const mediaDocs = mediaSnap.docs.map(d => ({id: d.id, ...d.data() as any}));
 
         const propsData = propSnap.docs.map(doc => {
@@ -208,6 +255,7 @@ export default function HomePage(): React.JSX.Element {
     setSubmittingLead(true);
     try {
       await addDoc(collection(db, 'inquiries'), {
+        companyId: COMPANY_ID, // ★ 強制綁定該筆名單至當前公司[cite: 4]
         tenantId: `visitor_${Date.now()}`,
         name: leadName,
         phone: leadPhone,
@@ -229,6 +277,22 @@ export default function HomePage(): React.JSX.Element {
       setSubmittingLead(false);
     }
   };
+
+  // ★ 處理要渲染的配置資料 (如果 CMS 還沒填過，就用預設值防呆)[cite: 4]
+  const displayAmenities = [
+    {
+      category: "公共區域必備", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-100",
+      items: amenitiesData?.publicArea || ["雙門大冰箱", "洗衣機 / 洗脫烘", "微波爐 / 烤箱 / 氣炸鍋", "Dyson 吹風機", "客廳空調 / 冷風機", "大件行李置物架", "客廳飯桌與座椅", "洗臉池與獨立鞋櫃", "馬桶與浴室冷暖通風"]
+    },
+    {
+      category: "個人房間必備", color: "text-emerald-600", bg: "bg-emerald-50", border: "border-emerald-100",
+      items: amenitiesData?.privateRoom || ["單人/雙人床及舒適床墊", "專屬書桌與人體工學椅", "獨立衣櫃與衣架", "多國通用延長線插板", "房間獨立變頻空調", "護眼檯燈", "全新被褥 (含被/單/套)", "收納層架與個人垃圾簍"]
+    },
+    {
+      category: "公共易耗品", color: "text-orange-600", bg: "bg-orange-50", border: "border-orange-100",
+      items: amenitiesData?.consumables || ["掃把、簸箕與拖把", "洗碗精與清潔抹布", "空氣清新劑與垃圾袋"]
+    }
+  ];
 
   return (
     <main className="relative min-h-screen bg-gradient-to-br from-orange-50 via-rose-50 to-amber-50 overflow-hidden selection:bg-orange-200">
@@ -252,6 +316,38 @@ export default function HomePage(): React.JSX.Element {
           </h1>
           <div className="w-full max-w-4xl drop-shadow-2xl">
             <HomeSearch />
+          </div>
+        </section>
+
+        {/* ============================================================================ */}
+        {/* ★ 動態渲染：拎包入住配置區塊[cite: 4] */}
+        {/* ============================================================================ */}
+        <section className="max-w-7xl mx-auto px-4">
+          <div className="flex flex-col md:flex-row justify-between items-end mb-12 border-b border-slate-300/50 pb-4 gap-4">
+            <div>
+              <h2 className="text-3xl font-black text-slate-900 tracking-tight flex items-center gap-3 drop-shadow-sm">
+                 <div className="w-2 h-8 bg-orange-500 rounded-full shadow-md shadow-orange-500/50"/> 房間標準配置
+              </h2>
+              <p className="text-sm font-bold text-slate-500 mt-2 ml-5">真・拎包入住，為您準備齊全的家電與生活用品</p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {displayAmenities.map((section, idx) => (
+              <div key={idx} className={`p-6 md:p-8 rounded-[2rem] border ${section.border} bg-white/70 backdrop-blur-xl shadow-xl shadow-slate-200/40 hover:bg-white/90 transition-all duration-300`}>
+                <div className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-lg ${section.bg} ${section.color} font-black text-sm tracking-widest mb-6`}>
+                  {section.category}
+                </div>
+                <ul className="space-y-4">
+                  {section.items.map((itemStr: string, itemIdx: number) => (
+                    <li key={itemIdx} className="flex items-start gap-3">
+                      <div className={`mt-0.5 ${section.color} opacity-70`}>{getAmenityIcon(itemStr)}</div>
+                      <span className="text-sm font-bold text-slate-700 leading-snug">{itemStr}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ))}
           </div>
         </section>
 
@@ -339,7 +435,6 @@ export default function HomePage(): React.JSX.Element {
                   className="group bg-white/70 backdrop-blur-xl rounded-3xl overflow-hidden shadow-xl shadow-slate-200/40 hover:shadow-2xl hover:bg-white/90 transition-all duration-300 border border-white/80 flex flex-col relative cursor-pointer"
                 >
                   
-                  {/* ★ 替換為動態姓氏的預訂遮罩 */}
                   {!prop.hasPublishedRooms && (
                     <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-[2px] z-20 flex flex-col items-center justify-center pointer-events-none">
                       <div className="bg-gradient-to-r from-orange-500 to-rose-500 text-white px-5 py-2.5 rounded-full font-black tracking-widest shadow-xl shadow-orange-500/30 border-2 border-white/20 flex items-center gap-2 transform transition-transform scale-105">
@@ -459,7 +554,6 @@ export default function HomePage(): React.JSX.Element {
               佳寓的高性價比房源通常會被迅速預訂。請留下您的需求，若有租客提前退租或新盤上架，專屬管家會為您優先保留。
             </p>
 
-            {/* ★ 修正輸入框樣式：強制設為深色文字與高對比 Placeholder */}
             <form onSubmit={handleAreaLeadSubmit} className="max-w-2xl mx-auto bg-slate-50 p-6 rounded-2xl shadow-inner border border-slate-200 text-left grid grid-cols-2 gap-4 mb-8">
               <div className="col-span-2 sm:col-span-1">
                 <label className="block text-xs font-bold text-slate-700 mb-1">您的稱呼 *</label>
