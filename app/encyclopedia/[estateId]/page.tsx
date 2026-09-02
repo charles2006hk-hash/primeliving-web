@@ -6,8 +6,8 @@ import { db } from '@/lib/firebase';
 import { 
   MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, 
   CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, ChevronDown, ChevronUp,
-  // ★ 匯入 SVG Icons
-  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen
+  // ★ 已經補上遺漏的 Wind 圖標
+  Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen, Wind
 } from 'lucide-react';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
