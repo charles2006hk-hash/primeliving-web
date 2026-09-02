@@ -6,7 +6,6 @@ import { db } from '@/lib/firebase';
 import { 
   MapPin, Search, Home, Building2, BedDouble, Navigation, LayoutList, Building, Sparkles, Map, 
   CheckCircle2, X, Loader2, Star, ArrowRight, MessageCircle, ChevronDown, ChevronUp,
-  // ★ 已經補上遺漏的 Wind 圖標
   Refrigerator, Waves, ChefHat, Briefcase, Coffee, Archive, Bath, Monitor, LampDesk, Plug, Shirt, Trash2, Fan, Droplets, BookOpen, Wind, Compass
 } from 'lucide-react';
 import Link from 'next/link';
@@ -39,9 +38,6 @@ const getAmenityIcon = (name: string) => {
   return <CheckCircle2 size={16} />;
 };
 
-// ==========================================
-// 1. 圖片安全處理與隱私遮罩元件
-// ==========================================
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
   if (url.includes('firebasestorage.googleapis.com')) {
@@ -52,15 +48,7 @@ const getProxiedUrl = (url?: string | null) => {
 
 const SafeImage = ({ src, alt, className, onClick }: { src: string, alt?: string, className?: string, onClick?: () => void }) => {
   const safeSrc = getProxiedUrl(src);
-  return (
-    <img 
-      src={safeSrc} 
-      alt={alt || '圖片'} 
-      className={`object-cover ${className || ''}`} 
-      loading="lazy"
-      onClick={onClick}
-    />
-  );
+  return <img src={safeSrc} alt={alt || '圖片'} className={`object-cover ${className || ''}`} loading="lazy" onClick={onClick} />;
 };
 
 const getEstateCover = (estateName?: string) => {
@@ -79,6 +67,7 @@ const getFloorLevel = (id: string) => {
   return rem === 0 ? '高層' : rem === 1 ? '中層' : '低層';
 };
 
+// 官方盤價格區間
 const getPriceRange = (price: number) => {
   if (!price || price === 0) return '價格待定';
   const base = Math.floor(price / 1000) * 1000;
@@ -89,65 +78,52 @@ const getPriceRange = (price: number) => {
   return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
 };
 
+// ★ 新增：行家盤專屬價格算法 (利用 ID Hash 產生穩定的 +- 500~1000 隨機數)
+const getCompetitorPriceRange = (price: number, id: string) => {
+  if (!price || price === 0) return '價格待定';
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  // Math.abs(hash) % 6 會產出 0~5，加上 5 變成 5~10，再乘 100 就是 500 ~ 1000 的固定偏移
+  const offset = (Math.abs(hash) % 6 + 5) * 100;
+  const lower = price - offset;
+  const upper = price + offset;
+  return `$${lower.toLocaleString()} - $${upper.toLocaleString()}`;
+};
+
 interface EncyclopediaData {
-  id: string;
-  title: string;
-  searchKeyword: string; 
-  aliases: string[]; 
-  targetAudience: string; 
-  trafficDesc: string; 
-  trafficMapUrl: string; 
-  estateIntro: string; 
-  estateImages: string[]; 
-  facilitiesText?: string; 
-  facilities?: string[]; 
-  facilityImages?: string[]; 
-  roomAmenitiesUrl?: string; 
-  roomAmenitiesImages?: string[];
-  roomAmenities?: string[];
-  highlightsUrl?: string; 
-  highlights?: string[];
-  publicAreaImages: string[]; 
-  roomTypes: {
-    name: string; 
-    floorPlanUrl: string; 
-    roomImages: string[]; 
-  }[];
+  id: string; title: string; searchKeyword: string; aliases: string[]; targetAudience: string; 
+  trafficDesc: string; trafficMapUrl: string; estateIntro: string; estateImages: string[]; 
+  facilitiesText?: string; facilities?: string[]; facilityImages?: string[]; 
+  roomAmenitiesUrl?: string; roomAmenitiesImages?: string[]; roomAmenities?: string[];
+  highlightsUrl?: string; highlights?: string[]; publicAreaImages: string[]; 
+  roomTypes: { name: string; floorPlanUrl: string; roomImages: string[]; }[];
 }
 
 const mockDatabase: Record<string, EncyclopediaData> = {
   'festival-city': {
-    id: 'festival-city',
-    title: '大圍 名城',
-    searchKeyword: '名城',
-    aliases: ['名城'],
+    id: 'festival-city', title: '大圍 名城', searchKeyword: '名城', aliases: ['名城'],
     targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學、香港恆生大學、香港都會大學\n【適合人群】學生、上班族。',
-    trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站。',
-    trafficMapUrl: '', 
+    trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站。', trafficMapUrl: '', 
     estateIntro: '大圍名城(Festival City)是香港新界沙田區的大型私人屋苑，坐落於港鐵大圍站上蓋。',
     estateImages: ['https://images.unsplash.com/photo-1549416878-b9ca95e26903?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
-    publicAreaImages: [],
-    roomTypes: []
+    publicAreaImages: [], roomTypes: []
   },
   'pavilia-farm': {
-    id: 'pavilia-farm',
-    title: '大圍 柏傲莊',
-    searchKeyword: '柏傲莊',
-    aliases: ['柏傲莊', '柏傲庄'],
+    id: 'pavilia-farm', title: '大圍 柏傲莊', searchKeyword: '柏傲莊', aliases: ['柏傲莊', '柏傲庄'],
     targetAudience: '【適合學校】香港中文大學、香港城市大學、香港理工大學、香港浸會大學、香港教育大學',
-    trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站。',
-    trafficMapUrl: '', 
+    trafficDesc: '位於大圍地鐵站上蓋，步行約3-8分鐘即可到達地鐵站。', trafficMapUrl: '', 
     estateIntro: '位於香港新界沙田區車公廟路18號，於2022年下半年開始開放入住。',
     estateImages: ['https://images.unsplash.com/photo-1628592102751-ba83b035e07c?auto=format&fit=crop&q=80&w=1200'],
     facilitiesText: '屋苑實行24小時安保管理。配套會所包含：泳池、健身房、自習室、琴房、各類室內球場等設施。',
-    publicAreaImages: [],
-    roomTypes: []
+    publicAreaImages: [], roomTypes: []
   },
 };
 
 // ==========================================
-// 3. 拉取大系統房源 (★ 支援多租戶過濾)
+// 3. 拉取大系統房源 (支援多租戶過濾)
 // ==========================================
 async function getRelatedRooms(searchKeywordStr: string, companyId: string) {
   let rooms: any[] = [];
@@ -182,7 +158,6 @@ async function getRelatedRooms(searchKeywordStr: string, companyId: string) {
         return {
           id: doc.id, name: data.name || data.title, baseRent: data.price || 0, status: data.status || 'Available', webStatus: data.webStatus || 'published',
           propertyName: data.district || data.estateName, estateName: data.estateName || '', primaryImage: data.imageUrl || null,
-          // ★ 新增這兩行：取得方向與描述
           direction: data.direction || (data.features && data.features.length > 0 ? data.features[0] : ''),
           description: data.description || '',
           isCompetitor: true, createdAt: data.createdAt?.seconds || Date.now() / 1000
@@ -215,11 +190,10 @@ async function getRelatedRooms(searchKeywordStr: string, companyId: string) {
 // 4. 頁面渲染
 // ==========================================
 export default function EstateEncyclopediaPage({ params }: { params: Promise<{ estateId: string }> | { estateId: string } }) {
-  // ★ 多租戶隔離
   const COMPANY_ID = process.env.NEXT_PUBLIC_COMPANY_ID || 'prime_living_hk';
 
   const [data, setData] = useState<{ estate: EncyclopediaData, rooms: any[] } | null>(null);
-  const [amenitiesData, setAmenitiesData] = useState<any>(null); // ★ 動態獲取房間配置資料
+  const [amenitiesData, setAmenitiesData] = useState<any>(null); 
   const [loading, setLoading] = useState(true);
   const [lightboxImage, setLightboxImage] = useState<string | null>(null);
 
@@ -275,7 +249,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
            notFound(); return;
         }
 
-        // ★ 抓取全域房間標準配置設定
         const qSettings = query(collection(db, 'settings'), where('companyId', '==', COMPANY_ID), where('type', '==', 'amenities'));
         const snapSettings = await getDocs(qSettings);
         if (!snapSettings.empty) {
@@ -288,7 +261,16 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
            const floorLevel = getFloorLevel(room.id);
            let rawEstateName = room.estateName || room.propertyName || '優質屋苑';
            rawEstateName = rawEstateName.replace(/[A-Za-z0-9\-\s]+$/, '').trim();
-           return { ...room, floorLevel, displayTitle: `${rawEstateName} | ${floorLevel}精選單位`, displayPrice: getPriceRange(room.baseRent) };
+           
+           // ★ 修復：不論是直營還是行家盤，全部統一遮罩名稱，只顯示「樓盤 | 樓層精選單位」
+           const displayTitle = `${rawEstateName} | ${floorLevel}精選單位`;
+           
+           // ★ 修復：行家盤使用固定演算法產生 +- 500~1000 隨機區間，直營盤保持原邏輯
+           const displayPrice = room.isCompetitor 
+             ? getCompetitorPriceRange(room.baseRent, room.id)
+             : getPriceRange(room.baseRent);
+
+           return { ...room, floorLevel, displayTitle, displayPrice };
         });
 
         setData({ estate: estateData, rooms: processedRooms });
@@ -309,14 +291,9 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
     try {
       await addDoc(collection(db, 'inquiries'), {
         companyId: COMPANY_ID, 
-        tenantId: `visitor_${Date.now()}`,
-        name: leadName,
-        phone: leadPhone,
+        tenantId: `visitor_${Date.now()}`, name: leadName, phone: leadPhone,
         message: `【百科頁面-預約看房】\n意向樓盤：${bookingRoom.displayTitle}\n系統房源ID (參考)：${bookingRoom.id}\n預期入住與預算：${leadReq}`,
-        type: 'official_notice',
-        status: 'New', 
-        createdAt: serverTimestamp(),
-        isExistingTenant: false 
+        type: 'official_notice', status: 'New', createdAt: serverTimestamp(), isExistingTenant: false 
       });
       alert('✅ 預約已成功發送給管家團隊！我們將在24小時內與您聯絡安排帶看。');
       setBookingRoom(null); setLeadName(''); setLeadPhone(''); setLeadReq('');
@@ -334,7 +311,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
   if (!data) return null;
   const { estate, rooms: relatedRooms } = data;
 
-  // 處理要渲染的配置資料
   const displayAmenities = [
     {
       category: "公共區域必備", color: "text-blue-600", bg: "bg-blue-50", border: "border-blue-100",
@@ -463,9 +439,6 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
               </div>
             )}
 
-            {/* ============================================================================ */}
-            {/* ★ 整合：動態圖示版「房間標準配置」放入百科內頁 */}
-            {/* ============================================================================ */}
             <div className="mb-10 pt-8 border-t border-slate-200/50">
                <h3 className="font-black text-slate-800 mb-6 flex items-center gap-2 text-xl"><BedDouble className="text-orange-500" size={24}/> 房間標準配置 (拎包入住清單)</h3>
                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
@@ -635,32 +608,29 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                      )}
                    </div>
                    <div className="p-6 flex flex-col flex-1 relative z-10">
-                    <div className="flex justify-between items-start mb-3 gap-2">
-                      <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
-                      <div className="text-right shrink-0">
-                        <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>
-                          {room.displayPrice}
-                        </span>
-                      </div>
-                    </div>
+                     <div className="flex justify-between items-start mb-3 gap-2">
+                       <h3 className={`text-lg font-black leading-tight line-clamp-2 ${isSoldOut ? 'text-slate-400' : 'text-slate-900'}`}>{room.displayTitle}</h3>
+                       <div className="text-right shrink-0">
+                         <span className={`font-black text-xl tracking-tight ${isSoldOut ? 'text-slate-400' : (room.isCompetitor ? 'text-purple-600' : 'text-orange-600')}`}>{room.displayPrice}</span>
+                       </div>
+                     </div>
 
-                    {/* ★ 新增：動態顯示行家盤的座向與描述 (Graceful Fallback) */}
-                    {room.isCompetitor && (room.direction || room.description) && (
-                      <div className="flex flex-col gap-1.5 mt-1 mb-2">
-                         {room.direction && (
-                           <span className="flex items-center gap-1 text-slate-500 text-[11px] font-bold">
-                             <Compass size={12} className="text-orange-400"/> 座向/景觀：{room.direction}
-                           </span>
-                         )}
-                         {room.description && (
-                           <span className="text-slate-500 text-xs leading-relaxed bg-slate-50 p-2 rounded-lg border border-slate-100 line-clamp-2 italic">
-                             {room.description}
-                           </span>
-                         )}
-                      </div>
-                    )}
+                     {room.isCompetitor && (room.direction || room.description) && (
+                       <div className="flex flex-col gap-1.5 mt-2 mb-3">
+                          {room.direction && (
+                            <span className="flex items-center gap-1.5 text-blue-600 bg-blue-50 px-2 py-1 rounded-md w-fit text-[11px] font-black border border-blue-100/50">
+                              <Compass size={12} className="text-blue-500"/> {room.direction}
+                            </span>
+                          )}
+                          {room.description && (
+                            <span className="text-slate-600 text-[11px] leading-relaxed bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100 line-clamp-2">
+                              {room.description}
+                            </span>
+                          )}
+                       </div>
+                     )}
 
-                    <div className="mt-auto pt-4 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-black text-slate-500">
+                     <div className="mt-auto pt-4 border-t border-slate-200/60 flex items-center justify-between text-[10px] font-black text-slate-500">
                         <span className={`flex items-center gap-1 px-2 py-1 rounded-md ${isSoldOut ? 'bg-slate-100 text-slate-400' : 'bg-cyan-50 text-cyan-700'}`}><BedDouble size={14}/> 拎包入住</span>
                         <span className={`px-4 py-2 rounded-lg transition-colors text-xs flex items-center gap-1 shadow-sm ${isSoldOut ? 'bg-slate-200 text-slate-400' : 'bg-slate-900 text-white hover:bg-orange-500'}`}>{isSoldOut ? '已租出' : <>預約看房 <ArrowRight size={14}/></>}</span>
                      </div>
@@ -694,8 +664,8 @@ export default function EstateEncyclopediaPage({ params }: { params: Promise<{ e
                 <input required type="text" value={leadPhone} onChange={(e) => setLeadPhone(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="輸入電話或微信號"/>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間</label>
-                <input type="text" value={leadReq} onChange={(e) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住"/>
+                <label className="block text-xs font-bold text-slate-500 mb-1">預期入住時間與預算</label>
+                <input type="text" value={leadReq} onChange={(e) => setLeadReq(e.target.value)} className="w-full border border-slate-200 rounded-xl p-3 text-sm outline-none focus:border-orange-500 focus:ring-2 focus:ring-orange-500/20 bg-white" placeholder="例如: 8月中入住，【預算 $10000】左右"/>
               </div>
               <div className="pt-2">
                 <button type="submit" disabled={submittingLead} className="w-full bg-slate-900 text-white font-black text-lg py-3.5 rounded-xl hover:bg-orange-500 transition-all shadow-md flex justify-center items-center active:scale-[0.98]">
