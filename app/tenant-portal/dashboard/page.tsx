@@ -5,10 +5,10 @@ import {
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
-  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2
+  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2, ArrowLeft, MessageSquare
 } from 'lucide-react';
 import Link from 'next/link';
-import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc, arrayUnion } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useSearchParams, useRouter } from 'next/navigation';
 import Script from 'next/script';
@@ -86,6 +86,8 @@ function DashboardContent() {
   const [tenantData, setTenantData] = useState<any>(null);
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   const [myInquiries, setMyInquiries] = useState<any[]>([]); 
+  // ★ 新增：專門用來存放該租客在大系統建立的「工單 (Tickets)」
+  const [myTickets, setMyTickets] = useState<any[]>([]);
   
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
@@ -103,22 +105,26 @@ function DashboardContent() {
   const [isSignDownloading, setIsSignDownloading] = useState(false);
   const contractRef = useRef<HTMLDivElement>(null);
 
-  const [ticketCategory, setTicketCategory] = useState('冷氣水電');
+  // ★ 報修模組狀態擴充
+  const [ticketTab, setTicketTab] = useState<'submit' | 'history'>('submit');
+  const [ticketCategory, setTicketCategory] = useState('一般維修'); // 對齊大系統
   const [ticketDesc, setTicketDesc] = useState('');
+  const [ticketPhoto, setTicketPhoto] = useState<File | null>(null);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPhotoUploaded, setIsPhotoUploaded] = useState(false);
+  const [viewingTicket, setViewingTicket] = useState<any>(null);
+  const [ticketComment, setTicketComment] = useState('');
+  const [isSubmittingComment, setIsSubmittingComment] = useState(false);
 
   const [isProfileComplete, setIsProfileComplete] = useState(false);
   const [emergencyContact, setEmergencyContact] = useState({ name: '', phone: '', relation: '' });
   const [isIdUploaded, setIsIdUploaded] = useState(false);
   const [isSavingProfile, setIsSavingProfile] = useState(false);
 
-// ★ 評價模塊狀態
   const [rating, setRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [isSubmittingReview, setIsSubmittingReview] = useState(false);
 
-  // ★ 退租管理模塊狀態
   const [surrenderStep, setSurrenderStep] = useState<1 | 2>(1);
   const [moveOutDate, setMoveOutDate] = useState('');
   const [surrenderReason, setSurrenderReason] = useState('');
@@ -207,7 +213,6 @@ function DashboardContent() {
         const res = await fetch(`/api/tenant-data?tenantId=${sessionData.id}`);
         if (res.ok) {
           const { documents, inquiries } = await res.json();
-          // ★ 強制優先讀取 docDate (單據日期)，並加上期數排序
           const sortedDocs = documents.sort((a: any, b: any) => {
              const timeA = getSafeTime(a.formData?.docDate || a.formData?.dueDate || a.createdAt);
              const timeB = getSafeTime(b.formData?.docDate || b.formData?.dueDate || b.createdAt);
@@ -219,6 +224,14 @@ function DashboardContent() {
         }
       } catch (error) { console.error("資料加載失敗:", error); }
     };
+
+    // ★ 監聽租客對應的大系統工單 (Tickets)
+    const qTickets = query(collection(db, 'tickets'), where('tenantId', '==', sessionData.id));
+    const unsubTickets = onSnapshot(qTickets, (snapshot) => {
+      const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      tickets.sort((a, b) => getSafeTime(b.createdAt) - getSafeTime(a.createdAt));
+      setMyTickets(tickets);
+    });
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
       if (!docSnap.exists()) {
@@ -243,6 +256,7 @@ function DashboardContent() {
         signature: data.signature || '', 
         signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
+        propertyId: data.propertyId || '', // ★ 加入 propertyId 供報修關聯
         roomId: data.roomId || '', 
         roomName: data.roomName || data.roomId || '', 
         leaseStart: data.leaseStart || '', 
@@ -251,7 +265,6 @@ function DashboardContent() {
         phone: data.phone || '', 
         identityNumber: resolvedIdNumber,
         isPhysicalSigned: data.isPhysicalSigned || false,
-        // ★ 新增抓取學校與學位/職業資訊
         university: data.university || data.school || '',
         degree: data.degree || data.studyLevel || data.program || '',
         occupation: data.occupation || ''
@@ -265,7 +278,7 @@ function DashboardContent() {
 
     fetchData(); 
     const interval = setInterval(fetchData, 30000); 
-    return () => { unsubTenant(); clearInterval(interval); };
+    return () => { unsubTenant(); unsubTickets(); clearInterval(interval); };
   }, [router]);
 
   useEffect(() => {
@@ -284,7 +297,6 @@ function DashboardContent() {
     }
   }, [tenantDocs]);
 
-  // ★ 核心結算邏輯：排序、逾期附加費、拆單打勾
   const billingSummary = useMemo(() => {
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -296,7 +308,6 @@ function DashboardContent() {
       const fd = item.formData || {};
       let baseAmount = Number(fd.totalAmount) || Number(fd.amount) || 0;
       
-      // 優先讀取單據日期 (docDate)
       let dueDateStr = fd.docDate || fd.dueDate || new Date().toISOString().split('T')[0];
       const dueDate = new Date(dueDateStr); dueDate.setHours(0, 0, 0, 0);
       
@@ -304,7 +315,6 @@ function DashboardContent() {
       let lateFee = 0;
       let isOverdue30 = false;
       
-      // 逾期超過 30 天，收取 5% 滯納金
       if (isOverdue) {
          const daysOverdue = Math.floor((today.getTime() - dueDate.getTime()) / (1000 * 60 * 60 * 24));
          if (daysOverdue >= 30) {
@@ -328,7 +338,6 @@ function DashboardContent() {
       };
     });
 
-    // 智能排序：日期 -> 期數
     allBills.sort((a, b) => {
       const timeDiff = a.dueDate.getTime() - b.dueDate.getTime();
       if (timeDiff !== 0) return timeDiff;
@@ -340,7 +349,6 @@ function DashboardContent() {
     const currentCheckoutBillIds: string[] = [];
     let isSplitNeeded = false;
 
-    // ★ 嚴格過濾限額：只將放得下的帳單加入結帳列表 (UI 才跟著打勾)
     for (const bill of allBills) {
       const isMandatory = bill.isOverdue || bill.isDueToday;
       const isSelected = isMandatory || selectedOptionalBillIds.includes(bill.id);
@@ -348,7 +356,7 @@ function DashboardContent() {
       if (isSelected) {
         if (currentCheckoutCents + bill.amountCents > PAYDOLLAR_LIMIT_CENTS) {
           isSplitNeeded = true;
-          continue; // 放不下，跳過不加入打勾名單
+          continue; 
         }
         currentCheckoutBillIds.push(bill.id);
         currentCheckoutCents += bill.amountCents;
@@ -380,7 +388,7 @@ function DashboardContent() {
     setChatMessages(prev => [...prev, { sender: 'user', text }]); setChatInput(''); setIsSubmittingTicket(true);
     try {
       await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name, phone: tenantData.phone, roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: chatCategory || '一般客服', message: text, type: 'ticket', source: 'Tenant Portal Chat', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
-      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您建立專屬服務單。管家核對後會在此系統通知您，或透過 WhatsApp 聯繫。' }]); setIsSubmittingTicket(false); }, 1000);
+      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您記錄並通知管家。您可以在小鈴鐺收到回覆通知。' }]); setIsSubmittingTicket(false); }, 1000);
     } catch (e) { setIsSubmittingTicket(false); }
   };
 
@@ -424,7 +432,7 @@ function DashboardContent() {
       await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name || '', phone: tenantData.phone || '', roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: '轉帳付款核對', message: `租客已上傳轉帳/FPS截圖，申報繳付總額：$${amount.toLocaleString()} (包含 ${payingBillIds.length} 筆帳單)。請管家對帳後開立收據。`, type: 'ticket', status: 'In Progress', amount: amount, billIds: payingBillIds, createdAt: serverTimestamp() });
       for (const billId of payingBillIds) { await updateDoc(doc(db, 'documents', billId), { paymentStatus: 'Under Review', updatedAt: serverTimestamp() }); }
       alert("✅ 入數紙已成功送出！管家將於 24 小時內確認銀行進帳並開立收據。"); setActiveModal('none');
-    } catch (error: any) { alert("上傳失敗，請稍後再試或透過 WhatsApp 將截圖傳給管家。"); } finally { setIsUploading(false); }
+    } catch (error: any) { alert("上傳失敗，請稍後再試或聯繫管家。"); } finally { setIsUploading(false); }
   };
 
   const handlePayDollarCheckout = async () => {
@@ -465,14 +473,74 @@ function DashboardContent() {
     } catch (error) { alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); } finally { setIsSignDownloading(false); }
   };
 
+  // ★ 全新整合的「提交報修單 (大系統 Ticket)」邏輯
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
     setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name || '', phone: tenantData.phone || '', roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: ticketCategory, message: ticketDesc, type: 'ticket', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
-      alert("✅ 報修單已送出！進度將會顯示於右上角小鈴鐺通知。"); setActiveModal('none'); setTicketDesc(''); setIsPhotoUploaded(false); setTicketCategory('冷氣水電');
-    } catch (error) { alert("報修失敗。"); } finally { setIsSubmittingTicket(false); }
+      let photoUrl = '';
+      if (ticketPhoto) {
+        const storage = getStorage();
+        const compressedFile = await compressImage(ticketPhoto);
+        const photoRef = ref(storage, `tickets/${tenantData.id}_${Date.now()}_${compressedFile.name}`);
+        await uploadBytesResumable(photoRef, compressedFile);
+        photoUrl = await getDownloadURL(photoRef);
+      }
+
+      // 寫入大系統專用的 `tickets` 表
+      await addDoc(collection(db, 'tickets'), { 
+        propertyId: tenantData.propertyId || '', // 關聯盤源
+        roomId: tenantData.roomId || '',         // 關聯房間
+        tenantId: tenantData.id,                 // 關聯租客
+        type: 'Repair',                          // 固定為一般維修
+        title: `[租客提報] ${ticketCategory}`,
+        description: ticketDesc, 
+        priority: 'Medium',                      // 預設中等優先級
+        status: 'Open',                          // 預設待處理
+        photoUrl: photoUrl,
+        comments: [],                            // 初始化留言陣列
+        createdAt: serverTimestamp() 
+      });
+      
+      alert("✅ 報修單已成功送出！您可在「我的報修紀錄」中隨時查看進度。"); 
+      setTicketDesc(''); 
+      setTicketPhoto(null); 
+      setIsPhotoUploaded(false); 
+      setTicketCategory('一般維修');
+      setTicketTab('history'); // 自動切換到歷史紀錄頁籤
+    } catch (error) { alert("報修失敗，請檢查網路連線。"); } finally { setIsSubmittingTicket(false); }
+  };
+
+  // ★ 租客新增留言 (Comment) 邏輯
+  const handleAddComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!ticketComment.trim() || !viewingTicket) return;
+    setIsSubmittingComment(true);
+    try {
+      const ticketRef = doc(db, 'tickets', viewingTicket.id);
+      const newComment = {
+        sender: 'Tenant',
+        name: tenantData.name,
+        text: ticketComment,
+        timestamp: new Date().toISOString()
+      };
+      await updateDoc(ticketRef, {
+        comments: arrayUnion(newComment),
+        updatedAt: serverTimestamp()
+      });
+      
+      // 更新本地狀態讓畫面立即反應
+      setViewingTicket({
+        ...viewingTicket,
+        comments: [...(viewingTicket.comments || []), newComment]
+      });
+      setTicketComment('');
+    } catch (error) {
+      alert("留言失敗，請稍後再試。");
+    } finally {
+      setIsSubmittingComment(false);
+    }
   };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
@@ -497,11 +565,9 @@ function DashboardContent() {
     setIsSubmittingReview(true);
     
     try {
-      // 1. 自動組合匿名名稱 (例如：曾敏 -> 曾同學)
       const lastName = tenantData.name ? tenantData.name.charAt(0) : '某';
       const displayAliasName = `${lastName}同學`;
 
-      // 2. 自動組合身分標籤 (例如：香港城市大學研究生)
       let identityStr = '佳寓認證租客';
       if (tenantData.university) {
         identityStr = `${tenantData.university}${tenantData.degree || '學生'}`;
@@ -509,21 +575,19 @@ function DashboardContent() {
         identityStr = tenantData.occupation;
       }
 
-      // 3. 寫入到 CMS 專用的 testimonials 集合 (預設待審核)
       await addDoc(collection(db, 'testimonials'), {
         tenantId: tenantData.id,
-        name: displayAliasName,     // 寫入 "X同學"
-        identity: identityStr,      // 寫入 "XX大學XX生" 或 "認證租客"
+        name: displayAliasName,     
+        identity: identityStr,      
         text: reviewText.trim(),
         rating: rating,
         status: 'pending', 
         createdAt: serverTimestamp()
       });
 
-      // 4. 寫入 inquiries 觸發大系統小鈴鐺與工單提醒
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id, 
-        name: tenantData.name, // 後台 Ticket 依然保留真實姓名，方便管家追蹤
+        name: tenantData.name, 
         phone: tenantData.phone || '',
         roomInfo: tenantData.roomInfo || '',
         category: '⭐ 收到新租客評價', 
@@ -545,7 +609,6 @@ function DashboardContent() {
     }
   };
 
-  // ★ 處理退租申請與簽署
   const handleConfirmSurrender = async () => {
     const canvas = surrenderSigCanvasRef.current;
     if (!canvas || !moveOutDate) return alert("請確保日期已填寫並完成簽名！");
@@ -557,7 +620,6 @@ function DashboardContent() {
       const base64Signature = canvas.toDataURL('image/png');
       const todayStr = new Date().toISOString().split('T')[0];
 
-      // 1. 上傳還原照片/影片 (支援圖片壓縮)
       for (const file of surrenderFiles) {
         const isImage = file.type.startsWith('image/');
         const fileToUpload = isImage ? await compressImage(file) : file;
@@ -566,7 +628,6 @@ function DashboardContent() {
         uploadedFileUrls.push(await getDownloadURL(fileRef));
       }
 
-      // 2. 生成具有香港法律效力的退租單據紀錄 (Termination Agreement)
       await addDoc(collection(db, 'documents'), {
         type: 'Termination',
         status: 'Signed',
@@ -583,7 +644,6 @@ function DashboardContent() {
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
       });
 
-      // 3. 發送管家通知單 (Ticket)
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
         category: '退租與交吉申請', 
@@ -695,7 +755,6 @@ function DashboardContent() {
               </div>
             </div>
             
-            {/* ★ 逾期帳單通知鈴鐺邏輯 */}
             <button onClick={() => setActiveModal('notifications')} className={`relative p-3 backdrop-blur-md rounded-full shadow-sm border transition-all duration-300 ${myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue ? 'bg-red-50 border-red-200 shadow-red-500/30 hover:bg-red-100 ring-2 ring-red-500/20' : 'bg-white/60 border-white/60 hover:shadow-md'}`}>
               <Bell size={20} className={myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue ? 'text-red-600' : 'text-slate-600'} />
               {(myInquiries.some(i => i.adminReply || i.status === 'In Progress' || i.status === 'Resolved' || i.type === 'official_notice') || billingSummary.hasOverdue) && (
@@ -744,7 +803,6 @@ function DashboardContent() {
                   </span>
                 </div>
 
-                {/* ★ 隱藏/展開的 Toggle 按鈕與明細 */}
                 <div className="mb-6 relative z-10">
                   <button onClick={() => setShowBillDetails(!showBillDetails)} className="flex items-center gap-1.5 text-xs font-bold text-orange-400 hover:text-orange-300 transition mb-2">
                     {showBillDetails ? <ChevronUp size={14}/> : <ChevronDown size={14}/>}
@@ -839,13 +897,13 @@ function DashboardContent() {
                   <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
                 </button>
                 
-                <button onClick={() => setActiveModal('ticket')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                <button onClick={() => { setActiveModal('ticket'); setTicketTab('submit'); setViewingTicket(null); }} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
                       <Wrench size={20} className="text-blue-500"/>
                     </div>
                     <div>
-                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請</p>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請與進度</p>
                       <p className="text-[10px] font-bold text-slate-500">設備損壞一鍵呼叫師傅</p>
                     </div>
                   </div>
@@ -878,7 +936,6 @@ function DashboardContent() {
                   <ChevronRight size={18} className="text-orange-400 group-hover:text-orange-500 transition-colors" />
                 </button>
 
-                {/* ★ 新增：退租管理模塊按鈕 */}
                 <button onClick={() => { setActiveModal('surrender'); setSurrenderStep(1); }} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-rose-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
@@ -892,7 +949,6 @@ function DashboardContent() {
                   <ChevronRight size={18} className="text-rose-400 group-hover:text-rose-500 transition-colors" />
                 </button>
 
-                {/* ★ 新增：好評與建議按鈕 */}
                 <button onClick={() => setActiveModal('review')} className="w-full flex items-center justify-between p-4 md:p-5 bg-white/80 hover:bg-white transition-colors rounded-2xl group text-left border border-white/50 mt-2 shadow-sm">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-amber-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
@@ -929,7 +985,6 @@ function DashboardContent() {
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
             <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-4 custom-scrollbar">
-              {/* ★ 自動生成的逾期通知警告 (置頂) */}
               {billingSummary.hasOverdue && (
                 <div className="bg-white p-4 rounded-xl border border-red-200 shadow-sm relative overflow-hidden mb-4 animate-in slide-in-from-top-2">
                   <div className="absolute top-0 left-0 w-1 h-full bg-red-500"></div>
@@ -1050,7 +1105,6 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 好評與建議 Modal */}
       {activeModal === 'review' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -1083,7 +1137,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 退租與交吉管理 Modal (具香港法律效力流程) */}
+      {/* ★ 退租與交吉管理 Modal */}
       {activeModal === 'surrender' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-2xl sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
@@ -1466,7 +1520,6 @@ function DashboardContent() {
                     </div>
                   </div>
                   
-                  {/* ★ KYC 證件類型與上傳 */}
                   <div>
                     <div className="flex justify-between items-center mb-3">
                       <p className="text-xs font-black text-slate-800">1. 身分證明文件上傳</p>
@@ -1537,46 +1590,157 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 報修 Modal */}
+      {/* ★ 全新升級：雙向報修進度與留言系統 Modal */}
       {activeModal === 'ticket' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
-            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
-              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-600" size={24}/> 填寫報修單</h3>
-              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+          <div className="bg-white w-full sm:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] sm:h-[80vh] overflow-hidden animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            
+            <div className="flex justify-between items-center p-6 bg-slate-900 text-white flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-700 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-400" size={24}/> 報修申請與進度追蹤</h3>
+              <button onClick={() => { setActiveModal('none'); setViewingTicket(null); }} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50">
-              <form onSubmit={handleSubmitTicket} className="space-y-6">
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目：</p>
-                  <div className="grid grid-cols-2 gap-3">
-                    {['冷氣水電', '家具家電', '門窗鎖具', '其他異常'].map(cat => (
-                      <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
-                    ))}
-                  </div>
+
+            {viewingTicket ? (
+              <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden relative">
+                 <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 flex-none">
+                   <button onClick={() => setViewingTicket(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition"><ArrowLeft size={20}/></button>
+                   <div>
+                     <h4 className="font-black text-slate-800">{viewingTicket.title}</h4>
+                     <span className={`text-[10px] px-2 py-0.5 rounded font-black border ${viewingTicket.status === 'Resolved' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : viewingTicket.status === 'InProgress' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                       {viewingTicket.status === 'Resolved' ? '✅ 已解決' : viewingTicket.status === 'InProgress' ? '👨‍🔧 處理中 / 聯絡中' : '⏳ 等待受理'}
+                     </span>
+                   </div>
+                 </div>
+                 
+                 <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+                   {/* 報修原始內容 */}
+                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                     <p className="text-[10px] text-slate-400 font-mono mb-2">{viewingTicket.createdAt?.toDate ? viewingTicket.createdAt.toDate().toLocaleString('zh-HK') : '剛剛'}</p>
+                     <p className="text-sm font-bold text-slate-700 whitespace-pre-wrap">{viewingTicket.description}</p>
+                     {viewingTicket.photoUrl && (
+                       <a href={viewingTicket.photoUrl} target="_blank" rel="noreferrer">
+                         <img src={viewingTicket.photoUrl} alt="損壞照片" className="mt-3 rounded-xl border border-slate-200 max-h-40 object-cover hover:opacity-80 transition cursor-pointer" />
+                       </a>
+                     )}
+                   </div>
+
+                   {/* 管理員官方進度備註 */}
+                   {viewingTicket.adminRemarks && (
+                     <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200 shadow-sm relative overflow-hidden">
+                       <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                       <p className="text-xs font-black text-blue-800 mb-1 flex items-center"><UserCircle size={14} className="mr-1"/> 管家最新進度</p>
+                       <p className="text-sm font-bold text-blue-900 whitespace-pre-wrap">{viewingTicket.adminRemarks}</p>
+                     </div>
+                   )}
+
+                   {/* 雙向留言板區塊 */}
+                   <div className="pt-4 space-y-3">
+                     {viewingTicket.comments?.map((msg: any, idx: number) => (
+                       <div key={idx} className={`flex flex-col ${msg.sender === 'Tenant' ? 'items-end' : 'items-start'}`}>
+                         <span className="text-[9px] text-slate-400 mb-1 px-1">{msg.sender === 'Tenant' ? '您' : '管家師傅'} • {new Date(msg.timestamp).toLocaleTimeString('zh-HK', {hour:'2-digit', minute:'2-digit'})}</span>
+                         <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.sender === 'Tenant' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'}`}>
+                           {msg.text}
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+
+                 {/* 留言輸入框 */}
+                 {viewingTicket.status !== 'Resolved' && (
+                   <div className="p-4 bg-white border-t border-slate-200 flex-none pb-8 sm:pb-4">
+                     <form onSubmit={handleAddComment} className="flex gap-2">
+                       <input type="text" value={ticketComment} onChange={e => setTicketComment(e.target.value)} placeholder="給管家或師傅留言..." className="flex-1 px-4 py-3 bg-slate-100 border-transparent rounded-full text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition font-bold" />
+                       <button type="submit" disabled={!ticketComment.trim() || isSubmittingComment} className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center shrink-0 hover:bg-blue-700 transition shadow-sm disabled:opacity-50">
+                          {isSubmittingComment ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
+                       </button>
+                     </form>
+                   </div>
+                 )}
+              </div>
+            ) : (
+              <div className="flex flex-col h-full overflow-hidden">
+                <div className="flex bg-slate-100 p-2 mx-6 mt-6 rounded-2xl flex-none">
+                  <button onClick={() => setTicketTab('submit')} className={`flex-1 py-2 text-sm font-black rounded-xl transition-all ${ticketTab === 'submit' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>提交新報修</button>
+                  <button onClick={() => setTicketTab('history')} className={`flex-1 py-2 text-sm font-black rounded-xl transition-all ${ticketTab === 'history' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>我的報修紀錄 {myTickets.length > 0 && `(${myTickets.length})`}</button>
                 </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3">狀況描述：</p>
-                  <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm" />
+
+                <div className="flex-1 overflow-y-auto p-6 bg-white custom-scrollbar">
+                  {ticketTab === 'submit' ? (
+                    <form onSubmit={handleSubmitTicket} className="space-y-6 animate-in slide-in-from-left-4">
+                      <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex items-start gap-3">
+                        <AlertCircle className="text-blue-600 shrink-0 mt-0.5" size={18}/>
+                        <p className="text-[10px] text-blue-800 font-bold leading-relaxed">請具體描述損壞情況並提供照片。送出後，您可以切換至「我的報修紀錄」查看最新處理進度並與師傅留言溝通。</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目 *</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {['一般維修', '入伙裝修', '退租翻新', '單位清潔'].map(cat => (
+                            <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3">狀況描述 *</p>
+                        <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm bg-slate-50" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
+                          <span>上傳照片 (選填)</span>
+                          <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
+                        </p>
+                        <div className="relative shadow-sm">
+                          <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setTicketPhoto(e.target.files[0]); setIsPhotoUploaded(true); } }} />
+                          <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                            {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black truncate px-4 max-w-[250px]">{ticketPhoto?.name || '照片已成功夾帶'}</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
+                          </label>
+                        </div>
+                      </div>
+                      <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl disabled:opacity-50">
+                        {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修單'}
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="space-y-3 animate-in slide-in-from-right-4 pb-8">
+                      {myTickets.length === 0 ? (
+                        <div className="text-center py-16 text-slate-400">
+                          <Wrench size={40} className="mx-auto mb-3 opacity-30"/>
+                          <p className="text-sm font-bold">目前沒有任何報修紀錄</p>
+                        </div>
+                      ) : (
+                        myTickets.map(ticket => (
+                          <button key={ticket.id} onClick={() => setViewingTicket(ticket)} className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-blue-400 hover:shadow-md transition-all group">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className={`text-[10px] px-2 py-0.5 rounded font-black border ${ticket.status === 'Resolved' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : ticket.status === 'InProgress' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                {ticket.status === 'Resolved' ? '✅ 已解決' : ticket.status === 'InProgress' ? '👨‍🔧 處理中 / 聯絡中' : '⏳ 等待受理'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleDateString('zh-HK') : ''}
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-slate-800 text-sm mb-1 truncate">{ticket.title}</h4>
+                            <p className="text-xs text-slate-500 truncate mb-3">{ticket.description}</p>
+                            
+                            {ticket.adminRemarks && (
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 mb-3">
+                                <p className="text-[10px] font-bold text-slate-700 flex items-center"><UserCircle size={12} className="mr-1"/> 管家最新回覆：</p>
+                                <p className="text-xs text-blue-700 truncate font-medium">{ticket.adminRemarks}</p>
+                              </div>
+                            )}
+
+                            <div className="flex justify-between items-center text-[10px] font-bold text-blue-500 pt-2 border-t border-slate-100">
+                              <span className="flex items-center gap-1"><MessageSquare size={12}/> {ticket.comments?.length || 0} 則留言</span>
+                              <span className="group-hover:translate-x-1 transition-transform flex items-center">查看詳情 <ChevronRight size={14}/></span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
-                <div>
-                  <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
-                    <span>上傳照片 (選填)</span>
-                    <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
-                  </p>
-                  <div className="relative shadow-sm">
-                    <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setIsPhotoUploaded(true); alert("📷 照片已夾帶上傳！"); } }} />
-                    <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-white text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
-                      {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black">照片已成功夾帶</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
-                    </label>
-                  </div>
-                </div>
-                <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-blue-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-blue-700 transition-all active:scale-95 shadow-xl shadow-blue-600/20 disabled:opacity-50">
-                  {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修申請'}
-                </button>
-              </form>
-            </div>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -1591,7 +1755,7 @@ function DashboardContent() {
               <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
             
-            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-3">
+            <div className="p-6 overflow-y-auto flex-1 bg-slate-50/50 space-y-3 custom-scrollbar">
               {otherBills.length === 0 ? (
                 <div className="py-10 text-center text-slate-400">
                   <Receipt size={40} className="mx-auto mb-3 opacity-50"/>
