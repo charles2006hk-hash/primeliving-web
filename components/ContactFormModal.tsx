@@ -142,11 +142,27 @@ export default function ContactFormModal({ isOpen, onClose, propertyName }: Cont
         createdAt: serverTimestamp(),
       });
 
+      // 原有的 Email 通知 API
       fetch('/api/send-inquiry', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id: docRef.id, ...dataToSave }),
       }).catch(err => console.warn("Email API 發送略過", err));
+
+      // ===================================================================
+      // ★ 新增：跨域呼叫大系統的 API，觸發推播通知給銷售與管家
+      // ===================================================================
+      fetch('https://admin.primelivinghk.com/api/send-push', { 
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '🚨 官網收到新客戶預約/諮詢！',
+          body: `客戶 ${formData.name} (${formData.phone}) 送出了新需求，請儘速跟進。`,
+          targetRoles: ['銷售', '管家', 'admin'], 
+          url: '/admin/inquiries' // 點擊推播後跳轉大系統處理列表
+        })
+      }).catch(console.warn); // 使用 warn 確保不影響前端流程
+      // ===================================================================
 
       localStorage.setItem('pm_last_inquiry', Date.now().toString());
 
