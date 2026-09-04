@@ -387,8 +387,21 @@ function DashboardContent() {
     if (!text.trim()) return;
     setChatMessages(prev => [...prev, { sender: 'user', text }]); setChatInput(''); setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), { tenantId: tenantData.id, name: tenantData.name, phone: tenantData.phone, roomInfo: `${tenantData.propertyName} ${tenantData.roomName}`, category: chatCategory || '一般客服', message: text, type: 'ticket', source: 'Tenant Portal Chat', isExistingTenant: true, status: 'New', createdAt: serverTimestamp() });
-      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您記錄並通知管家。您可以在小鈴鐺收到回覆通知。' }]); setIsSubmittingTicket(false); }, 1000);
+      await addDoc(collection(db, 'inquiries'), { /* ...原有屬性... */ });
+      
+      // ★ 新增：發送推播通知給管家與銷售
+      fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '💬 收到新租客客服訊息',
+          body: `${tenantData.name} (${tenantData.roomName}): ${text}`,
+          targetRoles: ['管家', '銷售', 'admin'],
+          url: '/admin/inquiries'
+        })
+      }).catch(console.error); // catch 避免影響前端流程
+
+      setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您記錄並通知管家。' }]); setIsSubmittingTicket(false); }, 1000);
     } catch (e) { setIsSubmittingTicket(false); }
   };
 
@@ -502,6 +515,18 @@ function DashboardContent() {
         comments: [],                            // 初始化留言陣列
         createdAt: serverTimestamp() 
       });
+
+      // ★ 新增：發送報修推播給管家
+      fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '🔧 收到新報修工單',
+          body: `租客 ${tenantData.name} 提報了「${ticketCategory}」`,
+          targetRoles: ['管家', 'admin'], // 報修通常只推給管家/工程
+          url: '/admin/tickets'
+        })
+      }).catch(console.error);
       
       alert("✅ 報修單已成功送出！您可在「我的報修紀錄」中隨時查看進度。"); 
       setTicketDesc(''); 
@@ -529,6 +554,18 @@ function DashboardContent() {
         comments: arrayUnion(newComment),
         updatedAt: serverTimestamp()
       });
+
+      // ★ 新增：發送留言推播給管家
+      fetch('/api/send-push', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: '💬 報修單有新留言',
+          body: `${tenantData.name}: ${ticketComment}`,
+          targetRoles: ['管家', 'admin'],
+          url: '/admin/tickets'
+        })
+      }).catch(console.error);
       
       // 更新本地狀態讓畫面立即反應
       setViewingTicket({
