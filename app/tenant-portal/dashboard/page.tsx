@@ -5,7 +5,8 @@ import {
   Bell, CreditCard, Wrench, FileText, ChevronRight, Calendar, UserCircle, Droplets, Loader2,
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
-  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2, ArrowLeft, MessageSquare
+  CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2, ArrowLeft, MessageSquare,
+  BookOpen, Wifi, KeyRound, Info // ★ 新增圖標
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc, arrayUnion } from 'firebase/firestore';
@@ -78,15 +79,115 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   });
 };
 
+// ============================================================================
+// ★ 新增組件：入住須知卡片 (MoveInGuideCard)
+// ============================================================================
+function MoveInGuideCard({ propertyData }: { propertyData: any }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const guide = propertyData?.moveInGuide;
+
+  if (!guide) return null; // 如果後台沒有設定就不顯示
+
+  return (
+    <>
+      <div 
+        onClick={() => setIsOpen(true)}
+        className="bg-white/60 backdrop-blur-xl border border-white/50 p-6 rounded-[2rem] cursor-pointer hover:shadow-lg transition-all active:scale-95 group relative overflow-hidden flex flex-col justify-center"
+      >
+        <BookOpen className="absolute -right-4 -bottom-4 text-blue-500/10" size={100} />
+        <div className="relative z-10">
+          <div className="flex justify-between items-center mb-1">
+            <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1.5">
+              <BookOpen size={12}/> 入住指南
+            </p>
+            <ChevronRight size={16} className="text-blue-400 group-hover:translate-x-1 transition-transform" />
+          </div>
+          <p className="text-lg md:text-xl font-black text-slate-800 tracking-tight">生活公約與密碼</p>
+          <p className="text-xs font-bold text-slate-500 mt-1">WiFi、門禁、倒垃圾</p>
+        </div>
+      </div>
+
+      {isOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl overflow-hidden flex flex-col max-h-[85vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            
+            <div className="bg-blue-600 p-6 text-white flex justify-between items-center shrink-0 relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-blue-500 rounded-full sm:hidden" />
+              <h2 className="font-bold flex items-center gap-2 mt-2 sm:mt-0 text-lg">
+                <BookOpen size={20}/> {propertyData?.name} 入住須知
+              </h2>
+              <button onClick={() => setIsOpen(false)} className="bg-blue-700 hover:bg-blue-800 p-2 rounded-full transition mt-2 sm:mt-0"><X size={18}/></button>
+            </div>
+
+            <div className="p-6 overflow-y-auto space-y-4 custom-scrollbar flex-1 bg-slate-50/50">
+              
+              {guide.wifi && (
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 items-center">
+                  <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center shrink-0">
+                    <Wifi className="text-emerald-500" size={24} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase text-slate-400 mb-0.5">網路 WiFi</p>
+                    <p className="text-sm font-black text-slate-800 font-mono truncate">{guide.wifi}</p>
+                  </div>
+                </div>
+              )}
+
+              {guide.doorCode && (
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 items-center">
+                  <div className="w-12 h-12 bg-orange-50 rounded-xl flex items-center justify-center shrink-0">
+                    <KeyRound className="text-orange-500" size={24} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-black uppercase text-slate-400 mb-0.5">門禁密碼/指引</p>
+                    <p className="text-sm font-black text-slate-800 font-mono truncate">{guide.doorCode}</p>
+                  </div>
+                </div>
+              )}
+
+              {guide.garbage && (
+                <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex gap-4 items-start">
+                  <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center shrink-0">
+                    <Trash2 className="text-slate-500" size={24} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-slate-400 mb-0.5">垃圾處理</p>
+                    <p className="text-sm font-bold text-slate-700 leading-relaxed">{guide.garbage}</p>
+                  </div>
+                </div>
+              )}
+
+              {guide.rules && (
+                <div className="pt-2">
+                  <h3 className="text-sm font-black text-blue-900 flex items-center gap-1.5 mb-2 pl-1"><Info size={16} className="text-blue-500"/> 租客生活公約</h3>
+                  <div className="bg-white text-slate-700 p-5 rounded-2xl border border-slate-200 text-sm leading-loose whitespace-pre-wrap font-medium shadow-sm">
+                    {guide.rules}
+                  </div>
+                </div>
+              )}
+              
+            </div>
+            
+            <div className="p-4 border-t border-slate-100 shrink-0 bg-white">
+              <button onClick={() => setIsOpen(false)} className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-black text-md rounded-2xl transition shadow-xl shadow-slate-900/10 active:scale-95">我知道了</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 function DashboardContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
+  const [propertyData, setPropertyData] = useState<any>(null); // ★ 新增：用來存放該租客關聯的盤源資料 (包含入住須知)
+  
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   const [myInquiries, setMyInquiries] = useState<any[]>([]); 
-  // ★ 新增：專門用來存放該租客在大系統建立的「工單 (Tickets)」
   const [myTickets, setMyTickets] = useState<any[]>([]);
   
   const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
@@ -225,7 +326,6 @@ function DashboardContent() {
       } catch (error) { console.error("資料加載失敗:", error); }
     };
 
-    // ★ 監聽租客對應的大系統工單 (Tickets)
     const qTickets = query(collection(db, 'tickets'), where('tenantId', '==', sessionData.id));
     const unsubTickets = onSnapshot(qTickets, (snapshot) => {
       const tickets = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
@@ -233,7 +333,7 @@ function DashboardContent() {
       setMyTickets(tickets);
     });
 
-    const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), (docSnap) => {
+    const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), async (docSnap) => {
       if (!docSnap.exists()) {
         localStorage.removeItem('pm_tenant_session');
         router.push('/tenant-portal');
@@ -256,7 +356,7 @@ function DashboardContent() {
         signature: data.signature || '', 
         signedAt: data.signedAt || '',
         propertyName: data.propertyName || '', 
-        propertyId: data.propertyId || '', // ★ 加入 propertyId 供報修關聯
+        propertyId: data.propertyId || '',
         roomId: data.roomId || '', 
         roomName: data.roomName || data.roomId || '', 
         leaseStart: data.leaseStart || '', 
@@ -269,6 +369,18 @@ function DashboardContent() {
         degree: data.degree || data.studyLevel || data.program || '',
         occupation: data.occupation || ''
       });
+
+      // ★ 讀取該租客對應的物業資料 (為了拿入住須知)
+      if (data.propertyId) {
+        try {
+          const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
+          if (propDoc.exists()) {
+            setPropertyData({ id: propDoc.id, ...propDoc.data() });
+          }
+        } catch (err) {
+          console.error("載入物業資料失敗", err);
+        }
+      }
 
       if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
       if (data.idUploaded || data.isIdVerified || data.idCardUrl) setIsIdUploaded(true);
@@ -387,9 +499,18 @@ function DashboardContent() {
     if (!text.trim()) return;
     setChatMessages(prev => [...prev, { sender: 'user', text }]); setChatInput(''); setIsSubmittingTicket(true);
     try {
-      await addDoc(collection(db, 'inquiries'), { /* ...原有屬性... */ });
+      await addDoc(collection(db, 'inquiries'), { 
+        tenantId: tenantData.id, 
+        name: tenantData.name, 
+        phone: tenantData.phone || '',
+        roomInfo: tenantData.roomInfo || '',
+        category: chatCategory || '一般問題', 
+        message: text,
+        type: 'ticket', 
+        status: 'New', 
+        createdAt: serverTimestamp() 
+      });
       
-      // ★ 新增：發送推播通知給管家與銷售
       fetch('/api/send-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -399,7 +520,7 @@ function DashboardContent() {
           targetRoles: ['管家', '銷售', 'admin'],
           url: '/admin/inquiries'
         })
-      }).catch(console.error); // catch 避免影響前端流程
+      }).catch(console.error);
 
       setTimeout(() => { setChatMessages(prev => [...prev, { sender: 'bot', text: '✅ 收到！我已為您記錄並通知管家。' }]); setIsSubmittingTicket(false); }, 1000);
     } catch (e) { setIsSubmittingTicket(false); }
@@ -486,7 +607,6 @@ function DashboardContent() {
     } catch (error) { alert("生成 PDF 失敗，請確認網路穩定或稍後再試。"); } finally { setIsSignDownloading(false); }
   };
 
-  // ★ 全新整合的「提交報修單 (大系統 Ticket)」邏輯
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticketDesc.trim()) return alert("請描述損壞情況！");
@@ -501,29 +621,27 @@ function DashboardContent() {
         photoUrl = await getDownloadURL(photoRef);
       }
 
-      // 寫入大系統專用的 `tickets` 表
       await addDoc(collection(db, 'tickets'), { 
-        propertyId: tenantData.propertyId || '', // 關聯盤源
-        roomId: tenantData.roomId || '',         // 關聯房間
-        tenantId: tenantData.id,                 // 關聯租客
-        type: 'Repair',                          // 固定為一般維修
+        propertyId: tenantData.propertyId || '', 
+        roomId: tenantData.roomId || '',         
+        tenantId: tenantData.id,                 
+        type: 'Repair',                          
         title: `[租客提報] ${ticketCategory}`,
         description: ticketDesc, 
-        priority: 'Medium',                      // 預設中等優先級
-        status: 'Open',                          // 預設待處理
+        priority: 'Medium',                      
+        status: 'Open',                          
         photoUrl: photoUrl,
-        comments: [],                            // 初始化留言陣列
+        comments: [],                            
         createdAt: serverTimestamp() 
       });
 
-      // ★ 新增：發送報修推播給管家
       fetch('/api/send-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           title: '🔧 收到新報修工單',
           body: `租客 ${tenantData.name} 提報了「${ticketCategory}」`,
-          targetRoles: ['管家', 'admin'], // 報修通常只推給管家/工程
+          targetRoles: ['管家', 'admin'], 
           url: '/admin/tickets'
         })
       }).catch(console.error);
@@ -533,11 +651,10 @@ function DashboardContent() {
       setTicketPhoto(null); 
       setIsPhotoUploaded(false); 
       setTicketCategory('一般維修');
-      setTicketTab('history'); // 自動切換到歷史紀錄頁籤
+      setTicketTab('history'); 
     } catch (error) { alert("報修失敗，請檢查網路連線。"); } finally { setIsSubmittingTicket(false); }
   };
 
-  // ★ 租客新增留言 (Comment) 邏輯
   const handleAddComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!ticketComment.trim() || !viewingTicket) return;
@@ -555,7 +672,6 @@ function DashboardContent() {
         updatedAt: serverTimestamp()
       });
 
-      // ★ 新增：發送留言推播給管家
       fetch('/api/send-push', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -567,7 +683,6 @@ function DashboardContent() {
         })
       }).catch(console.error);
       
-      // 更新本地狀態讓畫面立即反應
       setViewingTicket({
         ...viewingTicket,
         comments: [...(viewingTicket.comments || []), newComment]
@@ -892,7 +1007,7 @@ function DashboardContent() {
                 </button>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
                   <p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p>
@@ -903,6 +1018,13 @@ function DashboardContent() {
                     {tenantData.roomInfo?.length > 15 ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` : tenantData.roomInfo}
                   </p>
                 </div>
+
+                {/* ★ 整合：入住須知卡片，如果沒有提供就不會顯示 */}
+                {propertyData?.moveInGuide && (
+                  <div className="col-span-2 lg:col-span-1">
+                    <MoveInGuideCard propertyData={propertyData} />
+                  </div>
+                )}
               </div>
             </div>
 
