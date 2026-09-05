@@ -51,7 +51,7 @@ export default function AboutPage() {
             { 
               icon: <ShieldCheck size={32} />, 
               title: "100% 官方直營", 
-              desc: "拒絕二房東與黑中介。我們擁有所有物業的直接營運權，確保合同真實合法，受香港法律保障。"
+              desc: "我們擁有所有物業的直接營運權，確保合同真實合法，受香港法律保障。"
             },
             { 
               icon: <Award size={32} />, 
