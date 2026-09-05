@@ -1010,8 +1010,7 @@ function DashboardContent() {
                   <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
                 </button>
               </div>
-              
-             {/* ... 上面的大數字繳費區塊不變 ... */}
+
               
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center h-full">
@@ -1025,7 +1024,6 @@ function DashboardContent() {
                   </p>
                 </div>
 
-                {/* ★ 整合：入住須知卡片 */}
                 {propertyData?.moveInGuide && (
                   <div className="col-span-2 lg:col-span-1 h-full">
                     <MoveInGuideCard propertyData={propertyData} />
@@ -1034,8 +1032,6 @@ function DashboardContent() {
               </div>
             </div>
 
-            <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
-              {/* ... 下方的導航選單不變 ... */}
 
             <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
               <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
