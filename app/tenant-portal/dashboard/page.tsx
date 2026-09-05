@@ -86,26 +86,30 @@ function MoveInGuideCard({ propertyData }: { propertyData: any }) {
   const [isOpen, setIsOpen] = useState(false);
   const guide = propertyData?.moveInGuide;
 
-  if (!guide) return null; // 如果後台沒有設定就不顯示
+  if (!guide) return null;
 
   return (
     <>
       <div 
         onClick={() => setIsOpen(true)}
-        className="bg-white/60 backdrop-blur-xl border border-white/50 p-6 rounded-[2rem] cursor-pointer hover:shadow-lg transition-all active:scale-95 group relative overflow-hidden flex flex-col justify-center"
+        // ★ 加上 h-full 確保高度與旁邊的卡片一致，並將 p-6 改為 p-5 以爭取更多空間
+        className="bg-white/60 backdrop-blur-xl border border-white/50 p-5 rounded-[2rem] cursor-pointer hover:shadow-lg transition-all active:scale-95 group relative overflow-hidden flex flex-col justify-center h-full"
       >
-        <BookOpen className="absolute -right-4 -bottom-4 text-blue-500/10" size={100} />
+        <BookOpen className="absolute -right-4 -bottom-4 text-blue-500/10" size={80} />
         <div className="relative z-10">
           <div className="flex justify-between items-center mb-1">
-            <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1.5">
+            <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest flex items-center gap-1">
               <BookOpen size={12}/> 入住指南
             </p>
             <ChevronRight size={16} className="text-blue-400 group-hover:translate-x-1 transition-transform" />
           </div>
-          <p className="text-lg md:text-xl font-black text-slate-800 tracking-tight">生活公約與密碼</p>
-          <p className="text-xs font-bold text-slate-500 mt-1">WiFi、門禁、倒垃圾</p>
+          {/* ★ 加上 text-base, whitespace-nowrap 確保文字絕對不會斷行 */}
+          <p className="text-base font-black text-slate-800 tracking-tight whitespace-nowrap truncate">生活公約與密碼</p>
+          <p className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 truncate">WiFi、門禁、垃圾處理</p>
         </div>
       </div>
+
+      {/* ... 下方的 isOpen Modal 維持原樣不變 ... */}
 
       {isOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
@@ -1007,26 +1011,31 @@ function DashboardContent() {
                 </button>
               </div>
               
+             {/* ... 上面的大數字繳費區塊不變 ... */}
+              
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
-                <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center">
+                <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center h-full">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">剩餘租期</p>
                   <p className="text-3xl font-black text-slate-800">{tenantData.daysRemaining} <span className="text-sm font-bold text-slate-500">天</span></p>
                 </div>
-                <div className="bg-white/60 backdrop-blur-xl p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden">
+                <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden h-full">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
                   <p className="text-sm font-black text-slate-800 truncate font-mono">
                     {tenantData.roomInfo?.length > 15 ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` : tenantData.roomInfo}
                   </p>
                 </div>
 
-                {/* ★ 整合：入住須知卡片，如果沒有提供就不會顯示 */}
+                {/* ★ 整合：入住須知卡片 */}
                 {propertyData?.moveInGuide && (
-                  <div className="col-span-2 lg:col-span-1">
+                  <div className="col-span-2 lg:col-span-1 h-full">
                     <MoveInGuideCard propertyData={propertyData} />
                   </div>
                 )}
               </div>
             </div>
+
+            <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
+              {/* ... 下方的導航選單不變 ... */}
 
             <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
               <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
