@@ -163,9 +163,23 @@ function MoveInGuideCard({ propertyData }: { propertyData: any }) {
 
               {guide.rules && (
                 <div className="pt-2">
-                  <h3 className="text-sm font-black text-blue-900 flex items-center gap-1.5 mb-2 pl-1"><Info size={16} className="text-blue-500"/> 租客生活公約</h3>
-                  <div className="bg-white text-slate-700 p-5 rounded-2xl border border-slate-200 text-sm leading-loose whitespace-pre-wrap font-medium shadow-sm">
-                    {guide.rules}
+                  <h3 className="text-sm font-black text-blue-900 flex items-center gap-1.5 mb-2 pl-1">
+                    <Info size={16} className="text-blue-500"/> 租客生活公約
+                  </h3>
+                  
+                  {/* ★ 加入了 relative, overflow-hidden 與浮水印設計 */}
+                  <div className="bg-white text-slate-700 p-5 rounded-2xl border border-slate-200 text-sm leading-loose whitespace-pre-wrap font-medium shadow-sm relative overflow-hidden">
+                    
+                    {/* ★ PrimeLiving Logo 浮水印 */}
+                    <div 
+                      className="absolute inset-0 z-0 pointer-events-none bg-center bg-no-repeat bg-contain opacity-5" 
+                      style={{ backgroundImage: "url('/logo.png')", backgroundSize: "50%" }} 
+                    />
+                    
+                    {/* 確保文字在浮水印之上 */}
+                    <div className="relative z-10">
+                      {guide.rules}
+                    </div>
                   </div>
                 </div>
               )}
