@@ -74,6 +74,48 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
     reader.onerror = () => resolve(file); 
   });
 };
+// ★ 新增：預設入住公約 (保底機制，避免舊盤源沒資料時卡片消失)
+const DEFAULT_HOUSE_RULES = `【PrimeLiving 佳寓 - 入住須知與生活公約】
+歡迎入住！為維持高品質居住環境，請各位室友共同遵守以下規範：
+
+【一、安全與管家服務】
+1. 小區安保嚴格，如有任何疑慮或緊急情況，請務必第一時間聯繫樓下管理處或相應官方機構（如報警）。
+2. 佳寓管家服務時間：工作日 10:00-18:00，其他時候聯繫緊急電話：62007241（公寓方盡所能幫助但不承擔任何責任）。
+
+【二、清潔與衛生維護】
+1. 一般每週一次，一月不少於4次，預設為公共區域偏深度清潔。獨衛房間額外季度一次。
+2. 平日大家也需要自我愛護房屋衛生，建議每日掃地，隔幾日拖地，每日倒垃圾等。公共區域/個人設備要愛護：洗衣機、微波(烤)爐、冰箱、灶台、吹風機等。
+3. 每個房間至少配備書桌、床、衣櫃及小家具，如損壞會有相應的賠償，賠償價格參考價目表（價格非常低，只是為了起監督作用）。
+4. 下水管道維護：如單位下水管道沒有維護網需自己長期自備，且常備通渠液。每次用完及時清理頭髮等垃圾，退房時需確保下水道通暢，否則視情況扣通渠費 300-1000 HKD 不等。
+
+【三、住戶及公共設備使用】
+1. 洗澡後收拾好廁所頭髮、地下水等情況，保護下水道並方便下一位使用。公共區域洗澡時長不宜太長，建議整體不超過一小時。
+2. 公共區域位置（如飯桌、冰箱）應該是平等分配，不應出現一人佔據過多位置。
+3. 洗衣機洗完一次必須休息至少半小時，一次不要強行塞入太多衣物，建議不要把襪子、球鞋等放入洗衣機。
+4. 香港環境潮濕，每次做完飯必須清理乾淨垃圾並於當日丟入同層垃圾房，否則容易滋生蟑螂。
+5. 公共區域不建議存放貴重物品，遺失公寓方無責任。
+
+【四、垃圾與信件外賣】
+1. 丟垃圾：每層皆有垃圾房，紙殼（如快遞盒）請折疊壓扁後才可丟入，生活垃圾請用袋子打包好。大件垃圾需丟到小區樓下/地下室指定地方。
+2. 公共區域不設垃圾桶，建議當日垃圾當日清理。如想設置垃圾桶必須所有室友達成一致；如發現垃圾不丟，公寓方有權不通知直接搬走公共垃圾桶。
+3. 信箱及時收信：打開信箱收到室友的信，請互相通知。非室友的信請告知管家；水電煤信件請直接拆開發群裡方便管家繳費。
+4. 收快遞/外賣：如不在家請盡快放入房間，樓道為公共區域，嚴格遵守不可放私人物品以免物業標貼違規。
+
+【五、訪客與門禁】
+1. 公寓原則上禁止男女混住，如有異性上門或過夜必須獲得「所有室友同意」且「告知本公司」，同性過夜也需所有室友同意且告知本公司。
+2. 公寓只擁有公共區域大門鑰匙，如同性進入進行清潔維修不會特意通知，如異性進入將至少提前半小時通知。
+3. 如忘帶大門鑰匙，公寓方幫忙開門需收費 150 HKD 每次；如忘帶房門鑰匙只能自行找緊急開鎖。
+
+【六、退租步驟與扣費】
+1. 退租步驟：① 至少提前1週告知管家；② 簡單清理自己房間；③ 拍視頻及照片留存說明鑰匙和門禁情況；④ 一般自行離開，特別情況可提前預約管家上面對面驗收。
+2. 常見扣費：未簡單清理自己房間扣清潔費 300 HKD；物品/垃圾滯留視量扣 300-2000 HKD；牆體/門/家具粘貼未還原者視區域扣 300-5000 HKD；不慎刮花牆體地板視情況扣 300-20000 HKD。
+
+【七、許可他人入住 (轉租/換宿)】
+1. 承租前一個月和後兩個月許可他人，收取 500 HKD 手續費，不算違約（若為本公司內部簽約住客可免）。其他時段除手續費外算作違約，需另賠付租金的 10%。
+2. 每個房間總次數不能超過兩次，建議對象為學生或優才。許可期間所有行為視同原租客個人行為，如發生人為破壞，公寓方將直接與原租客索賠。
+
+【八、違規處罰】
+除特意提及的賠償外，其他違反行為超過三次（室友或本公司提醒後）依舊不改正，如產生相應成本公寓方會收取該費用；如未產生成本，公寓方會將扣取的費用平均發放給未違反的住客。本須知如24小時無異議則生效。`;
 
 function MoveInGuideCard({ propertyData }: { propertyData: any }) {
   const [isOpen, setIsOpen] = useState(false);
@@ -338,58 +380,97 @@ function DashboardContent() {
     });
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), async (docSnap) => {
-      if (!docSnap.exists()) {
-        localStorage.removeItem('pm_tenant_session');
-        router.push('/tenant-portal');
-        return;
+  // 1. 檢查文件存續狀態：若被刪除則自動登出
+  if (!docSnap.exists()) {
+    localStorage.removeItem('pm_tenant_session');
+    router.push('/tenant-portal');
+    return;
+  }
+
+  const data = docSnap.data();
+
+  // 2. 計算剩餘租期 (加入 Math.max 避免過期後顯示負數天數)
+  const end = new Date(data.leaseEnd || new Date());
+  const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+  
+  // 3. 欄位相容性處理 (處理舊版或缺失的資料)
+  const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+  
+  // 處理專屬帳戶：過濾包含「未提供」或長度異常的字串，強制轉為標準 TEN- 格式
+  const rawRoomInfo = data.contractId || data.roomInfo || '';
+  const resolvedRoomInfo = (!rawRoomInfo || rawRoomInfo.includes('未提供') || rawRoomInfo.length > 15) 
+    ? `TEN-${docSnap.id.slice(-6).toUpperCase()}` 
+    : rawRoomInfo;
+
+  // 4. 更新租客主資料 State
+  setTenantData({ 
+    id: docSnap.id, 
+    email: data.email || '', 
+    name: data.name, 
+    daysRemaining: Math.max(0, diffDays), 
+    status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
+    roomInfo: resolvedRoomInfo, 
+    isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
+    signature: data.signature || '', 
+    signedAt: data.signedAt || '',
+    propertyName: data.propertyName || '', 
+    propertyId: data.propertyId || '',
+    roomId: data.roomId || '', 
+    roomName: data.roomName || data.roomId || '', 
+    leaseStart: data.leaseStart || '', 
+    leaseEnd: data.leaseEnd || '', 
+    deposit: data.deposit || 0, 
+    phone: data.phone || '', 
+    identityNumber: resolvedIdNumber,
+    isPhysicalSigned: data.isPhysicalSigned || false,
+    university: data.university || data.school || '',
+    degree: data.degree || data.studyLevel || data.program || '',
+    occupation: data.occupation || ''
+  });
+
+  // 5. 異步獲取關聯的盤源資料與入住須知 (加入容錯 Fallback 機制)
+  let currentPropertyData = null;
+  if (data.propertyId) {
+    try {
+      const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
+      if (propDoc.exists()) {
+        currentPropertyData = { id: propDoc.id, ...propDoc.data() };
       }
+    } catch (err) {
+      console.error("載入物業資料失敗:", err);
+    }
+  }
 
-      const data = docSnap.data();
-      const end = new Date(data.leaseEnd || new Date());
-      const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
-
-      setTenantData({ 
-        id: docSnap.id, 
-        email: data.email || '', 
-        name: data.name, 
-        daysRemaining: diffDays > 0 ? diffDays : 0, 
-        status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
-        roomInfo: data.contractId || `TEN-${docSnap.id.slice(-6).toUpperCase()}`, 
-        isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
-        signature: data.signature || '', 
-        signedAt: data.signedAt || '',
-        propertyName: data.propertyName || '', 
-        propertyId: data.propertyId || '',
-        roomId: data.roomId || '', 
-        roomName: data.roomName || data.roomId || '', 
-        leaseStart: data.leaseStart || '', 
-        leaseEnd: data.leaseEnd || '', 
-        deposit: data.deposit || 0, 
-        phone: data.phone || '', 
-        identityNumber: resolvedIdNumber,
-        isPhysicalSigned: data.isPhysicalSigned || false,
-        university: data.university || data.school || '',
-        degree: data.degree || data.studyLevel || data.program || '',
-        occupation: data.occupation || ''
-      });
-
-      if (data.propertyId) {
-        try {
-          const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
-          if (propDoc.exists()) {
-            setPropertyData({ id: propDoc.id, ...propDoc.data() });
-          }
-        } catch (err) {
-          console.error("載入物業資料失敗", err);
-        }
+  // 若無 propertyId 或該盤源尚未設定 moveInGuide，強制寫入預設值，避免前端破版
+  if (!currentPropertyData || !currentPropertyData.moveInGuide) {
+    currentPropertyData = {
+      ...currentPropertyData,
+      name: currentPropertyData?.name || data.propertyName || '佳寓',
+      moveInGuide: {
+        wifi: '請洽專屬管家',
+        doorCode: '請洽專屬管家',
+        garbage: '每層皆有垃圾房，紙箱請折疊壓扁。室內公共區域不設垃圾桶，請當日清理。',
+        rules: typeof DEFAULT_HOUSE_RULES !== 'undefined' ? DEFAULT_HOUSE_RULES : '請遵守佳寓生活公約。'
       }
+    };
+  }
+  setPropertyData(currentPropertyData);
 
-      if (data.emergencyContact) setEmergencyContact(data.emergencyContact);
-      if (data.idUploaded || data.isIdVerified || data.idCardUrl) setIsIdUploaded(true);
-      if (data.emergencyContact?.name && (data.idUploaded || data.isIdVerified || data.idCardUrl)) setIsProfileComplete(true);
-      setLoading(false);
-    });
+  // 6. 更新 KYC 與個人檔案狀態
+  if (data.emergencyContact) {
+    setEmergencyContact(data.emergencyContact);
+  }
+  
+  const hasIdRecord = data.idUploaded || data.isIdVerified || data.idCardUrl;
+  if (hasIdRecord) setIsIdUploaded(true);
+  
+  if (data.emergencyContact?.name && hasIdRecord) {
+    setIsProfileComplete(true);
+  }
+
+  // 7. 解除載入狀態
+  setLoading(false);
+});
 
     fetchData(); 
     const interval = setInterval(fetchData, 30000); 
@@ -1020,11 +1101,15 @@ function DashboardContent() {
                 </div>
                 <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden h-full">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
+                  {/* ★ 修正專屬帳戶顯示邏輯：如果包含「未提供」或太長，就強制顯示 TEN-ID */}
                   <p className="text-sm font-black text-slate-800 truncate font-mono">
-                    {tenantData.roomInfo?.length > 15 ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` : tenantData.roomInfo}
+                    {(!tenantData.roomInfo || tenantData.roomInfo.includes('未提供') || tenantData.roomInfo.length > 15) 
+                      ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` 
+                      : tenantData.roomInfo}
                   </p>
                 </div>
 
+                {/* ★ 由於上方已經做了強制保底，這裡 propertyData 絕對會有 moveInGuide */}
                 {propertyData?.moveInGuide && (
                   <div className="col-span-2 lg:col-span-1 h-full">
                     <MoveInGuideCard propertyData={propertyData} />
