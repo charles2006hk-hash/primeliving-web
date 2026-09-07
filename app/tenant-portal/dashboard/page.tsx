@@ -33,12 +33,20 @@ const getPeriodNumber = (title: string) => {
   return numMap[match[1]] || parseInt(match[1]) || 999;
 };
 
+// ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB，影片限制 50MB)
 const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   return new Promise((resolve, reject) => {
-    if (file.type === 'application/pdf' || !file.type.startsWith('image/')) {
-      if (file.size > 5 * 1024 * 1024) return reject(new Error("PDF 檔案請勿超過 5MB"));
+    // 若不是圖片 (例如 PDF 或 影片)，直接跳過壓縮，但檢查容量
+    if (!file.type.startsWith('image/')) {
+      if (file.type.startsWith('video/') && file.size > 50 * 1024 * 1024) {
+        return reject(new Error("影片檔案請勿超過 50MB，請修剪後再上傳！"));
+      } else if (!file.type.startsWith('video/') && file.size > 5 * 1024 * 1024) {
+        return reject(new Error("PDF或其他檔案請勿超過 5MB"));
+      }
       return resolve(file);
     }
+    
+    // 圖片壓縮邏輯
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
@@ -74,6 +82,7 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
     reader.onerror = () => resolve(file); 
   });
 };
+
 // ★ 新增：預設入住公約 (保底機制，避免舊盤源沒資料時卡片消失)
 const DEFAULT_HOUSE_RULES = `【PrimeLiving 佳寓 - 入住須知與生活公約】
 歡迎入住！為維持高品質居住環境，請各位室友共同遵守以下規範：
@@ -278,6 +287,7 @@ function DashboardContent() {
   const [surrenderFiles, setSurrenderFiles] = useState<File[]>([]); 
   const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
   const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
+  const surrenderFileInputRef = useRef<HTMLInputElement>(null);
   const [idType, setIdType] = useState('HKID'); 
   const [idFile, setIdFile] = useState<File | null>(null);
 
@@ -1429,16 +1439,47 @@ function DashboardContent() {
                       <p className="text-[10px] text-slate-500 mb-3">📸 請確保上傳包含：<span className="text-rose-600 font-bold">1. 房間整體清潔狀況</span>、<span className="text-rose-600 font-bold">2. 留存的鑰匙/門卡</span>、<span className="text-rose-600 font-bold">3. 冷氣機遙控器</span>。</p>
                       
                       <div className="relative">
-                        <input type="file" multiple accept="image/*,video/mp4" onChange={e => { 
-                          if (e.target.files) {
-                            setSurrenderFiles(prev => [...prev, ...Array.from(e.target.files!)]);
-                            e.target.value = ''; // Reset input to allow selecting the same file again if needed
-                          }
-                        }} className="hidden" id="surrender-files" />
-                        <label htmlFor="surrender-files" className="flex flex-col items-center justify-center w-full py-6 border-2 border-dashed border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50 hover:text-rose-500 rounded-2xl cursor-pointer transition-all">
-                          <Camera size={28} className="mb-2"/>
-                          <span className="text-sm font-bold">點擊繼續新增相片或影片</span>
-                        </label>
+                        <input 
+                          type="file" 
+                          multiple 
+                          accept="image/*,video/*" 
+                          ref={surrenderFileInputRef}
+                          onChange={e => { 
+                            const files = e.target.files;
+                            if (files && files.length > 0) {
+                              // ★ 立即過濾掉超過 50MB 的超大影片，避免卡死
+                              const validFiles = Array.from(files).filter(f => {
+                                if (f.type.startsWith('video/') && f.size > 50 * 1024 * 1024) {
+                                  alert(`影片 [${f.name}] 超過 50MB！請修剪縮短或降低畫質後再上傳。`);
+                                  return false;
+                                }
+                                return true;
+                              });
+                              setSurrenderFiles(prev => [...prev, ...validFiles]);
+                            }
+                            // ★ 讀取完畢後立刻清空 value，這樣使用者刪除照片後，想重新選同一張才能再次觸發 onChange
+                            if (surrenderFileInputRef.current) {
+                              surrenderFileInputRef.current.value = ''; 
+                            }
+                          }} 
+                          className="hidden" 
+                        />
+                        
+                        {/* ★ 改用 Button 與 onClick 強制觸發，搭配 pointer-events-none 避免點擊被文字攔截 */}
+                        <button 
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            surrenderFileInputRef.current?.click();
+                          }}
+                          className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all outline-none ${surrenderFiles.length > 0 ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50'}`}
+                        >
+                          <Camera size={28} className="mb-2 pointer-events-none"/>
+                          <span className="text-sm font-bold pointer-events-none">
+                            {surrenderFiles.length > 0 ? '點擊繼續新增相片或影片' : '點擊上傳相片或影片'}
+                          </span>
+                          <span className="text-[10px] text-slate-400 mt-1 pointer-events-none">(支援多選。圖片自動壓縮，影片限 50MB 內)</span>
+                        </button>
                       </div>
 
                       {/* 支援獨立預覽與刪除的列表 */}
