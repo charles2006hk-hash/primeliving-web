@@ -6,7 +6,7 @@ import {
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
   CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2, ArrowLeft, MessageSquare,
-  BookOpen, Wifi, KeyRound, Info // ★ 新增圖標
+  BookOpen, Wifi, KeyRound, Info, Sparkles
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc, arrayUnion } from 'firebase/firestore';
@@ -16,11 +16,9 @@ import Script from 'next/script';
 import ContractTemplate, { ContractData } from '@/components/ContractTemplate';
 import { ref, uploadBytesResumable, getDownloadURL, getStorage } from 'firebase/storage';
 
-// 財務精確計算 (單位：分 Cents) - 避免 JS 浮點數誤差
 const toCents = (amount: number | string) => Math.round((Number(amount) || 0) * 100);
 const fromCents = (cents: number) => cents / 100;
 
-// 安全時間戳解析器
 const getSafeTime = (val: any): number => {
   if (!val) return 0;
   if (typeof val.toDate === 'function') return val.toDate().getTime();
@@ -28,7 +26,6 @@ const getSafeTime = (val: any): number => {
   return isNaN(t) ? 0 : t;
 };
 
-// ★ 提取中文期數轉為數字以便排序 (第一期 -> 1)
 const getPeriodNumber = (title: string) => {
   const match = title.match(/第([一二三四五六七八九十\d]+)期/);
   if (!match) return 999;
@@ -36,7 +33,6 @@ const getPeriodNumber = (title: string) => {
   return numMap[match[1]] || parseInt(match[1]) || 999;
 };
 
-// ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB)
 const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   return new Promise((resolve, reject) => {
     if (file.type === 'application/pdf' || !file.type.startsWith('image/')) {
@@ -79,9 +75,6 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   });
 };
 
-// ============================================================================
-// ★ 新增組件：入住須知卡片 (MoveInGuideCard)
-// ============================================================================
 function MoveInGuideCard({ propertyData }: { propertyData: any }) {
   const [isOpen, setIsOpen] = useState(false);
   const guide = propertyData?.moveInGuide;
@@ -92,7 +85,6 @@ function MoveInGuideCard({ propertyData }: { propertyData: any }) {
     <>
       <div 
         onClick={() => setIsOpen(true)}
-        // ★ 加上 h-full 確保高度與旁邊的卡片一致，並將 p-6 改為 p-5 以爭取更多空間
         className="bg-white/60 backdrop-blur-xl border border-white/50 p-5 rounded-[2rem] cursor-pointer hover:shadow-lg transition-all active:scale-95 group relative overflow-hidden flex flex-col justify-center h-full"
       >
         <BookOpen className="absolute -right-4 -bottom-4 text-blue-500/10" size={80} />
@@ -103,13 +95,10 @@ function MoveInGuideCard({ propertyData }: { propertyData: any }) {
             </p>
             <ChevronRight size={16} className="text-blue-400 group-hover:translate-x-1 transition-transform" />
           </div>
-          {/* ★ 加上 text-base, whitespace-nowrap 確保文字絕對不會斷行 */}
           <p className="text-base font-black text-slate-800 tracking-tight whitespace-nowrap truncate">生活公約與密碼</p>
           <p className="text-[10px] sm:text-xs font-bold text-slate-500 mt-1 truncate">WiFi、門禁、垃圾處理</p>
         </div>
       </div>
-
-      {/* ... 下方的 isOpen Modal 維持原樣不變 ... */}
 
       {isOpen && (
         <div className="fixed inset-0 bg-slate-900/60 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
@@ -163,20 +152,12 @@ function MoveInGuideCard({ propertyData }: { propertyData: any }) {
 
               {guide.rules && (
                 <div className="pt-2">
-                  <h3 className="text-sm font-black text-blue-900 flex items-center gap-1.5 mb-2 pl-1">
-                    <Info size={16} className="text-blue-500"/> 租客生活公約
-                  </h3>
-                  
-                  {/* ★ 加入了 relative, overflow-hidden 與浮水印設計 */}
+                  <h3 className="text-sm font-black text-blue-900 flex items-center gap-1.5 mb-2 pl-1"><Info size={16} className="text-blue-500"/> 租客生活公約</h3>
                   <div className="bg-white text-slate-700 p-5 rounded-2xl border border-slate-200 text-sm leading-loose whitespace-pre-wrap font-medium shadow-sm relative overflow-hidden">
-                    
-                    {/* ★ PrimeLiving Logo 浮水印 */}
                     <div 
                       className="absolute inset-0 z-0 pointer-events-none bg-center bg-no-repeat bg-contain opacity-5" 
                       style={{ backgroundImage: "url('/logo.png')", backgroundSize: "50%" }} 
                     />
-                    
-                    {/* 確保文字在浮水印之上 */}
                     <div className="relative z-10">
                       {guide.rules}
                     </div>
@@ -202,13 +183,13 @@ function DashboardContent() {
   
   const [loading, setLoading] = useState(true);
   const [tenantData, setTenantData] = useState<any>(null);
-  const [propertyData, setPropertyData] = useState<any>(null); // ★ 新增：用來存放該租客關聯的盤源資料 (包含入住須知)
+  const [propertyData, setPropertyData] = useState<any>(null); 
   
   const [tenantDocs, setTenantDocs] = useState<any[]>([]); 
   const [myInquiries, setMyInquiries] = useState<any[]>([]); 
   const [myTickets, setMyTickets] = useState<any[]>([]);
   
-  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications'>('none');
+  const [activeModal, setActiveModal] = useState<'none' | 'payment' | 'contract' | 'ticket' | 'bills' | 'profile' | 'view_doc' | 'contact' | 'notifications' | 'surrender' | 'review'>('none');
   const [viewingDoc, setViewingDoc] = useState<any>(null); 
 
   const [paymentMethod, setPaymentMethod] = useState<'bank' | 'paydollar'>('bank');
@@ -224,9 +205,11 @@ function DashboardContent() {
   const [isSignDownloading, setIsSignDownloading] = useState(false);
   const contractRef = useRef<HTMLDivElement>(null);
 
-  // ★ 報修模組狀態擴充
-  const [ticketTab, setTicketTab] = useState<'submit' | 'history'>('submit');
-  const [ticketCategory, setTicketCategory] = useState('一般維修'); // 對齊大系統
+  const [ticketTab, setTicketTab] = useState<'repair' | 'service' | 'history'>('repair');
+  const REPAIR_CATEGORIES = ['家電設備類', '排水/管道類', '強電/弱電照明類', '家具/門窗/裝修類', '其他'];
+  const SERVICE_CATEGORIES = ['額外清潔服務', '代收代寄快遞行李', '其他生活服務'];
+  
+  const [ticketCategory, setTicketCategory] = useState(REPAIR_CATEGORIES[0]); 
   const [ticketDesc, setTicketDesc] = useState('');
   const [ticketPhoto, setTicketPhoto] = useState<File | null>(null);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
@@ -247,7 +230,10 @@ function DashboardContent() {
   const [surrenderStep, setSurrenderStep] = useState<1 | 2>(1);
   const [moveOutDate, setMoveOutDate] = useState('');
   const [surrenderReason, setSurrenderReason] = useState('');
-  const [surrenderFiles, setSurrenderFiles] = useState<File[]>([]);
+  const [refundBank, setRefundBank] = useState('');
+  const [refundAccountName, setRefundAccountName] = useState('');
+  const [refundAccountNumber, setRefundAccountNumber] = useState('');
+  const [surrenderFiles, setSurrenderFiles] = useState<File[]>([]); 
   const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
   const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [idType, setIdType] = useState('HKID'); 
@@ -388,7 +374,6 @@ function DashboardContent() {
         occupation: data.occupation || ''
       });
 
-      // ★ 讀取該租客對應的物業資料 (為了拿入住須知)
       if (data.propertyId) {
         try {
           const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
@@ -627,7 +612,7 @@ function DashboardContent() {
 
   const handleSubmitTicket = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ticketDesc.trim()) return alert("請描述損壞情況！");
+    if (!ticketDesc.trim()) return alert("請描述申請/損壞情況！");
     setIsSubmittingTicket(true);
     try {
       let photoUrl = '';
@@ -639,12 +624,15 @@ function DashboardContent() {
         photoUrl = await getDownloadURL(photoRef);
       }
 
+      const ticketType = ticketTab === 'service' ? 'Service' : 'Repair';
+      const labelPrefix = ticketTab === 'service' ? '[生活服務]' : '[租客提報]';
+
       await addDoc(collection(db, 'tickets'), { 
         propertyId: tenantData.propertyId || '', 
         roomId: tenantData.roomId || '',         
         tenantId: tenantData.id,                 
-        type: 'Repair',                          
-        title: `[租客提報] ${ticketCategory}`,
+        type: ticketType,                          
+        title: `${labelPrefix} ${ticketCategory}`,
         description: ticketDesc, 
         priority: 'Medium',                      
         status: 'Open',                          
@@ -657,20 +645,19 @@ function DashboardContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '🔧 收到新報修工單',
+          title: `🔧 收到新${ticketTab === 'service' ? '服務' : '報修'}申請`,
           body: `租客 ${tenantData.name} 提報了「${ticketCategory}」`,
           targetRoles: ['管家', 'admin'], 
           url: '/admin/tickets'
         })
       }).catch(console.error);
       
-      alert("✅ 報修單已成功送出！您可在「我的報修紀錄」中隨時查看進度。"); 
+      alert("✅ 申請單已成功送出！您可在「我的紀錄」中隨時查看進度。"); 
       setTicketDesc(''); 
       setTicketPhoto(null); 
       setIsPhotoUploaded(false); 
-      setTicketCategory('一般維修');
       setTicketTab('history'); 
-    } catch (error) { alert("報修失敗，請檢查網路連線。"); } finally { setIsSubmittingTicket(false); }
+    } catch (error) { alert("送出失敗，請檢查網路連線。"); } finally { setIsSubmittingTicket(false); }
   };
 
   const handleAddComment = async (e: React.FormEvent) => {
@@ -694,7 +681,7 @@ function DashboardContent() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: '💬 報修單有新留言',
+          title: '💬 跟進單有新留言',
           body: `${tenantData.name}: ${ticketComment}`,
           targetRoles: ['管家', 'admin'],
           url: '/admin/tickets'
@@ -782,6 +769,7 @@ function DashboardContent() {
   const handleConfirmSurrender = async () => {
     const canvas = surrenderSigCanvasRef.current;
     if (!canvas || !moveOutDate) return alert("請確保日期已填寫並完成簽名！");
+    if (!refundBank || !refundAccountName || !refundAccountNumber) return alert("請完整填寫退款帳戶資訊！");
     
     setIsSubmittingSurrender(true);
     try {
@@ -791,8 +779,7 @@ function DashboardContent() {
       const todayStr = new Date().toISOString().split('T')[0];
 
       for (const file of surrenderFiles) {
-        const isImage = file.type.startsWith('image/');
-        const fileToUpload = isImage ? await compressImage(file) : file;
+        const fileToUpload = file.type.startsWith('image/') ? await compressImage(file) : file;
         const fileRef = ref(storage, `tenants/${tenantData.id}/surrender/${Date.now()}_${fileToUpload.name}`);
         await uploadBytesResumable(fileRef, fileToUpload);
         uploadedFileUrls.push(await getDownloadURL(fileRef));
@@ -809,6 +796,7 @@ function DashboardContent() {
           evidenceUrls: uploadedFileUrls,
           tenantSignature: base64Signature,
           signedAt: todayStr,
+          refundBank, refundAccountName, refundAccountNumber, // ★ 新增退款資訊
           remarks: '租客已簽署退租交吉確認書，同意於交吉日騰空交還物業。'
         },
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
@@ -817,11 +805,11 @@ function DashboardContent() {
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
         category: '退租與交吉申請', 
-        message: `【退租交吉通知】\n預計遷出日：${moveOutDate}\n原因：${surrenderReason || '無'}\n*租客已完成線上退租協議簽署並上傳交吉照片/影片，請管家安排退租點交與按金結算事宜。`,
+        message: `【退租交吉通知】\n預計遷出日：${moveOutDate}\n原因：${surrenderReason || '無'}\n\n【退款帳戶】\n銀行：${refundBank}\n戶名：${refundAccountName}\n帳號：${refundAccountNumber}\n\n*租客已完成線上退租協議簽署並上傳交吉照片/影片，請管家安排退租點交與按金結算事宜。`,
         type: 'ticket', status: 'New', createdAt: serverTimestamp()
       });
 
-      alert("✅ 退租協議簽署成功！管家已收到您的交吉通知，後續將與您結算按金。");
+      alert("✅ 退租協議簽署成功！管家已收到您的交吉通知與退款帳戶，後續將與您結算按金。");
       setActiveModal('none'); setSurrenderStep(1); setSurrenderFiles([]);
     } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態。"); } 
     finally { setIsSubmittingSurrender(false); }
@@ -1024,7 +1012,6 @@ function DashboardContent() {
                   <CreditCard size={18}/> {billingSummary.grandTotal === 0 ? '無待繳帳單' : '立即繳費'}
                 </button>
               </div>
-
               
               <div className="grid grid-cols-2 lg:grid-cols-3 gap-4">
                 <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center h-full">
@@ -1045,7 +1032,6 @@ function DashboardContent() {
                 )}
               </div>
             </div>
-
 
             <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
               <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
@@ -1075,14 +1061,15 @@ function DashboardContent() {
                   <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
                 </button>
                 
-                <button onClick={() => { setActiveModal('ticket'); setTicketTab('submit'); setViewingTicket(null); }} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
+                {/* ★ 更新：選單名稱改為「報修及其他服務跟進」 */}
+                <button onClick={() => { setActiveModal('ticket'); setTicketTab('repair'); setTicketCategory(REPAIR_CATEGORIES[0]); setViewingTicket(null); }} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
                       <Wrench size={20} className="text-blue-500"/>
                     </div>
                     <div>
-                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修申請與進度</p>
-                      <p className="text-[10px] font-bold text-slate-500">設備損壞一鍵呼叫師傅</p>
+                      <p className="text-sm font-black text-slate-800 mb-0.5 flex items-center gap-2">報修及其他服務跟進</p>
+                      <p className="text-[10px] font-bold text-slate-500">設備損壞或預約各項生活服務</p>
                     </div>
                   </div>
                   <ChevronRight size={18} className="text-slate-400 group-hover:text-slate-600 transition-colors" />
@@ -1121,7 +1108,7 @@ function DashboardContent() {
                     </div>
                     <div>
                       <p className="text-sm font-black text-rose-900 mb-0.5">退租與交吉管理</p>
-                      <p className="text-[10px] text-rose-600 font-bold">上傳交還證明並簽署退租書</p>
+                      <p className="text-[10px] text-rose-600 font-bold">上傳交還證明並填寫退款帳戶</p>
                     </div>
                   </div>
                   <ChevronRight size={18} className="text-rose-400 group-hover:text-rose-500 transition-colors" />
@@ -1315,14 +1302,14 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 退租與交吉管理 Modal */}
+      {/* ★ 退租與交吉管理 Modal - (加入退款方式與獨立照片預覽) */}
       {activeModal === 'surrender' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-2xl sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
             <div className="flex justify-between items-center px-6 py-4 bg-slate-900 text-white flex-none z-20">
               <div>
                 <h3 className="font-black text-lg sm:text-xl flex items-center"><LogOut className="mr-2 text-rose-400" size={24}/> 退租暨交吉管理</h3>
-                <p className="text-[10px] text-slate-400 mt-1">Surrender of Tenancy & Handover Confirmation</p>
+                <p className="text-[10px] text-slate-400 mt-1">Surrender of Tenancy & Handover</p>
               </div>
               <button onClick={() => setActiveModal('none')} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors"><X size={20} /></button>
             </div>
@@ -1332,7 +1319,7 @@ function DashboardContent() {
                 <div className="p-6 space-y-6 animate-in slide-in-from-left-4">
                   <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl">
                     <p className="text-sm font-black text-rose-900 mb-1 flex items-center gap-2"><AlertCircle size={16}/> 辦理退租須知</p>
-                    <p className="text-xs text-rose-700 leading-relaxed font-medium">依據合約與香港租賃法例，租客需於交吉日將物業以<strong className="text-rose-900">空置及清潔狀態</strong>交還。請確實填寫遷出日期並上傳屋況與鎖匙留存證明照。</p>
+                    <p className="text-xs text-rose-700 leading-relaxed font-medium">依據合約與香港租賃法例，租客需於交吉日將物業以<strong className="text-rose-900">空置及清潔狀態</strong>交還。請確實填寫退款帳戶並上傳屋況留存證明照。</p>
                   </div>
                   
                   <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -1340,25 +1327,63 @@ function DashboardContent() {
                       <label className="block text-xs font-black text-slate-700 mb-2">預計遷出交吉日 *</label>
                       <input type="date" required value={moveOutDate} onChange={e => setMoveOutDate(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
                     </div>
-                    <div>
-                      <label className="block text-xs font-black text-slate-700 mb-2">退租原因 (選填)</label>
-                      <input type="text" value={surrenderReason} onChange={e => setSurrenderReason(e.target.value)} placeholder="例如：畢業回國、工作調職..." className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                    
+                    <div className="border-t border-slate-100 pt-4 mt-2">
+                      <label className="block text-xs font-black text-slate-700 mb-3 flex items-center gap-1.5"><Landmark size={14} className="text-rose-600"/> 押金退款帳戶 (必填) *</label>
+                      <div className="space-y-3">
+                        <input type="text" required placeholder="銀行名稱 (如: HSBC 匯豐銀行)" value={refundBank} onChange={e => setRefundBank(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                        <div className="flex gap-3">
+                          <input type="text" required placeholder="帳戶持有人姓名" value={refundAccountName} onChange={e => setRefundAccountName(e.target.value)} className="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                          <input type="text" required placeholder="銀行帳號或轉數快號碼" value={refundAccountNumber} onChange={e => setRefundAccountNumber(e.target.value)} className="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-mono font-bold bg-slate-50" />
+                        </div>
+                      </div>
                     </div>
-                    <div>
-                      <label className="block text-xs font-black text-slate-700 mb-2 flex justify-between">
-                        <span>上傳交還證明 (相片或影片) *</span>
-                        <span className="text-[10px] text-slate-400 font-normal">可多選，例如清潔後的房間、冷氣遙控、門匙</span>
-                      </label>
+
+                    <div className="border-t border-slate-100 pt-4 mt-2">
+                      <label className="block text-xs font-black text-slate-700 mb-2">上傳交還證明照 *</label>
+                      <p className="text-[10px] text-slate-500 mb-3">📸 請確保上傳包含：<span className="text-rose-600 font-bold">1. 房間整體清潔狀況</span>、<span className="text-rose-600 font-bold">2. 留存的鑰匙/門卡</span>、<span className="text-rose-600 font-bold">3. 冷氣機遙控器</span>。</p>
+                      
                       <div className="relative">
-                        <input type="file" multiple accept="image/*,video/mp4,video/quicktime" onChange={e => { if (e.target.files) setSurrenderFiles(Array.from(e.target.files)); }} className="hidden" id="surrender-files" />
-                        <label htmlFor="surrender-files" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${surrenderFiles.length > 0 ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50'}`}>
-                          {surrenderFiles.length > 0 ? <><CheckCircle2 size={28} className="mb-2"/><span className="text-sm font-black">已選取 {surrenderFiles.length} 個檔案</span></> : <><UploadCloud size={28} className="mb-2"/><span className="text-sm font-bold">點擊上傳圖檔或影片</span></>}
+                        <input type="file" multiple accept="image/*,video/mp4" onChange={e => { 
+                          if (e.target.files) {
+                            setSurrenderFiles(prev => [...prev, ...Array.from(e.target.files!)]);
+                            e.target.value = ''; // Reset input to allow selecting the same file again if needed
+                          }
+                        }} className="hidden" id="surrender-files" />
+                        <label htmlFor="surrender-files" className="flex flex-col items-center justify-center w-full py-6 border-2 border-dashed border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50 hover:text-rose-500 rounded-2xl cursor-pointer transition-all">
+                          <Camera size={28} className="mb-2"/>
+                          <span className="text-sm font-bold">點擊繼續新增相片或影片</span>
                         </label>
                       </div>
+
+                      {/* 支援獨立預覽與刪除的列表 */}
+                      {surrenderFiles.length > 0 && (
+                        <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {surrenderFiles.map((file, index) => (
+                            <div key={index} className="flex items-center justify-between bg-white p-2 border border-slate-200 rounded-xl shadow-sm">
+                              <div className="flex items-center gap-3 overflow-hidden">
+                                {file.type.startsWith('image/') ? (
+                                  <img src={URL.createObjectURL(file)} alt="preview" className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
+                                ) : (
+                                  <div className="w-10 h-10 bg-slate-100 flex items-center justify-center rounded-lg border border-slate-200 shrink-0"><FileText size={16} className="text-slate-400"/></div>
+                                )}
+                                <span className="text-xs font-bold text-slate-700 truncate pr-2">{file.name}</span>
+                              </div>
+                              <button type="button" onClick={() => setSurrenderFiles(prev => prev.filter((_, i) => i !== index))} className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition shrink-0">
+                                <Trash2 size={16} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
                   </div>
 
-                  <button onClick={() => { if (!moveOutDate || surrenderFiles.length === 0) return alert("請填寫遷出日期並上傳至少一張證明照片！"); setSurrenderStep(2); }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl">
+                  <button onClick={() => { 
+                    if (!moveOutDate || surrenderFiles.length === 0) return alert("請填寫遷出日期並上傳至少一張證明照片！"); 
+                    if (!refundBank || !refundAccountName || !refundAccountNumber) return alert("請完整填寫押金退款帳戶資訊！");
+                    setSurrenderStep(2); 
+                  }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl">
                     下一步：檢閱並簽署退租書 <ChevronRight size={18}/>
                   </button>
                 </div>
@@ -1449,7 +1474,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 繳費 Modal */}
+    {/* 繳費 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -1520,7 +1545,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 合約與簽署 Modal */}
+{/* 合約與簽署 Modal */}
       {activeModal === 'contract' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-slate-100 w-full max-w-[1000px] rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
@@ -1768,14 +1793,14 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 全新升級：雙向報修進度與留言系統 Modal */}
+      {/* ★ 全新升級：雙向報修進度與留言系統 Modal (含分類修正) */}
       {activeModal === 'ticket' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] sm:h-[80vh] overflow-hidden animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
             
             <div className="flex justify-between items-center p-6 bg-slate-900 text-white flex-none relative">
               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-700 rounded-full sm:hidden" />
-              <h3 className="font-black text-xl mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-400" size={24}/> 報修申請與進度追蹤</h3>
+              <h3 className="font-black text-xl mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-400" size={24}/> 報修與其他服務進度追蹤</h3>
               <button onClick={() => { setActiveModal('none'); setViewingTicket(null); }} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
             </div>
 
@@ -1839,34 +1864,35 @@ function DashboardContent() {
               </div>
             ) : (
               <div className="flex flex-col h-full overflow-hidden">
-                <div className="flex bg-slate-100 p-2 mx-6 mt-6 rounded-2xl flex-none">
-                  <button onClick={() => setTicketTab('submit')} className={`flex-1 py-2 text-sm font-black rounded-xl transition-all ${ticketTab === 'submit' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>提交新報修</button>
-                  <button onClick={() => setTicketTab('history')} className={`flex-1 py-2 text-sm font-black rounded-xl transition-all ${ticketTab === 'history' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>我的報修紀錄 {myTickets.length > 0 && `(${myTickets.length})`}</button>
+                <div className="flex bg-slate-100 p-1.5 mx-6 mt-6 rounded-2xl flex-none shadow-inner border border-slate-200/50">
+                  <button onClick={() => { setTicketTab('repair'); setTicketCategory(REPAIR_CATEGORIES[0]); }} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'repair' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>維修申請</button>
+                  <button onClick={() => { setTicketTab('service'); setTicketCategory(SERVICE_CATEGORIES[0]); }} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'service' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>生活服務</button>
+                  <button onClick={() => setTicketTab('history')} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'history' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>我的紀錄 {myTickets.length > 0 && `(${myTickets.length})`}</button>
                 </div>
 
                 <div className="flex-1 overflow-y-auto p-6 bg-white custom-scrollbar">
-                  {ticketTab === 'submit' ? (
+                  {(ticketTab === 'repair' || ticketTab === 'service') ? (
                     <form onSubmit={handleSubmitTicket} className="space-y-6 animate-in slide-in-from-left-4">
                       <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex items-start gap-3">
                         <AlertCircle className="text-blue-600 shrink-0 mt-0.5" size={18}/>
-                        <p className="text-[10px] text-blue-800 font-bold leading-relaxed">請具體描述損壞情況並提供照片。送出後，您可以切換至「我的報修紀錄」查看最新處理進度並與師傅留言溝通。</p>
+                        <p className="text-[10px] text-blue-800 font-bold leading-relaxed">請具體描述情況並提供照片。送出後，您可以切換至「我的紀錄」查看最新處理進度並與管家留言溝通。</p>
                       </div>
                       <div>
-                        <p className="text-xs font-black text-slate-800 mb-3">請選擇損壞項目 *</p>
+                        <p className="text-xs font-black text-slate-800 mb-3">請選擇{ticketTab === 'repair' ? '損壞項目' : '服務類型'} *</p>
                         <div className="grid grid-cols-2 gap-3">
-                          {['一般維修', '入伙裝修', '退租翻新', '單位清潔'].map(cat => (
-                            <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-4 rounded-xl text-sm font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+                          {(ticketTab === 'repair' ? REPAIR_CATEGORIES : SERVICE_CATEGORIES).map(cat => (
+                            <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-3 rounded-xl text-xs font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
                           ))}
                         </div>
                       </div>
                       <div>
                         <p className="text-xs font-black text-slate-800 mb-3">狀況描述 *</p>
-                        <textarea rows={4} required placeholder="例如：冷氣開了不冷，而且會滴水..." value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm bg-slate-50" />
+                        <textarea rows={4} required placeholder={ticketTab === 'repair' ? "例如：冷氣開了不冷，而且會滴水..." : "請描述您需要的服務細節..."} value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm bg-slate-50" />
                       </div>
                       <div>
                         <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
                           <span>上傳照片 (選填)</span>
-                          <span className="text-slate-400 font-normal">幫助師傅更快判斷</span>
+                          <span className="text-slate-400 font-normal">幫助我們更快判斷</span>
                         </p>
                         <div className="relative shadow-sm">
                           <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setTicketPhoto(e.target.files[0]); setIsPhotoUploaded(true); } }} />
@@ -1876,7 +1902,7 @@ function DashboardContent() {
                         </div>
                       </div>
                       <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl disabled:opacity-50">
-                        {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : '確認送出報修單'}
+                        {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : `確認送出${ticketTab === 'repair' ? '報修單' : '申請'}`}
                       </button>
                     </form>
                   ) : (
@@ -1884,7 +1910,7 @@ function DashboardContent() {
                       {myTickets.length === 0 ? (
                         <div className="text-center py-16 text-slate-400">
                           <Wrench size={40} className="mx-auto mb-3 opacity-30"/>
-                          <p className="text-sm font-bold">目前沒有任何報修紀錄</p>
+                          <p className="text-sm font-bold">目前沒有任何紀錄</p>
                         </div>
                       ) : (
                         myTickets.map(ticket => (
