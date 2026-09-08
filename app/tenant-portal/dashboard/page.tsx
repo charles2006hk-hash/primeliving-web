@@ -34,7 +34,7 @@ const getPeriodNumber = (title: string) => {
 };
 
 // ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB，影片限制 50MB)
-const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
+const compressImage = (file: any, maxSizeKB = 150): Promise<any> => {
   return new Promise((resolve, reject) => {
     // 若不是圖片 (例如 PDF 或 影片)，直接跳過壓縮，但檢查容量
     if (!file.type.startsWith('image/')) {
@@ -262,7 +262,7 @@ function DashboardContent() {
   
   const [ticketCategory, setTicketCategory] = useState(REPAIR_CATEGORIES[0]); 
   const [ticketDesc, setTicketDesc] = useState('');
-  const [ticketPhoto, setTicketPhoto] = useState<File | null>(null);
+  const [ticketPhoto, setTicketPhoto] = useState<any>(null);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPhotoUploaded, setIsPhotoUploaded] = useState(false);
   const [viewingTicket, setViewingTicket] = useState<any>(null);
@@ -284,12 +284,12 @@ function DashboardContent() {
   const [refundBank, setRefundBank] = useState('');
   const [refundAccountName, setRefundAccountName] = useState('');
   const [refundAccountNumber, setRefundAccountNumber] = useState('');
-  const [surrenderFiles, setSurrenderFiles] = useState<File[]>([]); 
+  const [surrenderFiles, setSurrenderFiles] = useState<any[]>([]); 
   const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
   const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
   const surrenderFileInputRef = useRef<HTMLInputElement>(null);
   const [idType, setIdType] = useState('HKID'); 
-  const [idFile, setIdFile] = useState<File | null>(null);
+  const [idFile, setIdFile] = useState<any>(null);
 
   const [chatMessages, setChatMessages] = useState<{sender: 'bot'|'user', text: string, options?: string[]}[]>([]);
   const [chatCategory, setChatCategory] = useState('');
