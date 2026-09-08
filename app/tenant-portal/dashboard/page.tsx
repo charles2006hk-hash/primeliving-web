@@ -515,7 +515,16 @@ function DashboardContent() {
 
     const allBills = pendingDocs.map(item => {
       const fd = item.formData || {};
-      let baseAmount = Number(fd.totalAmount) || Number(fd.amount) || 0;
+      
+      // ★ 核心修復：如果這是一張對數單且有 finalBalance，待繳金額必須是 finalBalance (扣除已付後的欠款)
+      let baseAmount = 0;
+      if (fd.finalBalance !== undefined) {
+         baseAmount = Number(fd.finalBalance) > 0 ? Number(fd.finalBalance) : 0;
+      } else {
+         const total = Number(fd.totalAmount) || Number(fd.amount) || 0;
+         const received = Number(fd.totalReceived) || 0;
+         baseAmount = Math.max(0, total - received);
+      }
       
       let dueDateStr = fd.docDate || fd.dueDate || new Date().toISOString().split('T')[0];
       const dueDate = new Date(dueDateStr); dueDate.setHours(0, 0, 0, 0);
@@ -2167,7 +2176,12 @@ function DashboardContent() {
                   .map(doc => {
                     const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
                     const isPending = doc.status === 'Pending' || doc.paymentStatus === 'Unpaid';
-                    const amount = doc.formData?.totalAmount || doc.formData?.amount;
+                    
+                    // ★ 精確提取歷史單據明細
+                    const totalReceivable = Number(doc.formData?.totalReceivable || doc.formData?.totalAmount || doc.formData?.amount || 0);
+                    const totalReceived = Number(doc.formData?.totalReceived || 0);
+                    const finalBalance = doc.formData?.finalBalance !== undefined ? Number(doc.formData?.finalBalance) : Math.max(0, totalReceivable - totalReceived);
+                    const isPartialPaid = totalReceived > 0 && finalBalance > 0;
 
                     return (
                       <button key={doc.id} onClick={() => { setViewingDoc(doc); setActiveModal('view_doc'); }} className={`w-full flex justify-between items-center p-4 border rounded-xl hover:shadow-md transition-all text-left group ${isPending ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400' : 'bg-white border-slate-200 hover:border-cyan-400'}`}>
@@ -2186,7 +2200,17 @@ function DashboardContent() {
                           </div>
                         </div>
                         <div className="flex items-center gap-3">
-                           {amount && <span className="text-sm font-black font-mono text-slate-700 hidden sm:block">${Number(amount).toLocaleString()}</span>}
+                           <div className="flex flex-col items-end gap-0.5 hidden sm:flex">
+                             <span className={`text-sm font-black font-mono ${isPending && finalBalance > 0 ? 'text-red-600' : 'text-slate-700'}`}>
+                               ${finalBalance > 0 ? finalBalance.toLocaleString() : totalReceivable.toLocaleString()}
+                             </span>
+                             {isPartialPaid && (
+                               <span className="text-[9px] font-bold text-slate-400 font-mono text-right leading-tight">
+                                 總額: ${totalReceivable.toLocaleString()} <br/>
+                                 已付: <span className="text-emerald-500">${totalReceived.toLocaleString()}</span>
+                               </span>
+                             )}
+                           </div>
                            <Eye size={18} className="text-slate-300 group-hover:text-cyan-600 transition-colors shrink-0" />
                         </div>
                       </button>
