@@ -1004,8 +1004,8 @@ function DashboardContent() {
               <h1 className="text-3xl md:text-4xl font-black text-slate-900 tracking-tight mb-4">
                 尊貴的 {tenantData.name}，您好
               </h1>
+            
               <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
-                <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
                 <div className="p-2 bg-white/60 rounded-full shadow-sm">
                   {weather.type === 'rain' ? <CloudRain size={28} className="text-blue-500" /> : <Sun size={28} className="text-amber-500" />}
                 </div>
