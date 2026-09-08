@@ -75,8 +75,18 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
         }
 
         fetch(dataUrl).then(res => res.blob()).then(blob => {
-          resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", { type: 'image/jpeg', lastModified: Date.now() }));
-        }).catch(() => resolve(file)); 
+          const fileName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
+          try {
+            // 現代瀏覽器正常寫法
+            resolve(new File([blob], fileName, { type: 'image/jpeg', lastModified: Date.now() }));
+          } catch (e) {
+            // ★ 防呆：舊版 iOS Safari 會報 Illegal constructor，改用 Blob 偽裝
+            const fallbackBlob = blob as any;
+            fallbackBlob.name = fileName;
+            fallbackBlob.lastModified = Date.now();
+            resolve(fallbackBlob);
+          }
+        }).catch(() => resolve(file));
       };
     };
     reader.onerror = () => resolve(file); 
@@ -296,8 +306,11 @@ function DashboardContent() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  const [weather, setWeather] = useState({ temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> });
-
+  const [weather, setWeather] = useState({ 
+    temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', 
+    type: 'sun' // 用字串記錄天氣類型
+  });
+  
   const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
   
   const [showSigPad, setShowSigPad] = useState(false);
@@ -348,15 +361,18 @@ function DashboardContent() {
     } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態。"); } finally { setIsSigning(false); }
   };
 
+  // ★ 2. 修改 useEffect 內的 setWeather
   useEffect(() => {
     fetch('https://api.open-meteo.com/v1/forecast?latitude=22.3193&longitude=114.1694&current_weather=true')
       .then(res => res.json())
       .then(data => {
         const t = data.current_weather.temperature;
         const code = data.current_weather.weathercode;
-        let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', icon = <Sun size={28} className="text-amber-500" />;
-        if (code >= 50 && code <= 69) { desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; icon = <CloudRain size={28} className="text-blue-500" />; }
-        setWeather({ temp: t, desc, suggestion, bgClass, icon });
+        let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', type = 'sun';
+        if (code >= 50 && code <= 69) { 
+          desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; type = 'rain'; 
+        }
+        setWeather({ temp: t, desc, suggestion, bgClass, type });
       }).catch(() => {});
   }, []);
 
@@ -1003,7 +1019,10 @@ function DashboardContent() {
                 尊貴的 {tenantData.name}，您好
               </h1>
               <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
-                <div className="p-2 bg-white/60 rounded-full shadow-sm">{weather.icon}</div>
+                <div className="p-2 bg-white/60 rounded-full shadow-sm">
+                  {/* ★ 動態渲染圖標，避免從 State 讀取 JSX */}
+                  {weather.type === 'rain' ? <CloudRain size={28} className="text-blue-500" /> : <Sun size={28} className="text-amber-500" />}
+                </div>
                 <div>
                   <p className="text-sm font-black text-slate-800">目前香港天氣：{weather.desc}，氣溫 {weather.temp}°C</p>
                   <p className="text-xs text-slate-600 mt-1 font-bold">{weather.suggestion}</p>
