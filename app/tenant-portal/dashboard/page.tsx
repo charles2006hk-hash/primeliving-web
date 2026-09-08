@@ -262,7 +262,7 @@ function DashboardContent() {
   
   const [ticketCategory, setTicketCategory] = useState(REPAIR_CATEGORIES[0]); 
   const [ticketDesc, setTicketDesc] = useState('');
-  const [ticketPhoto, setTicketPhoto] = useState<any>(null);
+  const [ticketPhoto, setTicketPhoto] = useState<{fileUrl: string, file: any, name: string} | null>(null);
   const [isSubmittingTicket, setIsSubmittingTicket] = useState(false);
   const [isPhotoUploaded, setIsPhotoUploaded] = useState(false);
   const [viewingTicket, setViewingTicket] = useState<any>(null);
@@ -284,12 +284,12 @@ function DashboardContent() {
   const [refundBank, setRefundBank] = useState('');
   const [refundAccountName, setRefundAccountName] = useState('');
   const [refundAccountNumber, setRefundAccountNumber] = useState('');
-  const [surrenderFiles, setSurrenderFiles] = useState<any[]>([]); 
+  const [surrenderFiles, setSurrenderFiles] = useState<{fileUrl: string, file: any, name: string, type: string}[]>([]); 
   const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
   const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
   const surrenderFileInputRef = useRef<HTMLInputElement>(null);
   const [idType, setIdType] = useState('HKID'); 
-  const [idFile, setIdFile] = useState<any>(null);
+  const [idFile, setIdFile] = useState<{fileUrl: string, file: any, name: string} | null>(null);
 
   const [chatMessages, setChatMessages] = useState<{sender: 'bot'|'user', text: string, options?: string[]}[]>([]);
   const [chatCategory, setChatCategory] = useState('');
@@ -712,7 +712,8 @@ function DashboardContent() {
       let photoUrl = '';
       if (ticketPhoto) {
         const storage = getStorage();
-        const compressedFile = await compressImage(ticketPhoto);
+        // ★ 這裡改用 ticketPhoto.file
+        const compressedFile = await compressImage(ticketPhoto.file);
         const photoRef = ref(storage, `tickets/${tenantData.id}_${Date.now()}_${compressedFile.name}`);
         await uploadBytesResumable(photoRef, compressedFile);
         photoUrl = await getDownloadURL(photoRef);
@@ -801,7 +802,7 @@ function DashboardContent() {
     setIsSavingProfile(true);
     try {
       const storage = getStorage();
-      const compressedFile = await compressImage(idFile);
+      const compressedFile = await compressImage(idFile.file);
       const idRef = ref(storage, `tenants/${tenantData.id}/kyc/${idType}_${Date.now()}_${compressedFile.name}`);
       await uploadBytesResumable(idRef, compressedFile);
       const fileUrl = await getDownloadURL(idRef);
@@ -872,8 +873,9 @@ function DashboardContent() {
       const base64Signature = canvas.toDataURL('image/png');
       const todayStr = new Date().toISOString().split('T')[0];
 
-      for (const file of surrenderFiles) {
-        const fileToUpload = file.type.startsWith('image/') ? await compressImage(file) : file;
+      for (const item of surrenderFiles) {
+        // ★ 這裡改用 item.file
+        const fileToUpload = item.type.startsWith('image/') ? await compressImage(item.file) : item.file;
         const fileRef = ref(storage, `tenants/${tenantData.id}/surrender/${Date.now()}_${fileToUpload.name}`);
         await uploadBytesResumable(fileRef, fileToUpload);
         uploadedFileUrls.push(await getDownloadURL(fileRef));
@@ -1500,25 +1502,26 @@ function DashboardContent() {
                           onChange={e => { 
                             const files = e.target.files;
                             if (files && files.length > 0) {
-                              // ★ 立即過濾掉超過 50MB 的超大影片，避免卡死
-                              const validFiles = Array.from(files).filter(f => {
+                              const newFiles = Array.from(files).filter(f => {
                                 if (f.type.startsWith('video/') && f.size > 50 * 1024 * 1024) {
                                   alert(`影片 [${f.name}] 超過 50MB！請修剪縮短或降低畫質後再上傳。`);
                                   return false;
                                 }
                                 return true;
-                              });
-                              setSurrenderFiles(prev => [...prev, ...validFiles]);
+                              }).map(f => ({
+                                fileUrl: URL.createObjectURL(f),
+                                file: f,
+                                name: f.name,
+                                type: f.type
+                              }));
+                              
+                              setSurrenderFiles(prev => [...prev, ...newFiles]);
                             }
-                            // ★ 讀取完畢後立刻清空 value，這樣使用者刪除照片後，想重新選同一張才能再次觸發 onChange
-                            if (surrenderFileInputRef.current) {
-                              surrenderFileInputRef.current.value = ''; 
-                            }
+                            if (surrenderFileInputRef.current) surrenderFileInputRef.current.value = ''; 
                           }} 
                           className="hidden" 
                         />
                         
-                        {/* ★ 改用 Button 與 onClick 強制觸發，搭配 pointer-events-none 避免點擊被文字攔截 */}
                         <button 
                           type="button"
                           onClick={(e) => {
@@ -1538,15 +1541,15 @@ function DashboardContent() {
                       {/* 支援獨立預覽與刪除的列表 */}
                       {surrenderFiles.length > 0 && (
                         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                          {surrenderFiles.map((file, index) => (
+                          {surrenderFiles.map((item, index) => (
                             <div key={index} className="flex items-center justify-between bg-white p-2 border border-slate-200 rounded-xl shadow-sm">
                               <div className="flex items-center gap-3 overflow-hidden">
-                                {file.type.startsWith('image/') ? (
-                                  <img src={URL.createObjectURL(file)} alt="preview" className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
+                                {item.type.startsWith('image/') ? (
+                                  <img src={item.fileUrl} alt="preview" className="w-10 h-10 object-cover rounded-lg border border-slate-200 shrink-0" />
                                 ) : (
                                   <div className="w-10 h-10 bg-slate-100 flex items-center justify-center rounded-lg border border-slate-200 shrink-0"><FileText size={16} className="text-slate-400"/></div>
                                 )}
-                                <span className="text-xs font-bold text-slate-700 truncate pr-2">{file.name}</span>
+                                <span className="text-xs font-bold text-slate-700 truncate pr-2">{item.name}</span>
                               </div>
                               <button type="button" onClick={() => setSurrenderFiles(prev => prev.filter((_, i) => i !== index))} className="p-2 text-rose-500 hover:bg-rose-50 rounded-full transition shrink-0">
                                 <Trash2 size={16} />
@@ -2074,7 +2077,19 @@ function DashboardContent() {
                           <span className="text-slate-400 font-normal">幫助我們更快判斷</span>
                         </p>
                         <div className="relative shadow-sm">
-                          <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setTicketPhoto(e.target.files[0]); setIsPhotoUploaded(true); } }} />
+                          {/* ★ 改寫上傳攔截邏輯，避免 Illegal constructor */}
+                          <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={async (e) => { 
+                            if (e.target.files?.[0]) { 
+                              const f = e.target.files[0];
+                              // 立即轉換為 Blob 與安全物件存入 State
+                              setTicketPhoto({
+                                fileUrl: URL.createObjectURL(f),
+                                file: f,
+                                name: f.name
+                              }); 
+                              setIsPhotoUploaded(true); 
+                            } 
+                          }} />
                           <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
                             {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black truncate px-4 max-w-[250px]">{ticketPhoto?.name || '照片已成功夾帶'}</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
                           </label>
