@@ -6,7 +6,7 @@ import {
   Landmark, UploadCloud, X, CheckCircle2, AlertCircle, FileSignature, Download,
   Camera, Receipt, ShieldCheck, IdCard, LogOut, Eye, MessageCircle, PhoneCall, Send, MapPin, CloudRain, Sun, Cloud,
   CheckSquare, Square, ChevronDown, ChevronUp, Clock, Edit3, Trash2, ArrowLeft, MessageSquare,
-  BookOpen, Wifi, KeyRound, Info, Sparkles
+  BookOpen, Wifi, KeyRound, Info, Sparkles, Lock
 } from 'lucide-react';
 import Link from 'next/link';
 import { doc, onSnapshot, updateDoc, addDoc, collection, serverTimestamp, query, where, orderBy, setDoc, getDoc, getDocs, deleteDoc, arrayUnion } from 'firebase/firestore';
