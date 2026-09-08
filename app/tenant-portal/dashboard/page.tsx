@@ -2177,11 +2177,11 @@ function DashboardContent() {
                     const dynamicTitle = doc.formData?.items?.[0]?.description || (doc.type === 'Receipt' ? '繳款正式收據' : '對數結算單');
                     const isPending = doc.status === 'Pending' || doc.paymentStatus === 'Unpaid';
                     
-                    // ★ 精確提取歷史單據明細
+                    // ★ 精確提取歷史單據明細：強制動態計算
                     const totalReceivable = Number(doc.formData?.totalReceivable || doc.formData?.totalAmount || doc.formData?.amount || 0);
                     const totalReceived = Number(doc.formData?.totalReceived || 0);
-                    const finalBalance = doc.formData?.finalBalance !== undefined ? Number(doc.formData?.finalBalance) : Math.max(0, totalReceivable - totalReceived);
-                    const isPartialPaid = totalReceived > 0 && finalBalance > 0;
+                    const currentOwed = Math.max(0, Math.round((totalReceivable - totalReceived) * 100) / 100);
+                    const isPartialPaid = totalReceived > 0 && currentOwed > 0;
 
                     return (
                       <button key={doc.id} onClick={() => { setViewingDoc(doc); setActiveModal('view_doc'); }} className={`w-full flex justify-between items-center p-4 border rounded-xl hover:shadow-md transition-all text-left group ${isPending ? 'bg-amber-50/50 border-amber-200 hover:border-amber-400' : 'bg-white border-slate-200 hover:border-cyan-400'}`}>
@@ -2201,8 +2201,8 @@ function DashboardContent() {
                         </div>
                         <div className="flex items-center gap-3">
                            <div className="flex flex-col items-end gap-0.5 hidden sm:flex">
-                             <span className={`text-sm font-black font-mono ${isPending && finalBalance > 0 ? 'text-red-600' : 'text-slate-700'}`}>
-                               ${finalBalance > 0 ? finalBalance.toLocaleString() : totalReceivable.toLocaleString()}
+                             <span className={`text-sm font-black font-mono ${isPending && currentOwed > 0 ? 'text-red-600' : 'text-slate-700'}`}>
+                               ${currentOwed > 0 ? currentOwed.toLocaleString() : totalReceivable.toLocaleString()}
                              </span>
                              {isPartialPaid && (
                                <span className="text-[9px] font-bold text-slate-400 font-mono text-right leading-tight">
