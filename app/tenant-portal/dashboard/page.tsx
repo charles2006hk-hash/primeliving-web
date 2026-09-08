@@ -435,7 +435,7 @@ function DashboardContent() {
     isPhysicalSigned: data.isPhysicalSigned || false,
     university: data.university || data.school || '',
     degree: data.degree || data.studyLevel || data.program || '',
-    occupation: data.occupation || ''，
+    occupation: data.occupation || '',
     enablePendingBills: data.enablePendingBills ?? true,
     enableContracts: data.enableContracts ?? true,
     enableHistory: data.enableHistory ?? true,
