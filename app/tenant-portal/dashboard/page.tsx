@@ -435,7 +435,10 @@ function DashboardContent() {
     isPhysicalSigned: data.isPhysicalSigned || false,
     university: data.university || data.school || '',
     degree: data.degree || data.studyLevel || data.program || '',
-    occupation: data.occupation || ''
+    occupation: data.occupation || ''，
+    enablePendingBills: data.enablePendingBills ?? true,
+    enableContracts: data.enableContracts ?? true,
+    enableHistory: data.enableHistory ?? true,
   });
 
   // 5. 異步獲取關聯的盤源資料與入住須知 (加入容錯 Fallback 機制)
@@ -960,6 +963,10 @@ function DashboardContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>;
   if (!tenantData) return null;
 
+  const showPendingBills = tenantData.enablePendingBills !== false && tenantData.enablePendingBills !== 'false';
+  const showContracts = tenantData.enableContracts !== false && tenantData.enableContracts !== 'false';
+  const showHistory = tenantData.enableHistory !== false && tenantData.enableHistory !== 'false';
+
   return (
     <div className={`h-screen flex flex-col selection:bg-orange-200 font-sans relative bg-gradient-to-br transition-colors duration-1000 overflow-hidden ${weather.bgClass}`}>
       <Script src="https://cdn.jsdelivr.net/npm/html-to-image@1.11.11/dist/html-to-image.min.js" strategy="lazyOnload" />
@@ -1018,7 +1025,7 @@ function DashboardContent() {
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
             <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
               {/* ★ 1. 租客欠款、待繳單據 區塊 */}
-              {tenantData.enablePendingBills !== false ? (
+              {showPendingBills ? (
                 <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
                   <div className="absolute top-0 right-0 w-48 h-48 bg-orange-500/20 blur-[60px] -translate-y-16 translate-x-16 pointer-events-none" />
                   
@@ -1143,7 +1150,7 @@ function DashboardContent() {
             <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
               <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
                 {/* ★ 2. 電子合約單據 區塊 */}
-                {tenantData.enableContracts !== false ? (
+                {showContracts ? (
                   <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
                     <div className="flex items-center gap-4">
                       <div className={`w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform ${tenantData.isContractSigned ? 'bg-emerald-50' : 'bg-purple-50'}`}>
@@ -1200,7 +1207,7 @@ function DashboardContent() {
                 </button>
                 
                 {/* ★ 3. 歷史單據查詢 區塊 */}
-                {tenantData.enableHistory !== false ? (
+                {showHistory ? (
                   <button onClick={() => setActiveModal('bills')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 bg-cyan-50 rounded-2xl flex items-center justify-center shadow-sm group-hover:scale-110 transition-transform">
