@@ -33,9 +33,10 @@ const getPeriodNumber = (title: string) => {
   return numMap[match[1]] || parseInt(match[1]) || 999;
 };
 
-// ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB，影片限制 50MB，並防呆 Illegal constructor)
+// ★ 純前端圖片壓縮模組 (確保上傳圖片小於 150KB，影片限制 50MB)
 const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
   return new Promise((resolve, reject) => {
+    // 若不是圖片 (例如 PDF 或 影片)，直接跳過壓縮，但檢查容量
     if (!file.type.startsWith('image/')) {
       if (file.type.startsWith('video/') && file.size > 50 * 1024 * 1024) {
         return reject(new Error("影片檔案請勿超過 50MB，請修剪後再上傳！"));
@@ -45,6 +46,7 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
       return resolve(file);
     }
     
+    // 圖片壓縮邏輯
     const reader = new FileReader();
     reader.readAsDataURL(file);
     reader.onload = (event) => {
@@ -73,23 +75,15 @@ const compressImage = (file: File, maxSizeKB = 150): Promise<File> => {
         }
 
         fetch(dataUrl).then(res => res.blob()).then(blob => {
-          const fileName = file.name.replace(/\.[^/.]+$/, "") + ".jpg";
-          try {
-            resolve(new File([blob], fileName, { type: 'image/jpeg', lastModified: Date.now() }));
-          } catch (e) {
-            // ★ 防呆：舊版 iOS Safari 會報 Illegal constructor，改用 Blob 偽裝
-            const fallbackBlob = blob as any;
-            fallbackBlob.name = fileName;
-            fallbackBlob.lastModified = Date.now();
-            resolve(fallbackBlob);
-          }
-        }).catch(() => resolve(file));
+          resolve(new File([blob], file.name.replace(/\.[^/.]+$/, "") + ".jpg", { type: 'image/jpeg', lastModified: Date.now() }));
+        }).catch(() => resolve(file)); 
       };
     };
     reader.onerror = () => resolve(file); 
   });
 };
 
+// ★ 新增：預設入住公約 (保底機制，避免舊盤源沒資料時卡片消失)
 const DEFAULT_HOUSE_RULES = `【PrimeLiving 佳寓 - 入住須知與生活公約】
 歡迎入住！為維持高品質居住環境，請各位室友共同遵守以下規範：
 
@@ -302,17 +296,13 @@ function DashboardContent() {
   const [chatInput, setChatInput] = useState('');
   const chatEndRef = useRef<HTMLDivElement>(null);
 
-  // ★ 修復：天氣狀態改為字串類型，避免 React 排程器 Illegal constructor 崩潰
-  const [weather, setWeather] = useState({ 
-    temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', 
-    type: 'sun' 
-  });
+  const [weather, setWeather] = useState({ temp: '--', desc: '載入中', suggestion: '祝您有美好的一天！', bgClass: 'from-slate-100 to-slate-200', icon: <Sun size={28} className="text-amber-500" /> });
+
+  const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
   
   const [showSigPad, setShowSigPad] = useState(false);
   const sigCanvasRef = useRef<HTMLCanvasElement>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-
-  const handleLogout = () => { localStorage.clear(); router.push('/tenant-portal'); };
 
   const startDrawing = (e: any) => {
     setIsDrawing(true);
@@ -364,11 +354,9 @@ function DashboardContent() {
       .then(data => {
         const t = data.current_weather.temperature;
         const code = data.current_weather.weathercode;
-        let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', type = 'sun';
-        if (code >= 50 && code <= 69) { 
-          desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; type = 'rain'; 
-        }
-        setWeather({ temp: t, desc, suggestion, bgClass, type });
+        let desc = '晴朗', suggestion = '天氣不錯，祝您有美好的一天！', bgClass = 'from-sky-100 via-orange-50 to-amber-100', icon = <Sun size={28} className="text-amber-500" />;
+        if (code >= 50 && code <= 69) { desc = '下雨'; bgClass = 'from-slate-300 via-indigo-100 to-blue-200'; suggestion = '外面正在下雨，出門請務必記得攜帶雨具！☔️'; icon = <CloudRain size={28} className="text-blue-500" />; }
+        setWeather({ temp: t, desc, suggestion, bgClass, icon });
       }).catch(() => {});
   }, []);
 
@@ -402,90 +390,100 @@ function DashboardContent() {
     });
 
     const unsubTenant = onSnapshot(doc(db, 'tenants', sessionData.id), async (docSnap) => {
-      if (!docSnap.exists()) {
-        localStorage.removeItem('pm_tenant_session');
-        router.push('/tenant-portal');
-        return;
+  // 1. 檢查文件存續狀態：若被刪除則自動登出
+  if (!docSnap.exists()) {
+    localStorage.removeItem('pm_tenant_session');
+    router.push('/tenant-portal');
+    return;
+  }
+
+  const data = docSnap.data();
+
+  // 2. 計算剩餘租期 (加入 Math.max 避免過期後顯示負數天數)
+  const end = new Date(data.leaseEnd || new Date());
+  const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
+  
+  // 3. 欄位相容性處理 (處理舊版或缺失的資料)
+  const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
+  
+  // 處理專屬帳戶：過濾包含「未提供」或長度異常的字串，強制轉為標準 TEN- 格式
+  const rawRoomInfo = data.contractId || data.roomInfo || '';
+  const resolvedRoomInfo = (!rawRoomInfo || rawRoomInfo.includes('未提供') || rawRoomInfo.length > 15) 
+    ? `TEN-${docSnap.id.slice(-6).toUpperCase()}` 
+    : rawRoomInfo;
+
+  // 4. 更新租客主資料 State
+  setTenantData({ 
+    id: docSnap.id, 
+    email: data.email || '', 
+    name: data.name, 
+    daysRemaining: Math.max(0, diffDays), 
+    status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
+    roomInfo: resolvedRoomInfo, 
+    isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
+    signature: data.signature || '', 
+    signedAt: data.signedAt || '',
+    propertyName: data.propertyName || '', 
+    propertyId: data.propertyId || '',
+    roomId: data.roomId || '', 
+    roomName: data.roomName || data.roomId || '', 
+    leaseStart: data.leaseStart || '', 
+    leaseEnd: data.leaseEnd || '', 
+    deposit: data.deposit || 0, 
+    phone: data.phone || '', 
+    identityNumber: resolvedIdNumber,
+    isPhysicalSigned: data.isPhysicalSigned || false,
+    university: data.university || data.school || '',
+    degree: data.degree || data.studyLevel || data.program || '',
+    occupation: data.occupation || '',
+    enablePendingBills: data.enablePendingBills ?? true,
+    enableContracts: data.enableContracts ?? true,
+    enableHistory: data.enableHistory ?? true,
+  });
+
+  // 5. 異步獲取關聯的盤源資料與入住須知 (加入容錯 Fallback 機制)
+  let currentPropertyData = null;
+  if (data.propertyId) {
+    try {
+      const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
+      if (propDoc.exists()) {
+        currentPropertyData = { id: propDoc.id, ...propDoc.data() };
       }
+    } catch (err) {
+      console.error("載入物業資料失敗:", err);
+    }
+  }
 
-      const data = docSnap.data();
-      const end = new Date(data.leaseEnd || new Date());
-      const diffDays = Math.ceil((end.getTime() - new Date().getTime()) / (1000 * 60 * 60 * 24));
-      
-      const resolvedIdNumber = data.identityNumber || data.idNumber || data.hkid || data.passportNo || '未提供';
-      
-      const rawRoomInfo = data.contractId || data.roomInfo || '';
-      const resolvedRoomInfo = (!rawRoomInfo || rawRoomInfo.includes('未提供') || rawRoomInfo.length > 15) 
-        ? `TEN-${docSnap.id.slice(-6).toUpperCase()}` 
-        : rawRoomInfo;
-
-      setTenantData({ 
-        id: docSnap.id, 
-        email: data.email || '', 
-        name: data.name, 
-        daysRemaining: Math.max(0, diffDays), 
-        status: data.status === 'Active' ? '合約已生效' : '待簽約 / 待繳費', 
-        roomInfo: resolvedRoomInfo, 
-        isContractSigned: (!!data.signature && data.signature.length > 50) || data.isContractSigned === true || data.isPhysicalSigned === true, 
-        signature: data.signature || '', 
-        signedAt: data.signedAt || '',
-        propertyName: data.propertyName || '', 
-        propertyId: data.propertyId || '',
-        roomId: data.roomId || '', 
-        roomName: data.roomName || data.roomId || '', 
-        leaseStart: data.leaseStart || '', 
-        leaseEnd: data.leaseEnd || '', 
-        deposit: data.deposit || 0, 
-        phone: data.phone || '', 
-        identityNumber: resolvedIdNumber,
-        isPhysicalSigned: data.isPhysicalSigned || false,
-        university: data.university || data.school || '',
-        degree: data.degree || data.studyLevel || data.program || '',
-        occupation: data.occupation || '',
-        enablePendingBills: data.enablePendingBills ?? true,
-        enableContracts: data.enableContracts ?? true,
-        enableHistory: data.enableHistory ?? true,
-      });
-
-      let currentPropertyData = null;
-      if (data.propertyId) {
-        try {
-          const propDoc = await getDoc(doc(db, 'properties', data.propertyId));
-          if (propDoc.exists()) {
-            currentPropertyData = { id: propDoc.id, ...propDoc.data() };
-          }
-        } catch (err) {
-          console.error("載入物業資料失敗:", err);
-        }
+  // 若無 propertyId 或該盤源尚未設定 moveInGuide，強制寫入預設值，避免前端破版
+  if (!currentPropertyData || !currentPropertyData.moveInGuide) {
+    currentPropertyData = {
+      ...currentPropertyData,
+      name: currentPropertyData?.name || data.propertyName || '佳寓',
+      moveInGuide: {
+        wifi: '請洽專屬管家',
+        doorCode: '請洽專屬管家',
+        garbage: '每層皆有垃圾房，紙箱請折疊壓扁。室內公共區域不設垃圾桶，請當日清理。',
+        rules: typeof DEFAULT_HOUSE_RULES !== 'undefined' ? DEFAULT_HOUSE_RULES : '請遵守佳寓生活公約。'
       }
+    };
+  }
+  setPropertyData(currentPropertyData);
 
-      if (!currentPropertyData || !currentPropertyData.moveInGuide) {
-        currentPropertyData = {
-          ...currentPropertyData,
-          name: currentPropertyData?.name || data.propertyName || '佳寓',
-          moveInGuide: {
-            wifi: '請洽專屬管家',
-            doorCode: '請洽專屬管家',
-            garbage: '每層皆有垃圾房，紙箱請折疊壓扁。室內公共區域不設垃圾桶，請當日清理。',
-            rules: typeof DEFAULT_HOUSE_RULES !== 'undefined' ? DEFAULT_HOUSE_RULES : '請遵守佳寓生活公約。'
-          }
-        };
-      }
-      setPropertyData(currentPropertyData);
+  // 6. 更新 KYC 與個人檔案狀態
+  if (data.emergencyContact) {
+    setEmergencyContact(data.emergencyContact);
+  }
+  
+  const hasIdRecord = data.idUploaded || data.isIdVerified || data.idCardUrl;
+  if (hasIdRecord) setIsIdUploaded(true);
+  
+  if (data.emergencyContact?.name && hasIdRecord) {
+    setIsProfileComplete(true);
+  }
 
-      if (data.emergencyContact) {
-        setEmergencyContact(data.emergencyContact);
-      }
-      
-      const hasIdRecord = data.idUploaded || data.isIdVerified || data.idCardUrl;
-      if (hasIdRecord) setIsIdUploaded(true);
-      
-      if (data.emergencyContact?.name && hasIdRecord) {
-        setIsProfileComplete(true);
-      }
-
-      setLoading(false);
-    });
+  // 7. 解除載入狀態
+  setLoading(false);
+});
 
     fetchData(); 
     const interval = setInterval(fetchData, 30000); 
@@ -892,7 +890,7 @@ function DashboardContent() {
           evidenceUrls: uploadedFileUrls,
           tenantSignature: base64Signature,
           signedAt: todayStr,
-          refundBank, refundAccountName, refundAccountNumber, 
+          refundBank, refundAccountName, refundAccountNumber, // ★ 新增退款資訊
           remarks: '租客已簽署退租交吉確認書，同意於交吉日騰空交還物業。'
         },
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
@@ -965,7 +963,6 @@ function DashboardContent() {
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-slate-50"><Loader2 className="animate-spin text-orange-500" size={40} /></div>;
   if (!tenantData) return null;
 
-  // ★ 嚴格判定開關狀態 (同時防禦 boolean 與 string 格式)
   const showPendingBills = tenantData.enablePendingBills !== false && tenantData.enablePendingBills !== 'false';
   const showContracts = tenantData.enableContracts !== false && tenantData.enableContracts !== 'false';
   const showHistory = tenantData.enableHistory !== false && tenantData.enableHistory !== 'false';
@@ -1006,10 +1003,7 @@ function DashboardContent() {
                 尊貴的 {tenantData.name}，您好
               </h1>
               <div className="bg-white/50 backdrop-blur-xl border border-white/60 p-4 rounded-2xl flex items-center gap-4 shadow-sm max-w-lg">
-                <div className="p-2 bg-white/60 rounded-full shadow-sm">
-                  {/* ★ 動態渲染圖標，避免從 State 讀取 JSX */}
-                  {weather.type === 'rain' ? <CloudRain size={28} className="text-blue-500" /> : <Sun size={28} className="text-amber-500" />}
-                </div>
+                <div className="p-2 bg-white/60 rounded-full shadow-sm">{weather.icon}</div>
                 <div>
                   <p className="text-sm font-black text-slate-800">目前香港天氣：{weather.desc}，氣溫 {weather.temp}°C</p>
                   <p className="text-xs text-slate-600 mt-1 font-bold">{weather.suggestion}</p>
@@ -1030,7 +1024,6 @@ function DashboardContent() {
 
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1">
             <div className="lg:col-span-7 space-y-6 animate-in slide-in-from-bottom-6 duration-700">
-              
               {/* ★ 1. 租客欠款、待繳單據 區塊 */}
               {showPendingBills ? (
                 <div className="bg-slate-900/90 backdrop-blur-xl border border-slate-700/50 rounded-[2rem] p-8 text-white shadow-2xl shadow-slate-900/10 relative overflow-hidden">
@@ -1080,7 +1073,7 @@ function DashboardContent() {
                         {billingSummary.allPendingBills.length === 0 ? (
                           <p className="text-slate-400 py-1">目前無任何待繳單據</p>
                         ) : (
-                          billingSummary.allPendingBills.map(item => {
+                          billingSummary.allPendingBills.map((item: any) => {
                             const isChecked = billingSummary.checkoutBillIds.includes(item.id);
                             const isMandatory = item.isOverdue || item.isDueToday;
 
@@ -1137,8 +1130,11 @@ function DashboardContent() {
                 </div>
                 <div className="bg-white/60 backdrop-blur-xl p-5 sm:p-6 rounded-[2rem] border border-white/50 shadow-sm flex flex-col justify-center overflow-hidden h-full">
                   <p className="text-[10px] font-black text-slate-500 uppercase mb-1">專屬帳戶</p>
+                  {/* ★ 修正專屬帳戶顯示邏輯：如果包含「未提供」或太長，就強制顯示 TEN-ID */}
                   <p className="text-sm font-black text-slate-800 truncate font-mono">
-                    {tenantData.roomInfo}
+                    {(!tenantData.roomInfo || tenantData.roomInfo.includes('未提供') || tenantData.roomInfo.length > 15) 
+                      ? `TEN-${tenantData.id.slice(-6).toUpperCase()}` 
+                      : tenantData.roomInfo}
                   </p>
                 </div>
 
@@ -1153,7 +1149,6 @@ function DashboardContent() {
 
             <div className="lg:col-span-5 animate-in slide-in-from-bottom-8 duration-700">
               <div className="bg-white/60 backdrop-blur-xl rounded-[2rem] border border-white/60 shadow-xl shadow-slate-200/20 overflow-hidden flex flex-col p-2">
-                
                 {/* ★ 2. 電子合約單據 區塊 */}
                 {showContracts ? (
                   <button onClick={() => setActiveModal('contract')} className="w-full flex items-center justify-between p-4 md:p-5 hover:bg-white/80 transition-colors rounded-2xl group text-left">
@@ -1505,6 +1500,7 @@ function DashboardContent() {
                           onChange={e => { 
                             const files = e.target.files;
                             if (files && files.length > 0) {
+                              // ★ 立即過濾掉超過 50MB 的超大影片，避免卡死
                               const validFiles = Array.from(files).filter(f => {
                                 if (f.type.startsWith('video/') && f.size > 50 * 1024 * 1024) {
                                   alert(`影片 [${f.name}] 超過 50MB！請修剪縮短或降低畫質後再上傳。`);
@@ -1514,6 +1510,7 @@ function DashboardContent() {
                               });
                               setSurrenderFiles(prev => [...prev, ...validFiles]);
                             }
+                            // ★ 讀取完畢後立刻清空 value，這樣使用者刪除照片後，想重新選同一張才能再次觸發 onChange
                             if (surrenderFileInputRef.current) {
                               surrenderFileInputRef.current.value = ''; 
                             }
@@ -1521,6 +1518,7 @@ function DashboardContent() {
                           className="hidden" 
                         />
                         
+                        {/* ★ 改用 Button 與 onClick 強制觸發，搭配 pointer-events-none 避免點擊被文字攔截 */}
                         <button 
                           type="button"
                           onClick={(e) => {
@@ -1655,7 +1653,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* 繳費 Modal */}
+    {/* 繳費 Modal */}
       {activeModal === 'payment' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
@@ -2129,6 +2127,7 @@ function DashboardContent() {
           </div>
         </div>
       )}
+
       {/* 帳單列表 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
