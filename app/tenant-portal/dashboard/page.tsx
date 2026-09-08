@@ -1726,6 +1726,409 @@ function DashboardContent() {
         </div>
       )}
 
+{/* 合約與簽署 Modal */}
+      {activeModal === 'contract' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-slate-100 w-full max-w-[1000px] rounded-2xl sm:rounded-3xl shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
+            
+            {showSigPad && (
+              <div className="absolute inset-0 z-50 bg-white flex flex-col animate-in zoom-in-95 duration-200">
+                <div className="p-4 bg-slate-900 text-white flex justify-between items-center flex-none">
+                  <div>
+                    <h4 className="font-bold text-lg">親筆電子簽名</h4>
+                    <p className="text-xs text-slate-300">請在下方空白處用手指或滑鼠簽名</p>
+                  </div>
+                  <button onClick={() => setShowSigPad(false)} className="p-2 hover:bg-slate-800 rounded-full transition"><X size={20}/></button>
+                </div>
+                
+                <div className="flex-1 bg-slate-50 relative cursor-crosshair touch-none">
+                  <div className="absolute inset-x-8 inset-y-12 border-2 border-dashed border-slate-300 rounded-xl pointer-events-none flex items-center justify-center">
+                    <span className="text-slate-300 font-bold text-3xl opacity-30 select-none">簽名區</span>
+                  </div>
+                  <canvas 
+                    ref={sigCanvasRef} 
+                    className="w-full h-full relative z-10" 
+                    width={800} height={400}
+                    onMouseDown={startDrawing} onMouseMove={draw} onMouseUp={stopDrawing} onMouseLeave={stopDrawing}
+                    onTouchStart={startDrawing} onTouchMove={draw} onTouchEnd={stopDrawing}
+                  />
+                </div>
+                
+                <div className="p-4 bg-white border-t border-slate-200 flex gap-4 flex-none shadow-sm">
+                  <button onClick={clearSignature} className="px-6 py-3 font-bold text-slate-500 bg-slate-100 hover:bg-slate-200 rounded-xl transition">清除重寫</button>
+                  <button onClick={handleConfirmSignature} disabled={isSigning} className="flex-1 font-bold text-white bg-purple-600 hover:bg-purple-700 rounded-xl shadow-md transition flex items-center justify-center gap-2">
+                    {isSigning ? <><Loader2 className="animate-spin" size={18}/> 儲存中...</> : <><CheckCircle2 size={18}/> 確認簽署並印於合約</>}
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="flex justify-between items-center px-6 py-4 bg-white border-b border-slate-200 flex-none relative z-20">
+              <h3 className="font-black text-lg sm:text-xl text-slate-800 flex items-center">
+                <FileText className="mr-2 text-purple-600" size={24}/> 電子租賃合約
+              </h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto flex flex-col md:flex-row relative z-10">
+              <div className="flex-1 bg-slate-200 flex justify-center py-6 overflow-y-auto custom-scrollbar relative min-h-[400px]">
+                {latestLease ? (
+                  <div className="origin-top scale-[0.45] sm:scale-75 md:scale-90 lg:scale-100 transition-transform h-max pb-12">
+                    {renderA4Document(latestLease, true)}
+                  </div>
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-slate-400 py-12">
+                    <AlertCircle size={48} className="mb-4 opacity-50" />
+                    <p className="font-bold">管家尚未發布合約</p>
+                  </div>
+                )}
+              </div>
+              
+              {latestLease && (
+                <div className="w-full md:w-[320px] bg-white border-t md:border-t-0 md:border-l border-slate-200 p-6 flex flex-col justify-center flex-none gap-4">
+
+                  {latestLease.stampDutyUrl && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-center animate-in fade-in slide-in-from-top-4">
+                      <div 
+                        onClick={() => window.open(latestLease.stampDutyUrl, '_blank')}
+                        className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-blue-200 relative group shadow-sm cursor-pointer"
+                        title="點擊放大預覽"
+                      >
+                        <iframe 
+                          src={`${latestLease.stampDutyUrl}#toolbar=0&navpanes=0&scrollbar=0&view=FitH`} 
+                          className="absolute top-0 left-0 w-[200%] h-[200%] pointer-events-none origin-top-left scale-50" 
+                          frameBorder="0" 
+                        />
+                        <div className="absolute inset-0 z-10 bg-transparent" />
+                        <div className="absolute inset-0 bg-blue-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                          <Eye size={24} className="text-white drop-shadow-md" />
+                        </div>
+                      </div>
+
+                      <p className="text-sm font-black text-blue-900 mb-1">合約具法律效力</p>
+                      <p className="text-[10px] text-blue-700 leading-normal mb-3">
+                        已完成政府印花稅繳納手續
+                      </p>
+                      <a
+                        href={latestLease.stampDutyUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition shadow-md flex items-center justify-center gap-1.5"
+                      >
+                        <Download size={14}/> 下載印花稅單
+                      </a>
+                    </div>
+                  )}
+
+                  {(tenantData?.signature || tenantData?.isContractSigned || tenantData?.isPhysicalSigned) ? (
+                    <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 text-center">
+                      <div 
+                        onClick={handleDownloadPDF}
+                        className="w-full h-36 bg-slate-100 rounded-lg mb-3 flex items-center justify-center overflow-hidden border border-emerald-200 relative group shadow-sm cursor-pointer"
+                        title="點擊下載 PDF"
+                      >
+                         <div className="w-[65%] h-[85%] bg-white shadow-sm border border-slate-200 p-2 flex flex-col gap-1.5 relative overflow-hidden">
+                           <div className="w-1/2 h-1.5 bg-slate-300 rounded-full mx-auto mb-1"></div>
+                           <div className="w-full h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-5/6 h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-full h-1 bg-slate-200 rounded-full"></div>
+                           <div className="w-4/5 h-1 bg-slate-200 rounded-full"></div>
+                           <div className="mt-auto flex justify-between items-end">
+                             <div className="w-6 h-6 rounded-full border border-red-500/50 flex items-center justify-center rotate-12"><div className="w-4 h-4 rounded-full bg-red-500/20"></div></div>
+                             <div className="text-[10px] text-emerald-600 font-[cursive] -rotate-12 whitespace-nowrap">Signed</div>
+                           </div>
+                         </div>
+                         <div className="absolute inset-0 bg-emerald-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-20">
+                           <Download size={24} className="text-white drop-shadow-md" />
+                         </div>
+                      </div>
+
+                      <p className="text-sm font-black text-emerald-800 mb-1">合約已成功簽署</p>
+                      <button onClick={handleDownloadPDF} disabled={isSignDownloading} className="mt-3 w-full py-2.5 bg-white border border-emerald-200 text-emerald-700 text-xs font-bold rounded-lg flex items-center justify-center gap-1.5 hover:bg-emerald-100 transition-colors shadow-sm disabled:opacity-50">
+                        {isSignDownloading ? <Loader2 size={14} className="animate-spin"/> : <Download size={14}/>} 下載 PDF 副本
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-purple-50 p-5 rounded-xl border border-purple-200 shadow-sm text-center">
+                        <FileSignature size={32} className="mx-auto text-purple-500 mb-2"/>
+                        <p className="text-sm font-black text-purple-900 mb-1">等待您的親筆簽署</p>
+                        <p className="text-[11px] text-purple-700 leading-normal mb-4">
+                          請核對合約內容無誤後，點擊下方按鈕進行電子觸控簽名。簽名將直接印於合約底部。
+                        </p>
+                        <button onClick={() => setShowSigPad(true)} className="w-full py-3 bg-purple-600 hover:bg-purple-700 text-white font-bold rounded-lg transition shadow-md flex items-center justify-center gap-2">
+                          <Edit3 size={16}/> 開啟簽名板
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 檔案認證 Modal (已升級 KYC) */}
+      {activeModal === 'profile' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-md rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            <div className="flex justify-between items-center p-6 border-b border-slate-100 flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-200 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl text-slate-800 mt-2 sm:mt-0 flex items-center"><ShieldCheck className="mr-2 text-emerald-600" size={24}/> 住客檔案認證 (KYC)</h3>
+              <button onClick={() => setActiveModal('none')} className="p-2 bg-slate-100 text-slate-500 hover:bg-slate-200 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+            <div className="p-6 overflow-y-auto flex-1">
+              {isProfileComplete ? (
+                <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-6 text-center mb-6">
+                  <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm border border-emerald-100">
+                    <ShieldCheck size={32} className="text-emerald-500"/>
+                  </div>
+                  <h4 className="text-lg font-black text-emerald-900 mb-2">檔案已完善，感謝配合！</h4>
+                  <p className="text-xs text-emerald-700 font-medium leading-relaxed">您的身分證明文件與緊急聯絡人已加密儲存於管理中心。</p>
+                  <div className="mt-6 text-left bg-white p-4 rounded-xl border border-emerald-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">登記之緊急聯絡人</p>
+                    <p className="text-sm font-bold text-slate-800">{emergencyContact.name} <span className="text-slate-400 font-normal">({emergencyContact.relation})</span></p>
+                    <p className="text-xs text-slate-500 font-mono mt-1">{emergencyContact.phone}</p>
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleSaveProfile} className="space-y-6">
+                  <div className="bg-amber-50 border border-amber-200 p-4 rounded-xl flex items-start gap-3">
+                    <AlertCircle className="text-amber-600 shrink-0 mt-0.5" size={18}/>
+                    <div>
+                      <p className="text-sm font-black text-amber-900 mb-1">為保障居住安全請完善檔案</p>
+                      <p className="text-[10px] text-amber-700 font-bold leading-relaxed">依據管理規範，請上傳有效的身分證明文件並確實填寫緊急聯絡人資料。</p>
+                    </div>
+                  </div>
+                  
+                  <div>
+                    <div className="flex justify-between items-center mb-3">
+                      <p className="text-xs font-black text-slate-800">1. 身分證明文件上傳</p>
+                    </div>
+                    
+                    <select 
+                      value={idType} 
+                      onChange={e => setIdType(e.target.value)} 
+                      className="w-full mb-3 p-3 border border-slate-200 rounded-xl text-sm font-bold outline-none focus:border-emerald-500 bg-white shadow-sm"
+                    >
+                      <option value="HKID">香港身份證 (HKID)</option>
+                      <option value="CNID">內地身份證</option>
+                      <option value="Passport">護照 (Passport)</option>
+                      <option value="ExitEntryPermit">港澳通行證</option>
+                      <option value="StudentCard">學校就讀證明</option>
+                    </select>
+
+                    <div className="relative">
+                      <input 
+                        type="file" 
+                        id="id-upload" 
+                        accept="image/*,.pdf" 
+                        className="hidden" 
+                        onChange={(e) => { 
+                          if (e.target.files?.[0]) { 
+                            setIdFile(e.target.files[0]);
+                            setIsIdUploaded(true); 
+                          } 
+                        }} 
+                      />
+                      <label htmlFor="id-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isIdUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-emerald-400 hover:bg-emerald-50'}`}>
+                        {isIdUploaded ? (
+                          <>
+                            <CheckCircle2 size={28} className="mb-2"/> 
+                            <span className="text-sm font-black text-emerald-700 truncate px-4">{idFile?.name || '證件已夾帶'}</span>
+                            <span className="text-[10px] text-emerald-600 mt-1">(支援圖片自動壓縮優化)</span>
+                          </>
+                        ) : (
+                          <>
+                            <IdCard size={28} className="mb-2"/> 
+                            <span className="text-sm font-bold">點擊上傳 {idType === 'Passport' ? '護照' : idType === 'StudentCard' ? '就讀證明' : '證件'}</span>
+                            <span className="text-[10px] text-slate-400 mt-1">支援 PNG / JPG / PDF (自動壓縮)</span>
+                          </>
+                        )}
+                      </label>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-slate-100">
+                    <p className="text-xs font-black text-slate-800 mb-4">2. 緊急聯絡人資訊 (必填)</p>
+                    <div className="space-y-3">
+                      <input type="text" placeholder="聯絡人姓名 (Name)" required value={emergencyContact.name} onChange={e => setEmergencyContact({...emergencyContact, name: e.target.value})} className="w-full p-4 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-500 transition-all font-bold" />
+                      <div className="flex gap-3">
+                        <input type="tel" placeholder="聯絡電話 (Phone)" required value={emergencyContact.phone} onChange={e => setEmergencyContact({...emergencyContact, phone: e.target.value})} className="w-2/3 p-4 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-500 transition-all font-bold" />
+                        <select required value={emergencyContact.relation} onChange={e => setEmergencyContact({...emergencyContact, relation: e.target.value})} className="w-1/3 p-4 border border-slate-200 rounded-xl text-sm outline-none focus:border-emerald-500 bg-white font-bold">
+                          <option value="" disabled>關係</option><option value="父母">父母</option><option value="配偶">配偶</option><option value="親屬">親屬</option><option value="朋友">朋友</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                  <button type="submit" disabled={isSavingProfile || !isIdUploaded} className="w-full py-4 bg-emerald-600 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-emerald-700 transition-all shadow-xl shadow-emerald-600/20 disabled:opacity-50 disabled:bg-slate-400">
+                    {isSavingProfile ? <><Loader2 size={18} className="animate-spin"/> 安全加密上傳中...</> : '確認送出 KYC 檔案'}
+                  </button>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ★ 全新升級：雙向報修進度與留言系統 Modal (含分類修正) */}
+      {activeModal === 'ticket' && (
+        <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-xl rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] sm:h-[80vh] overflow-hidden animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            
+            <div className="flex justify-between items-center p-6 bg-slate-900 text-white flex-none relative">
+              <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-slate-700 rounded-full sm:hidden" />
+              <h3 className="font-black text-xl mt-2 sm:mt-0 flex items-center"><Wrench className="mr-2 text-blue-400" size={24}/> 報修與其他服務進度追蹤</h3>
+              <button onClick={() => { setActiveModal('none'); setViewingTicket(null); }} className="p-2 bg-white/10 hover:bg-white/20 rounded-full transition-colors mt-2 sm:mt-0"><X size={20} /></button>
+            </div>
+
+            {viewingTicket ? (
+              <div className="flex-1 flex flex-col bg-slate-50 overflow-hidden relative">
+                 <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-3 flex-none">
+                   <button onClick={() => setViewingTicket(null)} className="p-2 hover:bg-slate-100 rounded-full text-slate-500 transition"><ArrowLeft size={20}/></button>
+                   <div>
+                     <h4 className="font-black text-slate-800">{viewingTicket.title}</h4>
+                     <span className={`text-[10px] px-2 py-0.5 rounded font-black border ${viewingTicket.status === 'Resolved' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : viewingTicket.status === 'InProgress' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                       {viewingTicket.status === 'Resolved' ? '✅ 已解決' : viewingTicket.status === 'InProgress' ? '👨‍🔧 處理中 / 聯絡中' : '⏳ 等待受理'}
+                     </span>
+                   </div>
+                 </div>
+                 
+                 <div className="flex-1 overflow-y-auto p-5 space-y-4 custom-scrollbar">
+                   {/* 報修原始內容 */}
+                   <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
+                     <p className="text-[10px] text-slate-400 font-mono mb-2">{viewingTicket.createdAt?.toDate ? viewingTicket.createdAt.toDate().toLocaleString('zh-HK') : '剛剛'}</p>
+                     <p className="text-sm font-bold text-slate-700 whitespace-pre-wrap">{viewingTicket.description}</p>
+                     {viewingTicket.photoUrl && (
+                       <a href={viewingTicket.photoUrl} target="_blank" rel="noreferrer">
+                         <img src={viewingTicket.photoUrl} alt="損壞照片" className="mt-3 rounded-xl border border-slate-200 max-h-40 object-cover hover:opacity-80 transition cursor-pointer" />
+                       </a>
+                     )}
+                   </div>
+
+                   {/* 管理員官方進度備註 */}
+                   {viewingTicket.adminRemarks && (
+                     <div className="bg-blue-50 p-4 rounded-2xl border border-blue-200 shadow-sm relative overflow-hidden">
+                       <div className="absolute top-0 left-0 w-1 h-full bg-blue-500"></div>
+                       <p className="text-xs font-black text-blue-800 mb-1 flex items-center"><UserCircle size={14} className="mr-1"/> 管家最新進度</p>
+                       <p className="text-sm font-bold text-blue-900 whitespace-pre-wrap">{viewingTicket.adminRemarks}</p>
+                     </div>
+                   )}
+
+                   {/* 雙向留言板區塊 */}
+                   <div className="pt-4 space-y-3">
+                     {viewingTicket.comments?.map((msg: any, idx: number) => (
+                       <div key={idx} className={`flex flex-col ${msg.sender === 'Tenant' ? 'items-end' : 'items-start'}`}>
+                         <span className="text-[9px] text-slate-400 mb-1 px-1">{msg.sender === 'Tenant' ? '您' : '管家師傅'} • {new Date(msg.timestamp).toLocaleTimeString('zh-HK', {hour:'2-digit', minute:'2-digit'})}</span>
+                         <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${msg.sender === 'Tenant' ? 'bg-blue-600 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-sm shadow-sm'}`}>
+                           {msg.text}
+                         </div>
+                       </div>
+                     ))}
+                   </div>
+                 </div>
+
+                 {/* 留言輸入框 */}
+                 {viewingTicket.status !== 'Resolved' && (
+                   <div className="p-4 bg-white border-t border-slate-200 flex-none pb-8 sm:pb-4">
+                     <form onSubmit={handleAddComment} className="flex gap-2">
+                       <input type="text" value={ticketComment} onChange={e => setTicketComment(e.target.value)} placeholder="給管家或師傅留言..." className="flex-1 px-4 py-3 bg-slate-100 border-transparent rounded-full text-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:bg-white transition font-bold" />
+                       <button type="submit" disabled={!ticketComment.trim() || isSubmittingComment} className="w-12 h-12 bg-blue-600 text-white rounded-full flex items-center justify-center shrink-0 hover:bg-blue-700 transition shadow-sm disabled:opacity-50">
+                          {isSubmittingComment ? <Loader2 size={18} className="animate-spin"/> : <Send size={18} className="ml-1"/>}
+                       </button>
+                     </form>
+                   </div>
+                 )}
+              </div>
+            ) : (
+              <div className="flex flex-col h-full overflow-hidden">
+                <div className="flex bg-slate-100 p-1.5 mx-6 mt-6 rounded-2xl flex-none shadow-inner border border-slate-200/50">
+                  <button onClick={() => { setTicketTab('repair'); setTicketCategory(REPAIR_CATEGORIES[0]); }} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'repair' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>維修申請</button>
+                  <button onClick={() => { setTicketTab('service'); setTicketCategory(SERVICE_CATEGORIES[0]); }} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'service' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>生活服務</button>
+                  <button onClick={() => setTicketTab('history')} className={`flex-1 py-2 text-xs font-black rounded-xl transition-all ${ticketTab === 'history' ? 'bg-white text-blue-600 shadow-sm border border-slate-200/50' : 'text-slate-500 hover:text-slate-700'}`}>我的紀錄 {myTickets.length > 0 && `(${myTickets.length})`}</button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-6 bg-white custom-scrollbar">
+                  {(ticketTab === 'repair' || ticketTab === 'service') ? (
+                    <form onSubmit={handleSubmitTicket} className="space-y-6 animate-in slide-in-from-left-4">
+                      <div className="bg-blue-50 border border-blue-200 p-4 rounded-2xl flex items-start gap-3">
+                        <AlertCircle className="text-blue-600 shrink-0 mt-0.5" size={18}/>
+                        <p className="text-[10px] text-blue-800 font-bold leading-relaxed">請具體描述情況並提供照片。送出後，您可以切換至「我的紀錄」查看最新處理進度並與管家留言溝通。</p>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3">請選擇{ticketTab === 'repair' ? '損壞項目' : '服務類型'} *</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          {(ticketTab === 'repair' ? REPAIR_CATEGORIES : SERVICE_CATEGORIES).map(cat => (
+                            <button key={cat} type="button" onClick={() => setTicketCategory(cat)} className={`py-3 px-3 rounded-xl text-xs font-bold transition-colors border ${ticketCategory === cat ? 'bg-blue-50 border-blue-200 text-blue-700 shadow-sm' : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{cat}</button>
+                          ))}
+                        </div>
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3">狀況描述 *</p>
+                        <textarea rows={4} required placeholder={ticketTab === 'repair' ? "例如：冷氣開了不冷，而且會滴水..." : "請描述您需要的服務細節..."} value={ticketDesc} onChange={(e) => setTicketDesc(e.target.value)} className="w-full p-4 border border-slate-200 rounded-2xl text-sm outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-500/10 transition-all resize-none placeholder:text-slate-400 text-slate-900 font-bold shadow-sm bg-slate-50" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-black text-slate-800 mb-3 flex justify-between">
+                          <span>上傳照片 (選填)</span>
+                          <span className="text-slate-400 font-normal">幫助我們更快判斷</span>
+                        </p>
+                        <div className="relative shadow-sm">
+                          <input type="file" id="photo-upload" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) { setTicketPhoto(e.target.files[0]); setIsPhotoUploaded(true); } }} />
+                          <label htmlFor="photo-upload" className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all ${isPhotoUploaded ? 'border-emerald-500 bg-emerald-50 text-emerald-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-blue-400 hover:bg-blue-50'}`}>
+                            {isPhotoUploaded ? <><CheckCircle2 size={28} className="mb-2"/> <span className="text-sm font-black truncate px-4 max-w-[250px]">{ticketPhoto?.name || '照片已成功夾帶'}</span></> : <><Camera size={28} className="mb-2"/> <span className="text-sm font-bold">點擊拍照或上傳圖檔</span></>}
+                          </label>
+                        </div>
+                      </div>
+                      <button type="submit" disabled={isSubmittingTicket} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl disabled:opacity-50">
+                        {isSubmittingTicket ? <><Loader2 size={18} className="animate-spin"/> 正在安全送出...</> : `確認送出${ticketTab === 'repair' ? '報修單' : '申請'}`}
+                      </button>
+                    </form>
+                  ) : (
+                    <div className="space-y-3 animate-in slide-in-from-right-4 pb-8">
+                      {myTickets.length === 0 ? (
+                        <div className="text-center py-16 text-slate-400">
+                          <Wrench size={40} className="mx-auto mb-3 opacity-30"/>
+                          <p className="text-sm font-bold">目前沒有任何紀錄</p>
+                        </div>
+                      ) : (
+                        myTickets.map(ticket => (
+                          <button key={ticket.id} onClick={() => setViewingTicket(ticket)} className="w-full bg-white border border-slate-200 rounded-2xl p-4 text-left hover:border-blue-400 hover:shadow-md transition-all group">
+                            <div className="flex justify-between items-start mb-2">
+                              <span className={`text-[10px] px-2 py-0.5 rounded font-black border ${ticket.status === 'Resolved' ? 'bg-emerald-50 text-emerald-600 border-emerald-200' : ticket.status === 'InProgress' ? 'bg-blue-50 text-blue-600 border-blue-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                                {ticket.status === 'Resolved' ? '✅ 已解決' : ticket.status === 'InProgress' ? '👨‍🔧 處理中 / 聯絡中' : '⏳ 等待受理'}
+                              </span>
+                              <span className="text-[10px] text-slate-400 font-mono">
+                                {ticket.createdAt?.toDate ? ticket.createdAt.toDate().toLocaleDateString('zh-HK') : ''}
+                              </span>
+                            </div>
+                            <h4 className="font-bold text-slate-800 text-sm mb-1 truncate">{ticket.title}</h4>
+                            <p className="text-xs text-slate-500 truncate mb-3">{ticket.description}</p>
+                            
+                            {ticket.adminRemarks && (
+                              <div className="bg-slate-50 p-2 rounded-lg border border-slate-100 mb-3">
+                                <p className="text-[10px] font-bold text-slate-700 flex items-center"><UserCircle size={12} className="mr-1"/> 管家最新回覆：</p>
+                                <p className="text-xs text-blue-700 truncate font-medium">{ticket.adminRemarks}</p>
+                              </div>
+                            )}
+
+                            <div className="flex justify-between items-center text-[10px] font-bold text-blue-500 pt-2 border-t border-slate-100">
+                              <span className="flex items-center gap-1"><MessageSquare size={12}/> {ticket.comments?.length || 0} 則留言</span>
+                              <span className="group-hover:translate-x-1 transition-transform flex items-center">查看詳情 <ChevronRight size={14}/></span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       {/* 帳單列表 Modal */}
       {activeModal === 'bills' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-end sm:items-center justify-center p-0 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
