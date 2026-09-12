@@ -126,6 +126,110 @@ const DEFAULT_HOUSE_RULES = `【PrimeLiving 佳寓 - 入住須知與生活公約
 【八、違規處罰】
 除特意提及的賠償外，其他違反行為超過三次（室友或本公司提醒後）依舊不改正，如產生相應成本公寓方會收取該費用；如未產生成本，公寓方會將扣取的費用平均發放給未違反的住客。本須知如24小時無異議則生效。`;
 
+// ============================================================================
+// ★ 新增：入住須知強制閱讀警示組件 (MoveInGuideAlert)
+// ============================================================================
+function MoveInGuideAlert({ tenantId, propertyData, hasReadGuide }: { tenantId: string, propertyData: any, hasReadGuide?: boolean }) {
+  const [isOpen, setIsOpen] = useState(false);
+  const [isFlashing, setIsFlashing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+
+  useEffect(() => {
+    // 未讀時開啟閃動，並延遲 500ms 自動彈出
+    if (!hasReadGuide) {
+      setIsFlashing(true);
+      const timer = setTimeout(() => setIsOpen(true), 500);
+      return () => clearTimeout(timer);
+    }
+  }, [hasReadGuide]);
+
+  const handleAcknowledge = async () => {
+    setIsSaving(true);
+    try {
+      await updateDoc(doc(db, 'tenants', tenantId), {
+        hasReadMoveInGuide: true,
+        updatedAt: serverTimestamp()
+      });
+      setIsFlashing(false);
+      setIsOpen(false);
+    } catch (error) {
+      alert('網路連線異常，請稍後再試。');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const guide = propertyData?.moveInGuide;
+
+  if (!isFlashing && !isOpen) return null;
+
+  return (
+    <>
+      {isFlashing && !isOpen && (
+        <button
+          onClick={() => setIsOpen(true)}
+          className="fixed bottom-6 right-6 z-[60] bg-orange-600 text-white px-5 py-3 rounded-full shadow-2xl flex items-center gap-2 animate-bounce hover:bg-orange-700 transition-all border-2 border-orange-200"
+        >
+          <AlertCircle size={20} className="animate-pulse" />
+          <span className="font-bold text-sm">待確認：入住須知</span>
+          <span className="absolute -top-1 -right-1 flex h-4 w-4">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-4 w-4 bg-red-500 border border-white"></span>
+          </span>
+        </button>
+      )}
+
+      {isOpen && (
+        <div className="fixed inset-0 z-[150] flex items-end sm:items-center justify-center p-0 sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white w-full sm:max-w-lg rounded-t-[2.5rem] sm:rounded-[2.5rem] shadow-2xl flex flex-col max-h-[85vh] animate-in slide-in-from-bottom-8 sm:slide-in-from-bottom-0 sm:zoom-in-95 duration-300">
+            
+            <div className="p-6 border-b border-slate-100 flex justify-between items-center bg-orange-50 rounded-t-[2.5rem] sm:rounded-t-[2.5rem] flex-none relative">
+               <div className="absolute top-3 left-1/2 -translate-x-1/2 w-12 h-1.5 bg-orange-200 rounded-full sm:hidden" />
+               <h3 className="text-lg font-black text-orange-900 flex items-center gap-2 mt-2 sm:mt-0">
+                 <FileText className="text-orange-600" size={20} /> {propertyData?.name || '佳寓'} 入住須知
+               </h3>
+               <button onClick={() => setIsOpen(false)} className="text-slate-400 hover:text-slate-700 p-1.5 bg-white rounded-full transition-colors mt-2 sm:mt-0 shadow-sm border border-slate-100">
+                 <X size={20} />
+               </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-6 text-sm text-slate-600 space-y-4 custom-scrollbar bg-slate-50/50">
+               {guide?.rules ? (
+                 <div className="text-slate-700 leading-loose whitespace-pre-wrap font-medium">
+                   {guide.rules}
+                 </div>
+               ) : (
+                 <p className="text-center text-slate-400 py-10">尚無詳細的入住公約內容。</p>
+               )}
+            </div>
+
+            <div className="p-4 border-t border-slate-100 bg-white rounded-b-2xl flex flex-col gap-2 flex-none shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
+              {isFlashing ? (
+                <button 
+                  onClick={handleAcknowledge}
+                  disabled={isSaving}
+                  className="w-full py-4 bg-orange-600 hover:bg-orange-700 text-white font-black text-md rounded-2xl shadow-xl flex items-center justify-center gap-2 transition-all active:scale-[0.98] disabled:opacity-50"
+                >
+                  {isSaving ? <Loader2 size={18} className="animate-spin" /> : <CheckCircle2 size={18} />}
+                  我已詳細閱讀並同意遵守 (停止閃動)
+                </button>
+              ) : (
+                <button 
+                  onClick={() => setIsOpen(false)}
+                  className="w-full py-4 bg-slate-100 hover:bg-slate-200 text-slate-700 font-black text-md rounded-2xl flex items-center justify-center transition-all"
+                >
+                  關閉
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+
 function MoveInGuideCard({ propertyData }: { propertyData: any }) {
   const [isOpen, setIsOpen] = useState(false);
   const guide = propertyData?.moveInGuide;
@@ -439,6 +543,7 @@ function DashboardContent() {
     enablePendingBills: data.enablePendingBills ?? true,
     enableContracts: data.enableContracts ?? true,
     enableHistory: data.enableHistory ?? true,
+    hasReadMoveInGuide: data.hasReadMoveInGuide || false,
   });
 
   // 5. 異步獲取關聯的盤源資料與入住須知 (加入容錯 Fallback 機制)
@@ -2238,6 +2343,13 @@ function DashboardContent() {
         </div>
       )}
 
+      {/* ★ 新增：入住須知閃動警示組件 (放在畫面最上層) */}
+      <MoveInGuideAlert 
+        tenantId={tenantData.id} 
+        propertyData={propertyData} 
+        hasReadGuide={tenantData.hasReadMoveInGuide} 
+      />
+      
     </div>
   );
 } 
