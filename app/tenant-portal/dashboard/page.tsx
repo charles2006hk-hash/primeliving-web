@@ -390,6 +390,7 @@ function DashboardContent() {
   const [refundAccountNumber, setRefundAccountNumber] = useState('');
   const [surrenderFiles, setSurrenderFiles] = useState<{fileUrl: string, file: any, name: string, type: string}[]>([]); 
   const [isSubmittingSurrender, setIsSubmittingSurrender] = useState(false);
+  const [surrenderVideoLink, setSurrenderVideoLink] = useState('');
   const surrenderSigCanvasRef = useRef<HTMLCanvasElement>(null);
   const surrenderFileInputRef = useRef<HTMLInputElement>(null);
   const [idType, setIdType] = useState('HKID'); 
@@ -988,7 +989,6 @@ function DashboardContent() {
       const todayStr = new Date().toISOString().split('T')[0];
 
       for (const item of surrenderFiles) {
-        // ★ 這裡改用 item.file
         const fileToUpload = item.type.startsWith('image/') ? await compressImage(item.file) : item.file;
         const fileRef = ref(storage, `tenants/${tenantData.id}/surrender/${Date.now()}_${fileToUpload.name}`);
         await uploadBytesResumable(fileRef, fileToUpload);
@@ -1004,9 +1004,11 @@ function DashboardContent() {
           docDate: todayStr, dueDate: moveOutDate,
           moveOutDate: moveOutDate, reason: surrenderReason,
           evidenceUrls: uploadedFileUrls,
+          // ★ 新增：將外部影片連結寫入資料庫
+          videoLink: surrenderVideoLink, 
           tenantSignature: base64Signature,
           signedAt: todayStr,
-          refundBank, refundAccountName, refundAccountNumber, // ★ 新增退款資訊
+          refundBank, refundAccountName, refundAccountNumber, 
           remarks: '租客已簽署退租交吉確認書，同意於交吉日騰空交還物業。'
         },
         createdAt: serverTimestamp(), updatedAt: serverTimestamp()
@@ -1015,12 +1017,14 @@ function DashboardContent() {
       await addDoc(collection(db, 'inquiries'), {
         tenantId: tenantData.id, name: tenantData.name, roomInfo: tenantData.roomInfo,
         category: '退租與交吉申請', 
-        message: `【退租交吉通知】\n預計遷出日：${moveOutDate}\n原因：${surrenderReason || '無'}\n\n【退款帳戶】\n銀行：${refundBank}\n戶名：${refundAccountName}\n帳號：${refundAccountNumber}\n\n*租客已完成線上退租協議簽署並上傳交吉照片/影片，請管家安排退租點交與按金結算事宜。`,
+        message: `【退租交吉通知】\n預計遷出日：${moveOutDate}\n原因：${surrenderReason || '無'}\n\n【退款帳戶】\n銀行：${refundBank}\n戶名：${refundAccountName}\n帳號：${refundAccountNumber}\n\n*租客已完成線上退租協議簽署並上傳交吉資料，請管家安排退租點交與按金結算事宜。`,
         type: 'ticket', status: 'New', createdAt: serverTimestamp()
       });
 
       alert("✅ 退租協議簽署成功！管家已收到您的交吉通知與退款帳戶，後續將與您結算按金。");
-      setActiveModal('none'); setSurrenderStep(1); setSurrenderFiles([]);
+      
+      // ★ 清空所有狀態
+      setActiveModal('none'); setSurrenderStep(1); setSurrenderFiles([]); setSurrenderVideoLink('');
     } catch (error) { alert("❌ 簽署失敗，請檢查網路狀態。"); } 
     finally { setIsSubmittingSurrender(false); }
   };
@@ -1569,7 +1573,7 @@ function DashboardContent() {
         </div>
       )}
 
-      {/* ★ 退租與交吉管理 Modal - (加入退款方式與獨立照片預覽) */}
+      {/* ★ 退租與交吉管理 Modal */}
       {activeModal === 'surrender' && (
         <div className="fixed inset-0 bg-slate-900/60 z-[100] flex items-center justify-center p-2 sm:p-4 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white w-full max-w-2xl rounded-2xl sm:rounded-[2.5rem] shadow-2xl flex flex-col h-[90vh] overflow-hidden relative border border-slate-200">
@@ -1584,9 +1588,34 @@ function DashboardContent() {
             <div className="flex-1 overflow-y-auto bg-slate-50 flex flex-col relative custom-scrollbar">
               {surrenderStep === 1 ? (
                 <div className="p-6 space-y-6 animate-in slide-in-from-left-4">
-                  <div className="bg-rose-50 border border-rose-200 p-4 rounded-2xl">
-                    <p className="text-sm font-black text-rose-900 mb-1 flex items-center gap-2"><AlertCircle size={16}/> 辦理退租須知</p>
-                    <p className="text-xs text-rose-700 leading-relaxed font-medium">依據合約與香港租賃法例，租客需於交吉日將物業以<strong className="text-rose-900">空置及清潔狀態</strong>交還。請確實填寫退款帳戶並上傳屋況留存證明照。</p>
+                  
+                  {/* ★ 升級版：引導式任務清單 (取代競品的繁瑣獨立上傳框) */}
+                  <div className="bg-white border border-rose-200 shadow-sm rounded-2xl overflow-hidden">
+                    <div className="bg-rose-50 p-4 border-b border-rose-100 flex items-start gap-3">
+                      <AlertCircle className="text-rose-600 shrink-0 mt-0.5" size={20}/>
+                      <div>
+                        <h4 className="font-black text-rose-900 text-sm mb-1">退租交吉必備影像資料</h4>
+                        <p className="text-xs text-rose-700 font-medium">為保障您的按金退還權益，請務必拍攝以下畫面並於下方合併上傳。若無相關設備則免附。</p>
+                      </div>
+                    </div>
+                    <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-3 text-sm">
+                      <label className="flex items-start gap-2 cursor-pointer group">
+                        <input type="checkbox" className="mt-1 accent-rose-600 w-4 h-4 shrink-0" />
+                        <span className="text-slate-700 font-bold group-hover:text-rose-600 transition-colors">📸 房間整體照 <span className="block text-[10px] text-slate-400 font-normal mt-0.5">需看清床墊、書桌、衣櫃及地面已清空</span></span>
+                      </label>
+                      <label className="flex items-start gap-2 cursor-pointer group">
+                        <input type="checkbox" className="mt-1 accent-rose-600 w-4 h-4 shrink-0" />
+                        <span className="text-slate-700 font-bold group-hover:text-rose-600 transition-colors">📸 鑰匙交還照 <span className="block text-[10px] text-slate-400 font-normal mt-0.5">大門/房門鑰匙與門禁卡放於桌上或密碼盒內</span></span>
+                      </label>
+                      <label className="flex items-start gap-2 cursor-pointer group">
+                        <input type="checkbox" className="mt-1 accent-rose-600 w-4 h-4 shrink-0" />
+                        <span className="text-slate-700 font-bold group-hover:text-rose-600 transition-colors">🎥 冷氣機測試影片 <span className="block text-[10px] text-slate-400 font-normal mt-0.5">展示開啟、運轉聲音及關閉，10秒內</span></span>
+                      </label>
+                      <label className="flex items-start gap-2 cursor-pointer group">
+                        <input type="checkbox" className="mt-1 accent-rose-600 w-4 h-4 shrink-0" />
+                        <span className="text-slate-700 font-bold group-hover:text-rose-600 transition-colors">🎥 其他大型家電影片 <span className="block text-[10px] text-slate-400 font-normal mt-0.5">(若有) 洗衣機、獨立雪櫃運作確認</span></span>
+                      </label>
+                    </div>
                   </div>
                   
                   <div className="space-y-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
@@ -1598,17 +1627,33 @@ function DashboardContent() {
                     <div className="border-t border-slate-100 pt-4 mt-2">
                       <label className="block text-xs font-black text-slate-700 mb-3 flex items-center gap-1.5"><Landmark size={14} className="text-rose-600"/> 押金退款帳戶 (必填) *</label>
                       <div className="space-y-3">
-                        <input type="text" required placeholder="銀行名稱 (如: HSBC 匯豐銀行)" value={refundBank} onChange={e => setRefundBank(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
+                        <input type="text" required placeholder="銀行名稱 (如: HSBC 匯豐銀行 / 中國銀行)" value={refundBank} onChange={e => setRefundBank(e.target.value)} className="w-full p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
                         <div className="flex gap-3">
                           <input type="text" required placeholder="帳戶持有人姓名" value={refundAccountName} onChange={e => setRefundAccountName(e.target.value)} className="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-bold bg-slate-50" />
-                          <input type="text" required placeholder="銀行帳號或轉數快號碼" value={refundAccountNumber} onChange={e => setRefundAccountNumber(e.target.value)} className="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-mono font-bold bg-slate-50" />
+                          <input type="text" required placeholder="銀行帳號 或 FPS轉數快" value={refundAccountNumber} onChange={e => setRefundAccountNumber(e.target.value)} className="w-1/2 p-3 border border-slate-200 rounded-xl text-sm outline-none focus:border-rose-500 font-mono font-bold bg-slate-50" />
                         </div>
                       </div>
                     </div>
 
                     <div className="border-t border-slate-100 pt-4 mt-2">
-                      <label className="block text-xs font-black text-slate-700 mb-2">上傳交還證明照 *</label>
-                      <p className="text-[10px] text-slate-500 mb-3">📸 請確保上傳包含：<span className="text-rose-600 font-bold">1. 房間整體清潔狀況</span>、<span className="text-rose-600 font-bold">2. 留存的鑰匙/門卡</span>、<span className="text-rose-600 font-bold">3. 冷氣機遙控器</span>。</p>
+                      <div className="flex justify-between items-end mb-2">
+                         <label className="block text-xs font-black text-slate-700">合併上傳影像檔案 *</label>
+                         <span className="text-[10px] text-slate-400 font-bold">可一次選取多張照片</span>
+                      </div>
+                      
+                      {/* ★ 影片替代方案與容量提示 */}
+                      <div className="bg-slate-50 p-3 rounded-lg border border-slate-200 mb-3">
+                        <p className="text-[10px] text-slate-500 leading-relaxed font-bold">
+                          ⚠️ 影片限制 <span className="text-red-500">20MB 內 (約10秒)</span>。若影片過大，請上傳至 Google Drive 或百度網盤，並將連結貼於下方欄位。
+                        </p>
+                        <input 
+                          type="text" 
+                          placeholder="貼上外部影片連結 (若影片過大) 或 填寫退租備註..." 
+                          value={surrenderVideoLink} 
+                          onChange={e => setSurrenderVideoLink(e.target.value)} 
+                          className="w-full mt-2 p-2.5 border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500" 
+                        />
+                      </div>
                       
                       <div className="relative">
                         <input 
@@ -1620,8 +1665,9 @@ function DashboardContent() {
                             const files = e.target.files;
                             if (files && files.length > 0) {
                               const newFiles = Array.from(files).filter(f => {
-                                if (f.type.startsWith('video/') && f.size > 50 * 1024 * 1024) {
-                                  alert(`影片 [${f.name}] 超過 50MB！請修剪縮短或降低畫質後再上傳。`);
+                                // ★ 攔截超過 20MB 的檔案
+                                if (f.type.startsWith('video/') && f.size > 20 * 1024 * 1024) {
+                                  alert(`影片 [${f.name}] 超過 20MB！\n為避免上傳失敗，請將較長的影片上傳至雲端硬碟，並將「連結」貼在上方備註欄位。`);
                                   return false;
                                 }
                                 return true;
@@ -1631,7 +1677,6 @@ function DashboardContent() {
                                 name: f.name,
                                 type: f.type
                               }));
-                              
                               setSurrenderFiles(prev => [...prev, ...newFiles]);
                             }
                             if (surrenderFileInputRef.current) surrenderFileInputRef.current.value = ''; 
@@ -1641,21 +1686,16 @@ function DashboardContent() {
                         
                         <button 
                           type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            surrenderFileInputRef.current?.click();
-                          }}
-                          className={`flex flex-col items-center justify-center w-full py-6 border-2 border-dashed rounded-2xl cursor-pointer transition-all outline-none ${surrenderFiles.length > 0 ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50'}`}
+                          onClick={(e) => { e.preventDefault(); surrenderFileInputRef.current?.click(); }}
+                          className={`flex flex-col items-center justify-center w-full py-8 border-2 border-dashed rounded-2xl cursor-pointer transition-all outline-none ${surrenderFiles.length > 0 ? 'border-rose-500 bg-rose-50 text-rose-600' : 'border-slate-300 bg-slate-50 text-slate-400 hover:border-rose-400 hover:bg-rose-50'}`}
                         >
-                          <Camera size={28} className="mb-2 pointer-events-none"/>
+                          <Camera size={32} className="mb-2 pointer-events-none"/>
                           <span className="text-sm font-bold pointer-events-none">
-                            {surrenderFiles.length > 0 ? '點擊繼續新增相片或影片' : '點擊上傳相片或影片'}
+                            {surrenderFiles.length > 0 ? '點擊繼續新增影像' : '點擊選取相片與影片'}
                           </span>
-                          <span className="text-[10px] text-slate-400 mt-1 pointer-events-none">(支援多選。圖片自動壓縮，影片限 50MB 內)</span>
                         </button>
                       </div>
 
-                      {/* 支援獨立預覽與刪除的列表 */}
                       {surrenderFiles.length > 0 && (
                         <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-3">
                           {surrenderFiles.map((item, index) => (
@@ -1679,10 +1719,12 @@ function DashboardContent() {
                   </div>
 
                   <button onClick={() => { 
-                    if (!moveOutDate || surrenderFiles.length === 0) return alert("請填寫遷出日期並上傳至少一張證明照片！"); 
-                    if (!refundBank || !refundAccountName || !refundAccountNumber) return alert("請完整填寫押金退款帳戶資訊！");
+                    if (!moveOutDate) return alert("請填寫預計交吉日期！");
+                    // ★ 驗證：必須上傳檔案，或是提供了影片連結
+                    if (surrenderFiles.length === 0 && !surrenderVideoLink.trim()) return alert("請至少上傳一張照片，或提供交吉雲端連結以供核對！"); 
+                    if (!refundBank || !refundAccountName || !refundAccountNumber) return alert("請完整填寫退款帳戶資訊！");
                     setSurrenderStep(2); 
-                  }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl">
+                  }} className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-md flex items-center justify-center gap-2 hover:bg-slate-800 transition-all active:scale-95 shadow-xl mx-6 mb-6" style={{ width: 'calc(100% - 3rem)' }}>
                     下一步：檢閱並簽署退租書 <ChevronRight size={18}/>
                   </button>
                 </div>
