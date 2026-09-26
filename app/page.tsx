@@ -12,6 +12,8 @@ import {
 
 import WeatherAmbientBackground from '@/components/WeatherAmbientBackground';
 import HomeSearch from '@/components/HomeSearch';
+// ★ 1. 引入剛剛建立的首頁跳動提醒元件
+import GuideAlertBar from '@/components/GuideAlertBar';
 
 const getProxiedUrl = (url?: string | null) => {
   if (!url) return '';
@@ -236,6 +238,12 @@ export default function HomePage(): React.JSX.Element {
             您在香港的<br className="sm:hidden" />
             <span className="text-orange-500 whitespace-nowrap inline-block mt-2 sm:mt-0"> 星級理想家</span>
           </h1>
+          
+          {/* ★ 2. 插入最新攻略跳動提醒 (位於搜尋框上方) */}
+          <div className="w-full max-w-4xl mb-2 z-20">
+            <GuideAlertBar />
+          </div>
+
           <div className="w-full max-w-4xl drop-shadow-2xl">
             <HomeSearch />
           </div>
@@ -469,7 +477,6 @@ export default function HomePage(): React.JSX.Element {
               </div>
               <div className="col-span-2">
                 <label className="block text-xs font-bold text-slate-700 mb-1">預期入住時間與預算</label>
-                {/* ★ 更新 Placeholder 為 10000 */}
                 <input 
                   type="text" 
                   value={leadReq} 
