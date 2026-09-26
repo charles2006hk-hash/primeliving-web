@@ -78,10 +78,14 @@ export default function GuideDetailPage() {
           </h1>
         </div>
 
-        {/* 封面大圖 */}
+        {/* 封面大圖 (已修復：取消強制的 21:9 裁切比例，改為自適應高度並完整顯示) */}
         {article.imageUrl && (
-          <div className="w-full aspect-video sm:aspect-[21/9] rounded-2xl overflow-hidden bg-slate-100 mb-10 shadow-md border border-slate-200">
-            <img src={article.imageUrl} alt={article.title} className="w-full h-full object-cover" />
+          <div className="w-full rounded-2xl overflow-hidden bg-slate-50 mb-10 shadow-sm border border-slate-200 flex justify-center">
+            <img 
+              src={article.imageUrl} 
+              alt={article.title} 
+              className="w-full h-auto max-h-[60vh] object-contain" 
+            />
           </div>
         )}
 
