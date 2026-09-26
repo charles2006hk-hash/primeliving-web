@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X, MessageCircle, BookOpen } from 'lucide-react';
+import { Menu, X, MessageCircle, BookOpen, Home, Building2, Info, User } from 'lucide-react';
 import ContactFormModal from './ContactFormModal';
 
 export default function Navbar() {
@@ -22,7 +22,6 @@ export default function Navbar() {
 
   const linkStyle = (path: string) => {
     const isActive = pathname === path || (path !== '/' && pathname?.startsWith(path));
-    // ★ 修復點：加入 whitespace-nowrap 強制文字不換行
     return `relative group py-2 text-base font-bold transition-colors duration-300 flex items-center gap-1.5 whitespace-nowrap ${
       isActive ? 'text-orange-500' : 'text-slate-600 hover:text-orange-500'
     }`;
@@ -48,7 +47,6 @@ export default function Navbar() {
             : 'bg-white/90 backdrop-blur-md border-b border-transparent shadow-none py-3 md:py-4'
         }`}
       >
-        {/* ★ 修復點：稍微縮小兩側 px padding，讓中間選單有更多空間 */}
         <div className="max-w-7xl mx-auto px-3 sm:px-6 w-full flex items-center justify-between">
           
           <div className="flex flex-1 justify-start">
@@ -60,13 +58,15 @@ export default function Navbar() {
             </Link>
           </div>
 
-          {/* ★ 修復點：將 gap-8 lg:gap-10 縮小為 gap-5 lg:gap-8 防止擠壓 */}
+          {/* 🖥️ 桌面版 Navbar */}
           <div className="hidden lg:flex justify-center items-center gap-5 xl:gap-8">
             <Link href="/" className={linkStyle('/')}>
+              <Home size={16} className={pathname === '/' ? "text-orange-500" : "text-slate-400 group-hover:text-orange-500"}/>
               首頁
               <span className={underlineStyle('/')}></span>
             </Link>
             <Link href="/properties" className={linkStyle('/properties')}>
+              <Building2 size={16} className={pathname?.startsWith('/properties') ? "text-orange-500" : "text-slate-400 group-hover:text-orange-500"}/>
               精選房源
               <span className={underlineStyle('/properties')}></span>
             </Link>
@@ -76,10 +76,12 @@ export default function Navbar() {
               <span className={underlineStyle('/guides')}></span>
             </Link>
             <Link href="/about" className={linkStyle('/about')}>
+              <Info size={16} className={pathname?.startsWith('/about') ? "text-orange-500" : "text-slate-400 group-hover:text-orange-500"}/>
               關於我們
               <span className={underlineStyle('/about')}></span>
             </Link>
             <Link href="/tenant-portal" className={linkStyle('/tenant-portal')}>
+              <User size={16} className={pathname?.startsWith('/tenant-portal') ? "text-orange-500" : "text-slate-400 group-hover:text-orange-500"}/>
               租客入口
               <span className={underlineStyle('/tenant-portal')}></span>
             </Link>
@@ -95,7 +97,6 @@ export default function Navbar() {
                <span className="sm:hidden tracking-wide">諮詢</span>
              </button>
              
-             {/* ★ 修復點：在螢幕小於 lg (1024px) 時就顯示漢堡選單，避免平板直向時破版 */}
              <button 
                className="lg:hidden p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
                onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
@@ -109,20 +110,24 @@ export default function Navbar() {
         {isMobileMenuOpen && (
           <div className="absolute top-[100%] left-0 w-full bg-white/95 backdrop-blur-xl border-b border-slate-200/50 shadow-2xl lg:hidden flex flex-col px-6 py-6 gap-6 animate-in slide-in-from-top-4 duration-300 origin-top">
             <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/')}`}>
-              首頁 <span className="text-orange-500">&rarr;</span>
+              <div className="flex items-center gap-2"><Home size={20}/> 首頁</div>
+              <span className="text-orange-500">&rarr;</span>
             </Link>
             <Link href="/properties" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/properties')}`}>
-              精選房源 <span className="text-orange-500">&rarr;</span>
+              <div className="flex items-center gap-2"><Building2 size={20}/> 精選房源</div>
+              <span className="text-orange-500">&rarr;</span>
             </Link>
             <Link href="/guides" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/guides')}`}>
               <div className="flex items-center gap-2"><BookOpen size={20}/> 生活攻略</div>
               <span className="text-orange-500">&rarr;</span>
             </Link>
             <Link href="/about" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/about')}`}>
-              關於我們 <span className="text-orange-500">&rarr;</span>
+              <div className="flex items-center gap-2"><Info size={20}/> 關於我們</div>
+              <span className="text-orange-500">&rarr;</span>
             </Link>
             <Link href="/tenant-portal" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/tenant-portal')}`}>
-              租客入口 <span className="text-orange-500">&rarr;</span>
+              <div className="flex items-center gap-2"><User size={20}/> 租客入口</div>
+              <span className="text-orange-500">&rarr;</span>
             </Link>
           </div>
         )}
