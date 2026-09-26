@@ -3,7 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Menu, X, MessageCircle } from 'lucide-react';
+import { Menu, X, MessageCircle, BookOpen } from 'lucide-react';
 import ContactFormModal from './ContactFormModal';
 
 export default function Navbar() {
@@ -21,21 +21,21 @@ export default function Navbar() {
   }, []);
 
   const linkStyle = (path: string) => {
-    const isActive = pathname === path;
-    return `relative group py-2 text-base font-bold transition-colors duration-300 ${
+    // 若路由為 /guides 開頭，也視為 active 狀態
+    const isActive = pathname === path || (path !== '/' && pathname?.startsWith(path));
+    return `relative group py-2 text-base font-bold transition-colors duration-300 flex items-center gap-1.5 ${
       isActive ? 'text-orange-500' : 'text-slate-600 hover:text-orange-500'
     }`;
   };
 
   const underlineStyle = (path: string) => {
-    const isActive = pathname === path;
+    const isActive = pathname === path || (path !== '/' && pathname?.startsWith(path));
     return `absolute bottom-0 left-1/2 -translate-x-1/2 h-[3px] rounded-full bg-orange-500 transition-all duration-300 ease-out ${
       isActive ? 'w-full' : 'w-0 group-hover:w-full'
     }`;
   };
 
-  // ★ 核心修復：如果目前在「租客儀表板」頁面，直接隱藏全域 Navbar
-  // 這樣就能讓儀表板內建的 Navbar (包含安全登出按鈕) 正常顯示在最上方
+  // ★ 如果目前在「租客儀表板」頁面，直接隱藏全域 Navbar
   if (pathname?.startsWith('/tenant-portal/dashboard')) {
     return null;
   }
@@ -60,7 +60,8 @@ export default function Navbar() {
             </Link>
           </div>
 
-          <div className="hidden md:flex flex-1 justify-center items-center gap-10">
+          {/* 🖥️ 桌面版 Navbar */}
+          <div className="hidden md:flex flex-1 justify-center items-center gap-8 lg:gap-10">
             <Link href="/" className={linkStyle('/')}>
               首頁
               <span className={underlineStyle('/')}></span>
@@ -69,6 +70,14 @@ export default function Navbar() {
               精選房源
               <span className={underlineStyle('/properties')}></span>
             </Link>
+            
+            {/* ★ 新增：生活攻略頻道連結 */}
+            <Link href="/guides" className={linkStyle('/guides')}>
+              <BookOpen size={16} className={pathname?.startsWith('/guides') ? "text-orange-500" : "text-slate-400 group-hover:text-orange-500"}/> 
+              生活攻略
+              <span className={underlineStyle('/guides')}></span>
+            </Link>
+
             <Link href="/about" className={linkStyle('/about')}>
               關於我們
               <span className={underlineStyle('/about')}></span>
@@ -98,6 +107,7 @@ export default function Navbar() {
           </div>
         </div>
 
+        {/* 📱 手機版 Navbar */}
         {isMobileMenuOpen && (
           <div className="absolute top-[100%] left-0 w-full bg-white/95 backdrop-blur-xl border-b border-slate-200/50 shadow-2xl md:hidden flex flex-col px-6 py-6 gap-6 animate-in slide-in-from-top-4 duration-300 origin-top">
             <Link href="/" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/')}`}>
@@ -106,6 +116,13 @@ export default function Navbar() {
             <Link href="/properties" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/properties')}`}>
               精選房源 <span className="text-orange-500">&rarr;</span>
             </Link>
+            
+            {/* ★ 新增：生活攻略頻道連結 (手機版) */}
+            <Link href="/guides" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/guides')}`}>
+              <div className="flex items-center gap-2"><BookOpen size={20}/> 生活攻略</div>
+              <span className="text-orange-500">&rarr;</span>
+            </Link>
+
             <Link href="/about" onClick={() => setIsMobileMenuOpen(false)} className={`text-lg flex justify-between items-center ${linkStyle('/about')}`}>
               關於我們 <span className="text-orange-500">&rarr;</span>
             </Link>
