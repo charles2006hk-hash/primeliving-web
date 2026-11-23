@@ -3,9 +3,10 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 
 // ★ 引入統一組件
-import Navbar from "@/components/Navbar"; 
+import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
-import RecentBookingsToast from "@/components/RecentBookingsToast"; 
+import RecentBookingsToast from "@/components/RecentBookingsToast";
+import BuddyAIAssistant from "@/components/BuddyAIAssistant";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -35,14 +36,17 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col relative bg-slate-50 text-slate-900">
         <Navbar />
-        
+
         {/* ★ 移除了 pt-20 md:pt-24，讓畫面背景直接頂到最上方，完美融入毛玻璃導航列 */}
         <main className="flex-grow flex flex-col">
           {children}
         </main>
-        
+
         <Footer />
+
+        {/* ★ 全站共用浮動組件：左下角預訂通知 + 右下角 Buddy AI 管家 */}
         <RecentBookingsToast />
+        <BuddyAIAssistant />
       </body>
     </html>
   );
